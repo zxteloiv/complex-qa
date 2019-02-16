@@ -6,18 +6,15 @@ import torch.nn
 import allennlp.models
 from allennlp.data.vocabulary import Vocabulary
 from allennlp.modules import TokenEmbedder
-from allennlp.modules.seq2seq_encoders import StackedSelfAttentionEncoder
 from allennlp.nn import util
 
 from allennlp.training.metrics import BLEU
-from .encoder import TransformerEncoder
-from .decoder import TransformerDecoder
 
-class Transformer(allennlp.models.Model):
+class SimpleSeq2Seq(allennlp.models.Model):
     def __init__(self,
                  vocab: Vocabulary,
-                 encoder: TransformerEncoder,
-                 decoder: TransformerDecoder,
+                 encoder: torch.nn.Module,
+                 decoder: torch.nn.Module,
                  source_embedding: TokenEmbedder,
                  target_embedding: TokenEmbedder,
                  target_namespace: str = "target_tokens",
@@ -27,7 +24,7 @@ class Transformer(allennlp.models.Model):
                  use_bleu: bool = True,
                  label_smoothing: Optional[float] = None,
                  ):
-        super(Transformer, self).__init__(vocab)
+        super(SimpleSeq2Seq, self).__init__(vocab)
         self._encoder = encoder
         self._decoder = decoder
         self._src_embedding = source_embedding

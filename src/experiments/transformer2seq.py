@@ -63,7 +63,7 @@ def main():
                                         feedforward_hidden_dim=emb_sz,
                                         feedforward_dropout=st_ds_conf['feedforward_dropout'],
                                         attention_dropout=st_ds_conf['attention_dropout'],
-                                        residual_dropout=st_ds_conf['attention_dropout'],
+                                        residual_dropout=st_ds_conf['residual_dropout'],
                                         use_act=st_ds_conf['act'],
                                         use_vanilla_wiring=st_ds_conf['vanilla_wiring'])
     else:
@@ -73,7 +73,7 @@ def main():
                                                  feedforward_hidden_dim=emb_sz,
                                                  feedforward_dropout=st_ds_conf['feedforward_dropout'],
                                                  attention_dropout=st_ds_conf['attention_dropout'],
-                                                 residual_dropout=st_ds_conf['attention_dropout'],
+                                                 residual_dropout=st_ds_conf['residual_dropout'],
                                                  )
 
     model = allennlp.models.SimpleSeq2Seq(

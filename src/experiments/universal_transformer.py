@@ -14,7 +14,7 @@ import tqdm
 import logging
 
 from allennlp.data.iterators import BucketIterator
-from models.transformer.simple_transformer import Transformer
+from models.simple_seq2seq import SimpleSeq2Seq
 from models.transformer.encoder import UTEncoder
 from models.transformer.decoder import UTDecoder
 from allennlp.common.util import START_SYMBOL, END_SYMBOL
@@ -71,16 +71,16 @@ def main():
                                                   embedding_dim=st_ds_conf['emb_sz'])
     target_embedding = allennlp.modules.Embedding(num_embeddings=vocab.get_vocab_size('lftokens'),
                                                   embedding_dim=st_ds_conf['emb_sz'])
-    model = Transformer(vocab=vocab,
-                        encoder=encoder,
-                        decoder=decoder,
-                        source_embedding=source_embedding,
-                        target_embedding=target_embedding,
-                        target_namespace='lftokens',
-                        start_symbol=START_SYMBOL,
-                        eos_symbol=END_SYMBOL,
-                        max_decoding_step=st_ds_conf['max_decoding_len'],
-                        )
+    model = SimpleSeq2Seq(vocab=vocab,
+                          encoder=encoder,
+                          decoder=decoder,
+                          source_embedding=source_embedding,
+                          target_embedding=target_embedding,
+                          target_namespace='lftokens',
+                          start_symbol=START_SYMBOL,
+                          eos_symbol=END_SYMBOL,
+                          max_decoding_step=st_ds_conf['max_decoding_len'],
+                          )
 
     if args.models:
         logging.getLogger().setLevel(logging.INFO)

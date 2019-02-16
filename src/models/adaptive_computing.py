@@ -1,6 +1,5 @@
 from typing import List, Tuple, Dict, Mapping, Optional
 import torch
-import torch.nn.functional as F
 
 class AdaptiveComputing(torch.nn.Module):
     def __init__(self,
