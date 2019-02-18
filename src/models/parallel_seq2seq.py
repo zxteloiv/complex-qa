@@ -10,7 +10,7 @@ from allennlp.nn import util
 
 from allennlp.training.metrics import BLEU
 
-class SimpleSeq2Seq(allennlp.models.Model):
+class ParallelSeq2Seq(allennlp.models.Model):
     def __init__(self,
                  vocab: Vocabulary,
                  encoder: torch.nn.Module,
@@ -24,7 +24,7 @@ class SimpleSeq2Seq(allennlp.models.Model):
                  use_bleu: bool = True,
                  label_smoothing: Optional[float] = None,
                  ):
-        super(SimpleSeq2Seq, self).__init__(vocab)
+        super(ParallelSeq2Seq, self).__init__(vocab)
         self._encoder = encoder
         self._decoder = decoder
         self._src_embedding = source_embedding
@@ -57,7 +57,7 @@ class SimpleSeq2Seq(allennlp.models.Model):
         source, source_mask = source_tokens['tokens'], util.get_text_field_mask(source_tokens)
         state = self._encode(source, source_mask)
 
-        if target_tokens is not None:
+        if target_tokens is not None and self.training:
             target, target_mask = target_tokens['tokens'], util.get_text_field_mask(target_tokens)
 
             predictions, logits = self._forward_training(state, target[:, :-1], source_mask, target_mask[:, :-1])
@@ -156,7 +156,6 @@ class SimpleSeq2Seq(allennlp.models.Model):
         predictions_by_step = [batch_start]
 
         for timestep in range(self._max_decoding_step):
-
             # step_inputs: (batch, timestep + 1), i.e., at least 1 token at step 0
             # inputs_embedding: (batch, seq_len, embedding_dim)
             # step_hidden:      (batch, seq_len, hidden_dim)
