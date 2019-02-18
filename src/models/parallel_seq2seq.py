@@ -147,7 +147,7 @@ class ParallelSeq2Seq(allennlp.models.Model):
         Run decoder step by step for testing or validation, with no gold tokens available.
         """
         batch_size = state.size()[0]
-        # last_prediction: (batch, 1)
+        # batch_start: (batch,)
         batch_start = torch.ones((batch_size,), dtype=torch.long) * self._start_id
 
         # step_logits: a list of logits, [(batch, seq_len, vocab_size)]
@@ -159,7 +159,7 @@ class ParallelSeq2Seq(allennlp.models.Model):
             # step_inputs: (batch, timestep + 1), i.e., at least 1 token at step 0
             # inputs_embedding: (batch, seq_len, embedding_dim)
             # step_hidden:      (batch, seq_len, hidden_dim)
-            # step_projections: (batch, seq_len, vocab_size)
+            # step_logit:       (batch, seq_len, vocab_size)
             step_inputs = torch.stack(predictions_by_step, dim=1)
             inputs_embedding = self._tgt_embedding(step_inputs)
             step_hidden = self._decoder(inputs_embedding, None, state, source_mask)
