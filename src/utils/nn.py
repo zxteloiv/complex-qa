@@ -1,7 +1,6 @@
 from typing import List, Tuple, Dict, Mapping, Optional
 import torch
 
-
 def add_position_and_timestep_sinusoid(inputs: torch.Tensor,
                                        timestep: Optional[float] = None,
                                        base_num: float = 1.e4) -> torch.Tensor:
@@ -45,3 +44,56 @@ def add_positional_features(inputs: torch.Tensor) -> torch.Tensor:
     A wrapper with the same name from AllenNLP
     """
     return add_position_and_timestep_sinusoid(inputs, None)
+
+def add_depth_features_to_single_position(inputs: torch.Tensor, timestep: float) -> torch.Tensor:
+    """
+    Add depth-wise features to inputs.
+    The word ``depth'' is similar to ``timestep'' in Transformer.
+
+    :param inputs: (batch, emb_dim)
+    :param timestep: float
+    :returns same shape with inputs: (batch, emb_dim)
+    """
+    return add_position_and_timestep_sinusoid(inputs.unsqueeze(1), timestep).squeeze(1)
+
+from allennlp.modules.matrix_attention import MatrixAttention
+from allennlp.nn.util import masked_softmax
+
+class AllenNLPMatrixAttentionWrapper(torch.nn.Module):
+    """
+    A wrapper for matrix attention in allennlp, fitting the interface of the multi-headed attention
+    defined in models.transformer.multi_head_attention
+    """
+    def __init__(self, attn: MatrixAttention):
+        super(AllenNLPMatrixAttentionWrapper, self).__init__()
+        self._attn: MatrixAttention = attn
+
+    def forward(self,
+                input: torch.Tensor,
+                attend_over: torch.Tensor,
+                attend_mask: Optional[torch.LongTensor] = None) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Wrap the Attention in AllenNLP, with sufficient dimension and context value computation
+
+        :param input: (batch, max_input_length, input_dim)
+        :param attend_over: (batch, max_attend_length, attend_dim)
+        :param attend_mask: (batch, max_attend_length), used to blind out padded tokens
+        :return: Tuple of context vector and attention vector:
+                   context: (batch, max_input_length, output_dim=attend_dim)
+                 attention: (batch, max_input_length, 1, max_attend_length)
+        """
+
+        # logits: (batch, max_input_length, max_attend_length)
+        logits = self._attn(input, attend_over)
+
+        # attend_mask: (batch, 1, max_attend_length)
+        attend_mask = attend_mask.unsqueeze(1)
+
+        # attn: (batch, max_input_length, max_attend_length)
+        attn = masked_softmax(logits, attend_mask)
+
+        # context: (batch, max_input_length, attend_dim)
+        context = torch.matmul(attn, attend_over)
+
+        return context, attn.unsqueeze(-2)
+
