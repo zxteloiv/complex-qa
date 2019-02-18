@@ -256,3 +256,30 @@ class MultiHeadAttention(torch.nn.Module):
     def forward(self, input: torch.Tensor, attend_over: torch.Tensor, attend_mask: Optional[torch.Tensor] = None):
         return self.attention(input=input, attend_over=attend_over, attend_mask=attend_mask)
 
+class SingleTokenMHAttentionWrapper(torch.nn.Module):
+    def __init__(self, attn: GeneralMultiHeadAttention):
+        super(SingleTokenMHAttentionWrapper, self).__init__()
+        self._attn = attn
+
+    def forward(self, inputs, attend_over, attend_mask):
+        """
+        Do a multi-head attention for _input_ tokens over the _attend_over_ tokens.
+        _attend_mask_ is used to wipe out padded tokens in the corresponding sequences.
+
+        :param inputs: (batch, input_dim)
+        :param attend_over: (batch, max_attend_length, attend_dim)
+        :param attend_mask: (batch, max_attend_length), used to blind out padded tokens
+        :return: Tuple of context vector and attention vector:
+                   context: (batch, output_dim)
+                 attention: (batch, num_heads, max_attend_length)
+        """
+        # inputs: (batch, 1, input_dim)
+        inputs = inputs.unsqueeze(1)
+
+        c, a = self._attn(inputs, attend_over, attend_mask)
+
+        c = c.squeeze(1)
+        a = a.squeeze(1)
+
+        return c, a
+
