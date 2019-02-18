@@ -8,7 +8,7 @@ from allennlp.nn import Activation
 from utils.nn import add_position_and_timestep_sinusoid, add_positional_features
 
 from .multi_head_attention import MultiHeadSelfAttention, MaskedMultiHeadSelfAttention, MultiHeadAttention
-from models.adaptive_computing import AdaptiveComputing
+from .adaptive_computing import AdaptiveComputing
 
 class TransformerDecoder(torch.nn.Module):
     def __init__(self,
