@@ -57,6 +57,7 @@ def add_depth_features_to_single_position(inputs: torch.Tensor, timestep: float)
     return add_position_and_timestep_sinusoid(inputs.unsqueeze(1), timestep).squeeze(1)
 
 from allennlp.modules.matrix_attention import MatrixAttention
+from allennlp.modules.attention import Attention
 from allennlp.nn.util import masked_softmax
 
 class AllenNLPMatrixAttentionWrapper(torch.nn.Module):
@@ -96,4 +97,37 @@ class AllenNLPMatrixAttentionWrapper(torch.nn.Module):
         context = torch.matmul(attn, attend_over)
 
         return context, attn.unsqueeze(-2)
+
+
+class AllenNLPAttentionWrapper(torch.nn.Module):
+    """
+    A wrapper for matrix attention in allennlp, fitting the interface of the multi-headed attention
+    defined in models.transformer.multi_head_attention
+    """
+    def __init__(self, attn: Attention):
+        super(AllenNLPAttentionWrapper, self).__init__()
+        self._attn: Attention = attn
+
+    def forward(self,
+                inputs: torch.Tensor,
+                attend_over: torch.Tensor,
+                attend_mask: Optional[torch.LongTensor] = None) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Wrap the Attention in AllenNLP, with sufficient dimension and context value computation
+
+        :param inputs: (batch, input_dim)
+        :param attend_over: (batch, max_attend_length, attend_dim)
+        :param attend_mask: (batch, max_attend_length), used to blind out padded tokens
+        :return: Tuple of context vector and attention vector:
+                   context: (batch, max_input_length, output_dim=attend_dim)
+                 attention: (batch, max_input_length, 1, max_attend_length)
+        """
+
+        # attn: (batch, max_attend_length, 1)
+        attn = self._attn(inputs, attend_over, attend_mask).unsqueeze(-1)
+
+        # context: (batch, attend_dim)
+        context = (attn * attend_over).sum(1)
+
+        return context
 

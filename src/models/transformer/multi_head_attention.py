@@ -281,5 +281,5 @@ class SingleTokenMHAttentionWrapper(torch.nn.Module):
         c = c.squeeze(1)
         a = a.squeeze(1)
 
-        return c, a
+        return c
 
