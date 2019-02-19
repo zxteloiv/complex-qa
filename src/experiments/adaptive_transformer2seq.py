@@ -14,14 +14,14 @@ import allennlp.common
 import allennlp.models
 import allennlp.modules
 import allennlp.predictors
-from allennlp.modules.attention import BilinearAttention
+from allennlp.modules.attention import BilinearAttention, DotProductAttention
 
 import config
 
 import data_adapter
 import utils.opt_parser
 from models.adaptive_seq2seq import AdaptiveSeq2Seq
-from models.transformer.multi_head_attention import SingleTokenMHAttentionWrapper
+from models.transformer.multi_head_attention import SingleTokenMHAttentionWrapper, GeneralMultiHeadAttention
 from utils.nn import AllenNLPAttentionWrapper
 from models.transformer.encoder import TransformerEncoder
 from models.adaptive_rnn_cell import AdaptiveRNNCell, AdaptiveStateMode
@@ -34,6 +34,8 @@ def main():
     parser.add_argument('--test', action="store_true", help='use testing mode')
     parser.add_argument('--num-layer', type=int, help='maximum number of stacked layers')
     parser.add_argument('--use-act', action="store_true", help='Use adaptive computation time for decoder')
+    parser.add_argument('--decoder-attention', choices=["dot_product", "bilinear", "multihead"],
+                        help="the attention used in decoder, defaulted to bilinear")
 
     args = parser.parse_args()
 
@@ -54,25 +56,48 @@ def main():
         st_ds_conf['batch_sz'] = args.batch
     if args.use_act:
         st_ds_conf['act'] = True
+    if args.decoder_attention:
+        st_ds_conf['decoder_attn'] = args.decoder_attention
+
     bsz = st_ds_conf['batch_sz']
     emb_sz = st_ds_conf['emb_sz']
 
     source_embedding = allennlp.modules.Embedding(num_embeddings=vocab.get_vocab_size('nltokens'),
-                                                  embedding_dim=st_ds_conf['emb_sz'])
+                                                  embedding_dim=emb_sz)
     target_embedding = allennlp.modules.Embedding(num_embeddings=vocab.get_vocab_size('lftokens'),
-                                                  embedding_dim=st_ds_conf['emb_sz'])
-    encoder = TransformerEncoder(input_dim=st_ds_conf['emb_sz'],
+                                                  embedding_dim=emb_sz)
+    encoder = TransformerEncoder(input_dim=emb_sz,
                                  num_layers=st_ds_conf['max_num_layers'],
                                  num_heads=st_ds_conf['num_heads'],
-                                 feedforward_hidden_dim=st_ds_conf['emb_sz'],)
+                                 feedforward_hidden_dim=emb_sz,
+                                 attention_dropout=st_ds_conf['attention_dropout'],
+                                 residual_dropout=st_ds_conf['residual_dropout'],
+                                 feedforward_dropout=st_ds_conf['feedforward_dropout'],
+                                 )
+
+    def _get_attention():
+        decoder_attn = st_ds_conf['decoder_attn']
+        if decoder_attn == "bilinear":
+            attn = BilinearAttention(vector_dim=emb_sz, matrix_dim=emb_sz)
+            attn = AllenNLPAttentionWrapper(attn)
+        elif decoder_attn == "dot_product":
+            attn = DotProductAttention()
+            attn = AllenNLPAttentionWrapper(attn)
+        elif decoder_attn == "multihead":
+            attn = GeneralMultiHeadAttention(num_heads=st_ds_conf['num_heads'],
+                                          input_dim=emb_sz,
+                                          total_attention_dim=emb_sz,
+                                          total_value_dim=emb_sz,
+                                          attention_dropout=st_ds_conf['attention_dropout'],
+                                          use_future_blinding=False,
+                                          )
+            attn = SingleTokenMHAttentionWrapper(attn)
+        else:
+            assert False
+        return attn
 
     rnn_cell = torch.nn.LSTMCell(emb_sz, emb_sz)
-    if st_ds_conf['dwa']:
-        dwa = BilinearAttention(vector_dim=emb_sz, matrix_dim=emb_sz)
-        dwa = AllenNLPAttentionWrapper(dwa)
-    else:
-        dwa = None
-
+    dwa = _get_attention() if st_ds_conf['dwa'] else None
     decoder = AdaptiveRNNCell(hidden_dim=emb_sz,
                               rnn_cell=rnn_cell,
                               use_act=st_ds_conf['act'],
@@ -80,7 +105,6 @@ def main():
                               depth_wise_attention=dwa,
                               state_mode=AdaptiveStateMode.MEAN_FIELD,
                               )
-    input_attn = BilinearAttention(vector_dim=emb_sz, matrix_dim=emb_sz)
     model = AdaptiveSeq2Seq(vocab=vocab,
                             encoder=encoder,
                             decoder=decoder,
@@ -90,7 +114,7 @@ def main():
                             start_symbol=START_SYMBOL,
                             eos_symbol=END_SYMBOL,
                             max_decoding_step=st_ds_conf['max_decoding_len'],
-                            attention=AllenNLPAttentionWrapper(input_attn),
+                            attention=_get_attention(),
                             act_loss_weight=st_ds_conf['act_loss_weight'],
                             )
 
