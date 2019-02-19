@@ -37,6 +37,9 @@ def main():
     parser.add_argument('--use-act', action="store_true", help='Use adaptive computation time for decoder')
     parser.add_argument('--act-loss-weight', type=float, help="the loss of the act weights")
 
+    parser.add_argument('--act-mode', choices=['basic', 'random', 'mean_field'])
+    parser.add_argument('--depth-emb', choices=['sinusoid', 'learnt', 'none'])
+
     # parser.add_argument('--decoder-attention', choices=["dot_product", "bilinear", "multihead"],
     #                    help="the attention used in decoder, dot_product might be best")
 
@@ -65,6 +68,10 @@ def main():
         st_ds_conf['emb_sz'] = args.emb_dim
     if args.act_loss_weight:
         st_ds_conf['act_loss_weight'] = args.act_loss_weight
+    if args.act_mode:
+        st_ds_conf['act_mode'] = args.act_mode
+    if args.depth_emb:
+        st_ds_conf['depth_emb'] = args.depth_emb
 
     bsz = st_ds_conf['batch_sz']
     emb_sz = st_ds_conf['emb_sz']
@@ -110,7 +117,8 @@ def main():
                               use_act=st_ds_conf['act'],
                               act_max_layer=st_ds_conf['max_num_layers'],
                               depth_wise_attention=dwa,
-                              state_mode=AdaptiveStateMode.MEAN_FIELD,
+                              depth_embedding_type=st_ds_conf['depth_emb'],
+                              state_mode=st_ds_conf['act_mode'],
                               )
     model = AdaptiveSeq2Seq(vocab=vocab,
                             encoder=encoder,

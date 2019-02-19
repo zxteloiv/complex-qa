@@ -110,8 +110,10 @@ ADA_TRANS2SEQ_CONF[DS_ATIS] = dict(
     feedforward_dropout=.1,
     vanilla_wiring=False,
     dwa=True,
+    depth_emb='sinusoid',
     act_loss_weight=-0.1,
     decoder_attn="dot_product",
+    act_mode='mean_field'
 )
 
 ST_TRANSFORMER = 'transformer'
