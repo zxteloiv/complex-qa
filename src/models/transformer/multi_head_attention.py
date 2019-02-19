@@ -261,7 +261,7 @@ class SingleTokenMHAttentionWrapper(torch.nn.Module):
         super(SingleTokenMHAttentionWrapper, self).__init__()
         self._attn = attn
 
-    def forward(self, inputs, attend_over, attend_mask):
+    def forward(self, inputs, attend_over, attend_mask = None):
         """
         Do a multi-head attention for _input_ tokens over the _attend_over_ tokens.
         _attend_mask_ is used to wipe out padded tokens in the corresponding sequences.
