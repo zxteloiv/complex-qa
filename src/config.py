@@ -14,7 +14,7 @@ LOG_REPORT_INTERVAL = (1, 'iteration')
 TRAINING_LIMIT = 500  # in num of epochs
 SAVE_INTERVAL = (100, 'iteration')
 
-ADAM_LR = 1e-4
+ADAM_LR = 1e-3
 ADAM_BETAS = (.9, .98)
 ADAM_EPS = 1e-9
 
@@ -102,8 +102,9 @@ ADA_TRANS2SEQ_CONF[DS_ATIS] = dict(
     batch_sz=32,
     max_decoding_len=60,
     num_heads=8,
+    num_enc_layers=1,
     max_num_layers=1,
-    act=False,
+    act=True,
     residual_dropout=.1,
     attention_dropout=.1,
     feedforward_dropout=.1,

@@ -32,10 +32,13 @@ def main():
     parser = utils.opt_parser.get_trainer_opt_parser()
     parser.add_argument('models', nargs='*', help='pretrained models for the same setting')
     parser.add_argument('--test', action="store_true", help='use testing mode')
+    parser.add_argument('--emb-dim', type=int, help='basic embedding dimension')
     parser.add_argument('--num-layer', type=int, help='maximum number of stacked layers')
     parser.add_argument('--use-act', action="store_true", help='Use adaptive computation time for decoder')
-    parser.add_argument('--decoder-attention', choices=["dot_product", "bilinear", "multihead"],
-                        help="the attention used in decoder, defaulted to bilinear")
+    parser.add_argument('--act-loss-weight', type=float, help="the loss of the act weights")
+
+    # parser.add_argument('--decoder-attention', choices=["dot_product", "bilinear", "multihead"],
+    #                    help="the attention used in decoder, dot_product might be best")
 
     args = parser.parse_args()
 
@@ -56,8 +59,12 @@ def main():
         st_ds_conf['batch_sz'] = args.batch
     if args.use_act:
         st_ds_conf['act'] = True
-    if args.decoder_attention:
-        st_ds_conf['decoder_attn'] = args.decoder_attention
+    # if args.decoder_attention:
+    #     st_ds_conf['decoder_attn'] = args.decoder_attention
+    if args.emb_dim:
+        st_ds_conf['emb_sz'] = args.emb_dim
+    if args.act_loss_weight:
+        st_ds_conf['act_loss_weight'] = args.act_loss_weight
 
     bsz = st_ds_conf['batch_sz']
     emb_sz = st_ds_conf['emb_sz']
@@ -67,7 +74,7 @@ def main():
     target_embedding = allennlp.modules.Embedding(num_embeddings=vocab.get_vocab_size('lftokens'),
                                                   embedding_dim=emb_sz)
     encoder = TransformerEncoder(input_dim=emb_sz,
-                                 num_layers=st_ds_conf['max_num_layers'],
+                                 num_layers=st_ds_conf['num_enc_layers'],
                                  num_heads=st_ds_conf['num_heads'],
                                  feedforward_hidden_dim=emb_sz,
                                  attention_dropout=st_ds_conf['attention_dropout'],
@@ -76,7 +83,7 @@ def main():
                                  )
 
     def _get_attention():
-        decoder_attn = st_ds_conf['decoder_attn']
+        decoder_attn = "dot_product" #st_ds_conf['decoder_attn']
         if decoder_attn == "bilinear":
             attn = BilinearAttention(vector_dim=emb_sz, matrix_dim=emb_sz)
             attn = AllenNLPAttentionWrapper(attn)
