@@ -14,6 +14,10 @@ LOG_REPORT_INTERVAL = (1, 'iteration')
 TRAINING_LIMIT = 500  # in num of epochs
 SAVE_INTERVAL = (100, 'iteration')
 
+ADAM_LR = 1e-4
+ADAM_BETAS = (.9, .98)
+ADAM_EPS = 1e-9
+
 # ======================
 # dataset config
 
@@ -91,6 +95,23 @@ TRANS2SEQ_CONF[DS_ATIS] = dict(
     vanilla_wiring=False,
 )
 
+ST_ADA_TRANS2SEQ = 'ada_trans2s'
+ADA_TRANS2SEQ_CONF = dict()
+ADA_TRANS2SEQ_CONF[DS_ATIS] = dict(
+    emb_sz=256,
+    batch_sz=32,
+    max_decoding_len=60,
+    num_heads=8,
+    max_num_layers=1,
+    act=False,
+    residual_dropout=.1,
+    attention_dropout=.1,
+    feedforward_dropout=.1,
+    vanilla_wiring=False,
+    dwa=True,
+    act_loss_weight=1.,
+)
+
 ST_TRANSFORMER = 'transformer'
 TRANSFORMER_CONF = dict()
 TRANSFORMER_CONF[DS_GEOQUERY] = dict(
@@ -136,5 +157,6 @@ SETTINGS = {
     ST_TRANS2SEQ: TRANS2SEQ_CONF,
     ST_TRANSFORMER: TRANSFORMER_CONF,
     ST_UTRANSFORMER: UTRANSFORMER_CONF,
+    ST_ADA_TRANS2SEQ: ADA_TRANS2SEQ_CONF,
 }
 
