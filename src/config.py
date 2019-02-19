@@ -110,7 +110,7 @@ ADA_TRANS2SEQ_CONF[DS_ATIS] = dict(
     feedforward_dropout=.1,
     vanilla_wiring=False,
     dwa=True,
-    act_loss_weight=1.,
+    act_loss_weight=-0.1,
     decoder_attn="dot_product",
 )
 
