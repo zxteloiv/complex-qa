@@ -16,3 +16,4 @@ out.*
 __pycache__
 sync.sh
 .DS_Store
+snapshots
