@@ -37,6 +37,7 @@ def main():
     parser.add_argument('--use-act', action="store_true", help='Use adaptive computation time for decoder')
     parser.add_argument('--act-loss-weight', type=float, help="the loss of the act weights")
 
+    parser.add_argument('--enc-layers', type=int, help="layers in encoder")
     parser.add_argument('--act-mode', choices=['basic', 'random', 'mean_field'])
     parser.add_argument('--depth-emb', choices=['sinusoid', 'learnt', 'none'])
 
@@ -72,6 +73,8 @@ def main():
         st_ds_conf['act_mode'] = args.act_mode
     if args.depth_emb:
         st_ds_conf['depth_emb'] = args.depth_emb
+    if args.enc_layers:
+        st_ds_conf['num_enc_layers'] = args.enc_layers
 
     bsz = st_ds_conf['batch_sz']
     emb_sz = st_ds_conf['emb_sz']
