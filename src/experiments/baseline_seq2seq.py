@@ -29,15 +29,21 @@ import utils.opt_parser
 def main():
     parser = utils.opt_parser.get_trainer_opt_parser()
     parser.add_argument('models', nargs='*', help='pretrained models for the same setting')
+    parser.add_argument('--enc-layers', type=int, default=1, help="encoder layer number defaulted to 1")
     parser.add_argument('--test', action="store_true", help='use testing mode')
+    parser.add_argument('--use-dev', action="store_true")
 
     args = parser.parse_args()
 
     reader = data_adapter.GeoQueryDatasetReader()
     training_set = reader.read(config.DATASETS[args.dataset].train_path)
+    if args.use_dev:
+        validation_set = reader.read(config.DATASETS[args.dataset].dev_path)
 
     vocab = allennlp.data.Vocabulary.from_instances(training_set)
     st_ds_conf = config.SEQ2SEQ_CONF[args.dataset]
+    if args.epoch:
+        config.TRAINING_LIMIT = args.epoch
     bsz = st_ds_conf['batch_sz']
     emb_sz = st_ds_conf['emb_sz']
 
@@ -45,13 +51,14 @@ def main():
         token_embedders={ "tokens": Embedding(vocab.get_vocab_size('nltokens'), emb_sz)}
     )
 
-    encoder = PytorchSeq2SeqWrapper(torch.nn.LSTM(emb_sz, emb_sz, batch_first=True))
+    encoder = PytorchSeq2SeqWrapper(torch.nn.LSTM(emb_sz, emb_sz,
+                                                  num_layers=args.enc_layers, batch_first=True))
 
     model = allennlp.models.SimpleSeq2Seq(
         vocab,
         source_embedder=src_embedder,
         encoder=encoder,
-        max_decoding_steps=50,
+        max_decoding_steps=st_ds_conf['max_decoding_len'],
         attention=allennlp.modules.attention.DotProductAttention(),
         beam_size=8,
         target_namespace="lftokens",
@@ -68,7 +75,7 @@ def main():
         optim = torch.optim.Adam(model.parameters())
 
         savepath = os.path.join(config.SNAPSHOT_PATH, args.dataset, 'seq2seq',
-                                datetime.datetime.now().strftime('%Y%m%d%H%M%S'))
+                                datetime.datetime.now().strftime('%Y%m%d-%H%M%S') + "--" + args.memo)
         if not os.path.exists(savepath):
             os.makedirs(savepath, mode=0o755)
 
@@ -77,6 +84,7 @@ def main():
             optimizer=optim,
             iterator=iterator,
             train_dataset=training_set,
+            validation_dataset=validation_set if args.use_dev else None,
             serialization_dir=savepath,
             cuda_device=args.device,
             num_epochs=config.TRAINING_LIMIT,

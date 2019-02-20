@@ -74,6 +74,12 @@ SEQ2SEQ_CONF[DS_GEOQUERY] = dict(
     batch_sz=32,
     max_decoding_len=50,
 )
+SEQ2SEQ_CONF[DS_ATIS] = dict(
+    emb_sz=200,
+    batch_sz=32,
+    max_decoding_len=60,
+
+)
 
 ST_TRANS2SEQ = 'transformer2seq'
 TRANS2SEQ_CONF = dict()
