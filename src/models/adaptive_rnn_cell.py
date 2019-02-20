@@ -2,7 +2,7 @@ from typing import List, Mapping, Dict, Optional, Tuple, Union, Callable, Sequen
 import torch
 import torch.nn
 
-from utils.nn import add_depth_features_to_single_position, AllenNLPAttentionWrapper
+from utils.nn import add_depth_features_to_single_position, AllenNLPAttentionWrapper, select_item_along_dim
 from models.transformer.multi_head_attention import SingleTokenMHAttentionWrapper
 
 class DepthEmbeddingType:
@@ -158,10 +158,8 @@ class AdaptiveRNNCell(torch.nn.Module):
             step_inputs = add_depth_features_to_single_position(inputs, depth)
 
         elif self._depth_embedding_type == DepthEmbeddingType.LEARNT:
-            batch = inputs.size()[0]
-            step_inputs = inputs + torch.index_select(self._depth_embedding,
-                                                      dim=0,
-                                                      index=torch.ones(batch, dtype=torch.long) * depth)
+            # every item in batch receives the same depth embedding
+            step_inputs = inputs + self._depth_embedding.select(0, depth).unsqueeze(0)
 
         else: #self._depth_embedding_type == DepthEmbeddingType.NONE:
             step_inputs = inputs
@@ -181,7 +179,7 @@ class AdaptiveRNNCell(torch.nn.Module):
         else:
             hidden_vars = [hidden_list]
 
-        # only [hidden] or [hidden, memory_cell] like in LSTM
+        # only [hidden] or [hidden, context] in LSTM
         hidden = [self._merge_anytime_state(anytime_state, halting_probs) for anytime_state in hidden_vars]
 
         # simplify returning data for GRU and vanilla RNN
@@ -198,24 +196,27 @@ class AdaptiveRNNCell(torch.nn.Module):
         # computation depth is the last dimension
         if self.state_mode == AdaptiveStateMode.BASIC:
             # desired_state: (batch, hidden_dim)
-            desired_state = anytime_state[-1]
+            merged_state = anytime_state[-1]
 
         elif self.state_mode == AdaptiveStateMode.MEAN_FIELD:
             # halting_probs_extended: (batch, 1, max_computing_depth)
             # desired_state: (batch, hidden_dim)
             halting_probs_extended = halting_probs.unsqueeze(1)
-            desired_state = (halting_probs_extended * state).sum(dim=-1)
+            merged_state = (halting_probs_extended * state).sum(dim=-1)
 
         elif self.state_mode == AdaptiveStateMode.RANDOM:
             # samples_index: torch.LongTensor: (batch, )
             # desired_state: (batch, hidden_dim)
             samples_index = torch.multinomial(halting_probs, 1).squeeze(-1)
-            desired_state = torch.index_select(state, dim=-1, index=samples_index)
+            merged_state = select_item_along_dim(state, samples_index)
 
         else:
             assert False
 
-        return desired_state
+        assert len(merged_state.size()) == 2
+        assert merged_state.size() == state[:, :, -1].size()
+
+        return merged_state
 
     def _add_depth_wise_attention(self,
                                   step_inputs: torch.Tensor,

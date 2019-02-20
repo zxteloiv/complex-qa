@@ -131,3 +131,36 @@ class AllenNLPAttentionWrapper(torch.nn.Module):
 
         return context
 
+def select_item_along_dim(inputs: torch.Tensor,
+                          index: torch.LongTensor,
+                          along_dim: int = -1,
+                          batch_dim: int = 0,) -> torch.Tensor:
+    """
+    Select items from inputs, along a given dimension, using a 1D-index, which is similar
+    to chainer.functions.select_item but provides along_dim and batch_dim parameters.
+
+    namely, output[..., i, ..., m, n, ...] = inputs[..., i, ..., m, index[i], n, ...],
+    where i indexes the _batch_dim_ and squeezes the _along_dim_.
+
+    :param inputs: (..., batch, ..., m, along_dim, n, ...)
+    :param index: (batch,)
+    :param along_dim:
+    :param batch_dim:
+    :return:
+    """
+    # base_size = (1, ..., 1, batch_num, 1, ..., 1)
+    base_size = [1] * len(inputs.size())
+    base_size[batch_dim] = inputs.size()[batch_dim]
+    index = index.view(*base_size)
+
+    # expanded_size = (..., batch,..., m, 1, n, ...)
+    expanded_size = list(inputs.size())
+    expanded_size[along_dim] = 1    # only select 1 item from that dimension
+
+    # index: (batch,) -> (1, ..., 1, batch, 1, ..., 1)
+    # expanded_index: (..., batch, ..., m, 1, n, ...)
+    expanded_index = index.new_ones(*expanded_size) * index
+
+    output = torch.gather(inputs, along_dim, expanded_index)
+    output = output.squeeze(along_dim)
+    return output
