@@ -24,7 +24,7 @@ from models.adaptive_seq2seq import AdaptiveSeq2Seq
 from models.transformer.multi_head_attention import SingleTokenMHAttentionWrapper, GeneralMultiHeadAttention
 from utils.nn import AllenNLPAttentionWrapper
 from models.transformer.encoder import TransformerEncoder
-from models.adaptive_rnn_cell import AdaptiveRNNCell, AdaptiveStateMode
+from models.adaptive_rnn_cell import AdaptiveRNNCell
 from allennlp.common.util import START_SYMBOL, END_SYMBOL
 
 
@@ -40,6 +40,7 @@ def main():
     parser.add_argument('--enc-layers', type=int, help="layers in encoder")
     parser.add_argument('--act-mode', choices=['basic', 'random', 'mean_field'])
     parser.add_argument('--depth-emb', choices=['sinusoid', 'learnt', 'none'])
+    parser.add_argument('--encoder', choices=['transformer', 'lstm'])
 
     # parser.add_argument('--decoder-attention', choices=["dot_product", "bilinear", "multihead"],
     #                    help="the attention used in decoder, dot_product might be best")
@@ -54,27 +55,9 @@ def main():
         validation_set = None
 
     vocab = allennlp.data.Vocabulary.from_instances(training_set)
-    st_ds_conf = config.ADA_TRANS2SEQ_CONF[args.dataset]
-    if args.num_layer:
-        st_ds_conf['max_num_layers'] = args.num_layer
     if args.epoch:
         config.TRAINING_LIMIT = args.epoch
-    if args.batch:
-        st_ds_conf['batch_sz'] = args.batch
-    if args.use_act:
-        st_ds_conf['act'] = True
-    # if args.decoder_attention:
-    #     st_ds_conf['decoder_attn'] = args.decoder_attention
-    if args.emb_dim:
-        st_ds_conf['emb_sz'] = args.emb_dim
-    if args.act_loss_weight:
-        st_ds_conf['act_loss_weight'] = args.act_loss_weight
-    if args.act_mode:
-        st_ds_conf['act_mode'] = args.act_mode
-    if args.depth_emb:
-        st_ds_conf['depth_emb'] = args.depth_emb
-    if args.enc_layers:
-        st_ds_conf['num_enc_layers'] = args.enc_layers
+    st_ds_conf = get_update_settings(args)
 
     bsz = st_ds_conf['batch_sz']
     emb_sz = st_ds_conf['emb_sz']
@@ -83,14 +66,23 @@ def main():
                                                   embedding_dim=emb_sz)
     target_embedding = allennlp.modules.Embedding(num_embeddings=vocab.get_vocab_size('lftokens'),
                                                   embedding_dim=emb_sz)
-    encoder = TransformerEncoder(input_dim=emb_sz,
-                                 num_layers=st_ds_conf['num_enc_layers'],
-                                 num_heads=st_ds_conf['num_heads'],
-                                 feedforward_hidden_dim=emb_sz,
-                                 attention_dropout=st_ds_conf['attention_dropout'],
-                                 residual_dropout=st_ds_conf['residual_dropout'],
-                                 feedforward_dropout=st_ds_conf['feedforward_dropout'],
-                                 )
+
+
+    if st_ds_conf['encoder'] == 'lstm':
+        encoder = allennlp.modules.seq2seq_encoders.PytorchSeq2SeqWrapper(
+            torch.nn.LSTM(emb_sz, emb_sz, st_ds_conf['num_enc_layers'], batch_first=True)
+        )
+    elif st_ds_conf['encoder'] == 'transformer':
+        encoder = TransformerEncoder(input_dim=emb_sz,
+                                     num_layers=st_ds_conf['num_enc_layers'],
+                                     num_heads=st_ds_conf['num_heads'],
+                                     feedforward_hidden_dim=emb_sz,
+                                     attention_dropout=st_ds_conf['attention_dropout'],
+                                     residual_dropout=st_ds_conf['residual_dropout'],
+                                     feedforward_dropout=st_ds_conf['feedforward_dropout'],
+                                     )
+    else:
+        assert False
 
     def _get_attention():
         decoder_attn = "dot_product" #st_ds_conf['decoder_attn']
@@ -176,6 +168,30 @@ def main():
             output = predictor.predict_instance(instance)
             print('PRED:', ' '.join(output['predicted_tokens']))
 
+
+def get_update_settings(args):
+    st_ds_conf = config.ADA_TRANS2SEQ_CONF[args.dataset]
+    if args.num_layer:
+        st_ds_conf['max_num_layers'] = args.num_layer
+    if args.batch:
+        st_ds_conf['batch_sz'] = args.batch
+    if args.use_act:
+        st_ds_conf['act'] = True
+    # if args.decoder_attention:
+    #     st_ds_conf['decoder_attn'] = args.decoder_attention
+    if args.emb_dim:
+        st_ds_conf['emb_sz'] = args.emb_dim
+    if args.act_loss_weight:
+        st_ds_conf['act_loss_weight'] = args.act_loss_weight
+    if args.act_mode:
+        st_ds_conf['act_mode'] = args.act_mode
+    if args.depth_emb:
+        st_ds_conf['depth_emb'] = args.depth_emb
+    if args.enc_layers:
+        st_ds_conf['num_enc_layers'] = args.enc_layers
+    if args.encoder:
+        st_ds_conf['encoder'] = args.encoder
+    return st_ds_conf
 
 if __name__ == '__main__':
     try:
