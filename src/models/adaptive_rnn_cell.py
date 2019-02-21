@@ -63,6 +63,7 @@ class AdaptiveRNNCell(torch.nn.Module):
         self._max_computing_time = act_max_layer
 
         self._depth_wise_attention = depth_wise_attention
+        self._dwa_mapping = torch.nn.Linear(hidden_dim, hidden_dim)
         self._depth_embedding_type = depth_embedding_type
         if self._depth_embedding_type == DepthEmbeddingType.LEARNT:
             self._depth_embedding = torch.nn.Parameter(torch.Tensor(act_max_layer, hidden_dim))
@@ -237,11 +238,11 @@ class AdaptiveRNNCell(torch.nn.Module):
         output_states = [self.get_output_state(hidden) for hidden in previous_hidden_list]
         attend_over = torch.stack(output_states, dim=1)
 
-        # context: (batch, 1, hidden_dim)
+        # context: (batch, hidden_dim)
         context = self._depth_wise_attention(step_inputs, attend_over)
+        context = self._dwa_mapping(context)
 
         step_inputs = step_inputs + context
-        step_inputs = step_inputs.squeeze(1)
 
         return step_inputs
 

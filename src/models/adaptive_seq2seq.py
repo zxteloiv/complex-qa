@@ -35,9 +35,12 @@ class AdaptiveSeq2Seq(allennlp.models.Model):
         self._attention = attention
         self._scheduled_sampling_ratio = scheduled_sampling_ratio
         self._encoder = encoder
+        hidden_dim = self._encoder.get_output_dim()
         self._decoder = decoder
         self._src_embedding = source_embedding
         self._tgt_embedding = target_embedding
+
+        self._attn_mapping = torch.nn.Linear(hidden_dim, hidden_dim)
 
         self._start_id = vocab.get_token_index(start_symbol, target_namespace)
         self._eos_id = vocab.get_token_index(eos_symbol, target_namespace)
@@ -198,6 +201,7 @@ class AdaptiveSeq2Seq(allennlp.models.Model):
             inputs_embedding = self._tgt_embedding(step_inputs)
 
             context = self._attention(self._decoder.get_output_state(step_hidden), source_state, source_mask)
+            context = self._attn_mapping(context)
 
             inputs_embedding = inputs_embedding + context
 
@@ -208,7 +212,7 @@ class AdaptiveSeq2Seq(allennlp.models.Model):
                 acc_halting_probs_by_step.append(step_acc_halting_probs)
 
             # step_logit: (batch, vocab_size)
-            step_logit = self._output_projection_layer(self._decoder.get_output_state(step_hidden))
+            step_logit = self._output_projection_layer(self._decoder.get_output_state(step_hidden) + context)
 
             logits_by_step.append(step_logit)
 
