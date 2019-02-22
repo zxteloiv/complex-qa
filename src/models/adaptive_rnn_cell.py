@@ -78,7 +78,9 @@ class ACTRNNCell(AdaptiveRNNCell):
         self._dwa_mapping = torch.nn.Linear(hidden_dim, hidden_dim)
         self._depth_embedding_type = depth_embedding_type
         if self._depth_embedding_type == DepthEmbeddingType.LEARNT:
-            self._depth_embedding = torch.nn.Parameter(torch.Tensor(act_max_layer, hidden_dim))
+            emb_param = torch.empty(act_max_layer, hidden_dim)
+            torch.nn.init.xavier_normal_(emb_param)
+            self._depth_embedding = torch.nn.Parameter(emb_param)
 
         self.state_mode = state_mode
         self.hidden_dim = hidden_dim

@@ -142,6 +142,8 @@ def main():
 
     else:
         testing_set = reader.read(config.DATASETS[args.dataset].test_path)
+        if config.DEVICE > -1:
+            model = model.cuda(config.DEVICE)
         model.eval()
 
         predictor = allennlp.predictors.SimpleSeq2SeqPredictor(model, reader)

@@ -22,9 +22,15 @@ class IndRNNCell(torch.nn.Module):
 
         self.activation = activation
 
-        self.weight = torch.nn.Parameter(torch.Tensor(hidden_size, inputs_size))
-        self.u_vec = torch.nn.Parameter(torch.Tensor(1, hidden_size))
-        self.bias = torch.nn.Parameter(torch.Tensor(hidden_size)) if bias is not None else None
+        w = torch.empty(hidden_size, inputs_size)
+        torch.nn.init.xavier_normal_(w)
+        self.weight = torch.nn.Parameter(w)
+
+        u = torch.randn(1, hidden_size)
+        self.u_vec = torch.nn.Parameter(u)
+
+        b = torch.randn(hidden_size)
+        self.bias = torch.nn.Parameter(b) if bias else 0
 
     def forward(self, inputs: torch.Tensor, hidden: Optional[torch.Tensor] = None) -> torch.Tensor:
         """
@@ -39,11 +45,9 @@ class IndRNNCell(torch.nn.Module):
         Wx = torch.matmul(self.weight.unsqueeze(0), inputs.unsqueeze(-1)).squeeze(-1)
 
         # uh: (batch, hidden) <- (1, hidden) * (batch, hidden)
-        uh = self.u_vec * hidden if hidden else 0
+        uh = self.u_vec * hidden if hidden is not None else 0
 
-        raw = Wx + uh
-        if self.bias is not None:
-            raw = raw + self.bias
+        raw = Wx + uh + self.bias
 
         return self.activation(raw)
 
