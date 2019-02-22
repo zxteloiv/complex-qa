@@ -246,7 +246,7 @@ class AdaptiveSeq2Seq(allennlp.models.Model):
 
     def get_metrics(self, reset: bool = False) -> Dict[str, float]:
         all_metrics: Dict[str, float] = {}
-        if self._bleu and not self.training:
+        if self._bleu: # and not self.training:
             all_metrics.update(self._bleu.get_metric(reset=reset))
         return all_metrics
 
