@@ -24,7 +24,8 @@ from models.adaptive_seq2seq import AdaptiveSeq2Seq
 from models.transformer.multi_head_attention import SingleTokenMHAttentionWrapper, GeneralMultiHeadAttention
 from utils.nn import AllenNLPAttentionWrapper
 from models.transformer.encoder import TransformerEncoder
-from models.adaptive_rnn_cell import AdaptiveRNNCell
+from models.adaptive_rnn_cell import ACTRNNCell
+from models.universal_hidden_state_wrapper import UniversalHiddenStateWrapper, RNNType
 from allennlp.common.util import START_SYMBOL, END_SYMBOL
 
 
@@ -41,9 +42,10 @@ def main():
     parser.add_argument('--act-mode', choices=['basic', 'random', 'mean_field'])
     parser.add_argument('--depth-emb', choices=['sinusoid', 'learnt', 'none'])
     parser.add_argument('--encoder', choices=['transformer', 'lstm'])
+    parser.add_argument('--decoder', choices=['lstm', 'rnn', 'gru', 'ind_rnn'])
 
-    # parser.add_argument('--decoder-attention', choices=["dot_product", "bilinear", "multihead"],
-    #                    help="the attention used in decoder, dot_product might be best")
+    parser.add_argument('--decoder-attention', choices=["dot_product", "bilinear", "multihead"],
+                       help="the attention used in decoder, dot_product might be best")
 
     args = parser.parse_args()
 
@@ -57,7 +59,9 @@ def main():
     vocab = allennlp.data.Vocabulary.from_instances(training_set)
     if args.epoch:
         config.TRAINING_LIMIT = args.epoch
-    st_ds_conf = get_update_settings(args)
+    if args.device:
+        config.DEVICE = args.device
+    st_ds_conf = get_updated_settings(args)
 
     bsz = st_ds_conf['batch_sz']
     emb_sz = st_ds_conf['emb_sz']
@@ -84,37 +88,18 @@ def main():
     else:
         assert False
 
-    def _get_attention():
-        decoder_attn = "dot_product" #st_ds_conf['decoder_attn']
-        if decoder_attn == "bilinear":
-            attn = BilinearAttention(vector_dim=emb_sz, matrix_dim=emb_sz)
-            attn = AllenNLPAttentionWrapper(attn)
-        elif decoder_attn == "dot_product":
-            attn = DotProductAttention()
-            attn = AllenNLPAttentionWrapper(attn)
-        elif decoder_attn == "multihead":
-            attn = GeneralMultiHeadAttention(num_heads=st_ds_conf['num_heads'],
-                                          input_dim=emb_sz,
-                                          total_attention_dim=emb_sz,
-                                          total_value_dim=emb_sz,
-                                          attention_dropout=st_ds_conf['attention_dropout'],
-                                          use_future_blinding=False,
-                                          )
-            attn = SingleTokenMHAttentionWrapper(attn)
-        else:
-            assert False
-        return attn
-
-    rnn_cell = torch.nn.LSTMCell(emb_sz, emb_sz)
-    dwa = _get_attention() if st_ds_conf['dwa'] else None
-    decoder = AdaptiveRNNCell(hidden_dim=emb_sz,
-                              rnn_cell=rnn_cell,
-                              use_act=st_ds_conf['act'],
-                              act_max_layer=st_ds_conf['max_num_layers'],
-                              depth_wise_attention=dwa,
-                              depth_embedding_type=st_ds_conf['depth_emb'],
-                              state_mode=st_ds_conf['act_mode'],
-                              )
+    rnn_cell = get_rnn_cell(st_ds_conf['decoder'], emb_sz, emb_sz)
+    dwa = get_attention(st_ds_conf) if st_ds_conf['dwa'] else None
+    decoder = ACTRNNCell(hidden_dim=emb_sz,
+                         rnn_cell=UniversalHiddenStateWrapper(rnn_cell),
+                         use_act=st_ds_conf['act'],
+                         act_max_layer=st_ds_conf['max_num_layers'],
+                         act_dropout=st_ds_conf['act_dropout'],
+                         act_epsilon=st_ds_conf['act_epsilon'],
+                         depth_wise_attention=dwa,
+                         depth_embedding_type=st_ds_conf['depth_emb'],
+                         state_mode=st_ds_conf['act_mode'],
+                         )
     model = AdaptiveSeq2Seq(vocab=vocab,
                             encoder=encoder,
                             decoder=decoder,
@@ -124,7 +109,7 @@ def main():
                             start_symbol=START_SYMBOL,
                             eos_symbol=END_SYMBOL,
                             max_decoding_step=st_ds_conf['max_decoding_len'],
-                            attention=_get_attention(),
+                            attention=get_attention(st_ds_conf),
                             act_loss_weight=st_ds_conf['act_loss_weight'],
                             )
 
@@ -149,7 +134,7 @@ def main():
             train_dataset=training_set,
             validation_dataset=validation_set,
             serialization_dir=savepath,
-            cuda_device=args.device,
+            cuda_device=config.DEVICE,
             num_epochs=config.TRAINING_LIMIT,
         )
 
@@ -169,7 +154,7 @@ def main():
             print('PRED:', ' '.join(output['predicted_tokens']))
 
 
-def get_update_settings(args):
+def get_updated_settings(args):
     st_ds_conf = config.ADA_TRANS2SEQ_CONF[args.dataset]
     if args.num_layer:
         st_ds_conf['max_num_layers'] = args.num_layer
@@ -177,8 +162,8 @@ def get_update_settings(args):
         st_ds_conf['batch_sz'] = args.batch
     if args.use_act:
         st_ds_conf['act'] = True
-    # if args.decoder_attention:
-    #     st_ds_conf['decoder_attn'] = args.decoder_attention
+    if args.decoder_attention:
+        st_ds_conf['decoder_attn'] = args.decoder_attention
     if args.emb_dim:
         st_ds_conf['emb_sz'] = args.emb_dim
     if args.act_loss_weight:
@@ -191,7 +176,43 @@ def get_update_settings(args):
         st_ds_conf['num_enc_layers'] = args.enc_layers
     if args.encoder:
         st_ds_conf['encoder'] = args.encoder
+    if args.decoder:
+        st_ds_conf['decoder'] = args.decoder
     return st_ds_conf
+
+def get_rnn_cell(cell_type: str, input_dim: int, hidden_dim: int):
+    if cell_type == "lstm":
+        return RNNType.LSTM(input_dim, hidden_dim)
+    elif cell_type == "gru":
+        return RNNType.GRU(input_dim, hidden_dim)
+    elif cell_type == "ind_rnn":
+        return RNNType.IndRNN(input_dim, hidden_dim)
+    elif cell_type == "rnn":
+        return RNNType.VanillaRNN(input_dim, hidden_dim)
+    else:
+        raise ValueError(f"RNN type of {cell_type} not found.")
+
+def get_attention(st_ds_conf):
+    emb_sz = st_ds_conf['emb_sz']
+    decoder_attn = st_ds_conf['decoder_attn']
+    if decoder_attn == "bilinear":
+        attn = BilinearAttention(vector_dim=emb_sz, matrix_dim=emb_sz)
+        attn = AllenNLPAttentionWrapper(attn)
+    elif decoder_attn == "dot_product":
+        attn = DotProductAttention()
+        attn = AllenNLPAttentionWrapper(attn)
+    elif decoder_attn == "multihead":
+        attn = GeneralMultiHeadAttention(num_heads=st_ds_conf['num_heads'],
+                                         input_dim=emb_sz,
+                                         total_attention_dim=emb_sz,
+                                         total_value_dim=emb_sz,
+                                         attention_dropout=st_ds_conf['attention_dropout'],
+                                         use_future_blinding=False,
+                                         )
+        attn = SingleTokenMHAttentionWrapper(attn)
+    else:
+        assert False
+    return attn
 
 if __name__ == '__main__':
     try:

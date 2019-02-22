@@ -9,16 +9,15 @@ from allennlp.modules import TokenEmbedder
 from allennlp.nn import util
 
 from models.transformer.multi_head_attention import SingleTokenMHAttentionWrapper
+from models.adaptive_rnn_cell import AdaptiveRNNCell
 from allennlp.training.metrics import BLEU
 from utils.nn import AllenNLPAttentionWrapper
-
-from .parallel_seq2seq import ParallelSeq2Seq
 
 class AdaptiveSeq2Seq(allennlp.models.Model):
     def __init__(self,
                  vocab: Vocabulary,
                  encoder: torch.nn.Module,
-                 decoder: torch.nn.Module,
+                 decoder: AdaptiveRNNCell,
                  source_embedding: TokenEmbedder,
                  target_embedding: TokenEmbedder,
                  target_namespace: str = "target_tokens",
@@ -30,6 +29,8 @@ class AdaptiveSeq2Seq(allennlp.models.Model):
                  attention: Union[AllenNLPAttentionWrapper, SingleTokenMHAttentionWrapper, None] = None,
                  scheduled_sampling_ratio: float = 0.,
                  act_loss_weight: float = 1.,
+                 prediction_dropout: float = .1,
+                 embedding_dropout: float = .1,
                  ):
         super(AdaptiveSeq2Seq, self).__init__(vocab)
         self._attention = attention
@@ -51,6 +52,8 @@ class AdaptiveSeq2Seq(allennlp.models.Model):
 
         self._act_loss_weight = act_loss_weight
 
+        self._pre_projection_dropout = torch.nn.Dropout(prediction_dropout)
+        self._embedding_dropout = torch.nn.Dropout(embedding_dropout)
         self._output_projection_layer = torch.nn.Linear(decoder.hidden_dim,
                                                         vocab.get_vocab_size(target_namespace))
 
@@ -87,7 +90,8 @@ class AdaptiveSeq2Seq(allennlp.models.Model):
                                                                 target_mask[:, 1:].float(),
                                                                 label_smoothing=self._label_smoothing)
             if acc_halting_probs is not None and n_updates is not None:
-                loss_act = (acc_halting_probs * target_mask[:, 1:].float()).sum()
+                # acc_halting_probs will get maximized while n_updates will get minimized
+                loss_act = (acc_halting_probs * (- n_updates - 1).float() * target_mask[:, 1:].float()).sum()
             else:
                 loss_act = 0
 
@@ -142,6 +146,7 @@ class AdaptiveSeq2Seq(allennlp.models.Model):
 
         # source_embedding: (batch, max_input_length, embedding_sz)
         source_embedding = self._src_embedding(source)
+        source_embedding = self._embedding_dropout(source_embedding)
         source_hidden = self._encoder(source_embedding, source_mask)
         return source_hidden
 
@@ -173,7 +178,8 @@ class AdaptiveSeq2Seq(allennlp.models.Model):
         # Initialize target predictions with the start index.
         # batch_start: (batch_size,)
         batch_start = source_mask.new_full((batch,), fill_value=self._start_id)
-        step_hidden = self._decoder.init_hidden_states(source_state, source_mask, self._encoder.is_bidirectional())
+        step_hidden, step_output = self._decoder.init_hidden_states(source_state, source_mask,
+                                                                    self._encoder.is_bidirectional())
 
         # acc_halting_probs: [(batch,)]
         # updated_num_by_step: [(batch,)]
@@ -199,20 +205,26 @@ class AdaptiveSeq2Seq(allennlp.models.Model):
 
             # inputs_embedding: (batch, embedding_dim)
             inputs_embedding = self._tgt_embedding(step_inputs)
+            inputs_embedding = self._embedding_dropout(inputs_embedding)
 
-            context = self._attention(self._decoder.get_output_state(step_hidden), source_state, source_mask)
+            context = self._attention(step_output, source_state, source_mask)
             context = self._attn_mapping(context)
 
             inputs_embedding = inputs_embedding + context
 
-            # step_hidden: (batch, hidden_dim)
+            # step_hidden: some_hidden_var_with_unknown_internals
+            # step_output: (batch, hidden_dim)
             # step_acc_halting_probs: (batch, )
-            step_hidden, step_acc_halting_probs, step_updated_num = self._decoder(inputs_embedding, step_hidden)
-            if step_acc_halting_probs is not None and step_updated_num is not None:
+            step_hidden, step_output, step_acc_halting_probs, _ = self._decoder(
+                inputs_embedding, step_hidden,
+                lambda out: self._attn_mapping(self._attention(out, source_state, source_mask))
+            )
+
+            if step_acc_halting_probs is not None:
                 acc_halting_probs_by_step.append(step_acc_halting_probs)
 
             # step_logit: (batch, vocab_size)
-            step_logit = self._output_projection_layer(self._decoder.get_output_state(step_hidden) + context)
+            step_logit = self._output_projection_layer(self._pre_projection_dropout(step_output + context))
 
             logits_by_step.append(step_logit)
 
