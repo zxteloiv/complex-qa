@@ -221,10 +221,10 @@ def get_attention(st_ds_conf, attn_type):
     attn_type = attn_type.lower()
     if attn_type == "bilinear":
         attn = BilinearAttention(vector_dim=emb_sz, matrix_dim=emb_sz)
-        attn = AllenNLPAttentionWrapper(attn)
+        attn = AllenNLPAttentionWrapper(attn, st_ds_conf['attention_dropout'])
     elif attn_type == "dot_product":
         attn = DotProductAttention()
-        attn = AllenNLPAttentionWrapper(attn)
+        attn = AllenNLPAttentionWrapper(attn, st_ds_conf['attention_dropout'])
     elif attn_type == "multihead":
         attn = GeneralMultiHeadAttention(num_heads=st_ds_conf['num_heads'],
                                          input_dim=emb_sz,
