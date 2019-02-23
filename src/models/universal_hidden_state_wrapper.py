@@ -44,7 +44,7 @@ class UniversalHiddenStateWrapper(torch.nn.Module):
 
         :param hidden_list: [hidden] or [(hidden, context)] or else
         :param weight: (batch, total = len(hidden_list) )
-        :return: hidden or (hidden, context)
+        :return: hidden or (hidden, context), or something else if you know about its internals
         """
         if self._merge_hidden_list_fn is not None:
             return self._merge_hidden_list_fn(hidden_list, weight)
@@ -64,19 +64,8 @@ class UniversalHiddenStateWrapper(torch.nn.Module):
         else:
             raise NotImplementedError
 
-    def init_hidden_states(self, source_state, source_mask, is_bidirectional=False):
-        batch, _, hidden_dim = source_state.size()
-
-        last_word_indices = source_mask.sum(1).long() - 1
-        expanded_indices = last_word_indices.view(-1, 1, 1).expand(batch, 1, hidden_dim)
-        final_encoder_output = source_state.gather(1, expanded_indices)
-        final_encoder_output = final_encoder_output.squeeze(1)  # (batch_size, hidden_dim)
-
-        if is_bidirectional:
-            hidden_dim = hidden_dim // 2
-            final_encoder_output = final_encoder_output[:, :hidden_dim]
-
-        initial_hidden = final_encoder_output
+    def init_hidden_states(self, forward_out, backward_out):
+        initial_hidden = forward_out
         initial_context = torch.zeros_like(initial_hidden)
 
         # returns (hidden, output) or ((hidden, context), output)

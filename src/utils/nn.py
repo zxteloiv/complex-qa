@@ -1,6 +1,10 @@
 from typing import List, Tuple, Dict, Mapping, Optional
 import torch
 
+from allennlp.modules.matrix_attention import MatrixAttention
+from allennlp.modules.attention import Attention
+from allennlp.nn.util import masked_softmax
+
 def add_position_and_timestep_sinusoid(inputs: torch.Tensor,
                                        timestep: Optional[float] = None,
                                        base_num: float = 1.e4) -> torch.Tensor:
@@ -56,10 +60,6 @@ def add_depth_features_to_single_position(inputs: torch.Tensor, timestep: float)
     """
     return add_position_and_timestep_sinusoid(inputs.unsqueeze(1), timestep).squeeze(1)
 
-from allennlp.modules.matrix_attention import MatrixAttention
-from allennlp.modules.attention import Attention
-from allennlp.nn.util import masked_softmax
-
 class AllenNLPMatrixAttentionWrapper(torch.nn.Module):
     """
     A wrapper for matrix attention in allennlp, fitting the interface of the multi-headed attention
@@ -104,9 +104,10 @@ class AllenNLPAttentionWrapper(torch.nn.Module):
     A wrapper for matrix attention in allennlp, fitting the interface of the multi-headed attention
     defined in models.transformer.multi_head_attention
     """
-    def __init__(self, attn: Attention):
+    def __init__(self, attn: Attention, attn_dropout: float = 0.):
         super(AllenNLPAttentionWrapper, self).__init__()
         self._attn: Attention = attn
+        self._dropout = torch.nn.Dropout(attn_dropout)
 
     def forward(self,
                 inputs: torch.Tensor,
@@ -123,44 +124,16 @@ class AllenNLPAttentionWrapper(torch.nn.Module):
                  attention: (batch, max_input_length, 1, max_attend_length)
         """
 
-        # attn: (batch, max_attend_length, 1)
-        attn = self._attn(inputs, attend_over, attend_mask).unsqueeze(-1)
+        # attn: (batch, max_attend_length, -1)
+        attn = self._attn(inputs, attend_over, attend_mask)
+        attn = self._dropout(attn).unsqueeze(-1)
 
         # context: (batch, attend_dim)
         context = (attn * attend_over).sum(1)
 
         return context
 
-def select_item_along_dim(inputs: torch.Tensor,
-                          index: torch.LongTensor,
-                          along_dim: int = -1,
-                          batch_dim: int = 0,) -> torch.Tensor:
-    """
-    Select items from inputs, along a given dimension, using a 1D-index, which is similar
-    to chainer.functions.select_item but provides along_dim and batch_dim parameters.
-
-    namely, output[..., i, ..., m, n, ...] = inputs[..., i, ..., m, index[i], n, ...],
-    where i indexes the _batch_dim_ and squeezes the _along_dim_.
-
-    :param inputs: (..., batch, ..., m, along_dim, n, ...)
-    :param index: (batch,)
-    :param along_dim:
-    :param batch_dim:
-    :return:
-    """
-    # base_size = (1, ..., 1, batch_num, 1, ..., 1)
-    base_size = [1] * len(inputs.size())
-    base_size[batch_dim] = inputs.size()[batch_dim]
-    index = index.view(*base_size)
-
-    # expanded_size = (..., batch,..., m, 1, n, ...)
-    expanded_size = list(inputs.size())
-    expanded_size[along_dim] = 1    # only select 1 item from that dimension
-
-    # index: (batch,) -> (1, ..., 1, batch, 1, ..., 1)
-    # expanded_index: (..., batch, ..., m, 1, n, ...)
-    expanded_index = index.new_ones(*expanded_size) * index
-
-    output = torch.gather(inputs, along_dim, expanded_index)
-    output = output.squeeze(along_dim)
-    return output
+def filter_cat(iterable, dim):
+    items = [item for item in iterable if item is not None]
+    res = torch.cat(items, dim=dim)
+    return res

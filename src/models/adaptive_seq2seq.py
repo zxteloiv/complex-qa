@@ -11,13 +11,14 @@ from allennlp.nn import util
 from models.transformer.multi_head_attention import SingleTokenMHAttentionWrapper
 from models.adaptive_rnn_cell import AdaptiveRNNCell
 from allennlp.training.metrics import BLEU
-from utils.nn import AllenNLPAttentionWrapper
+from utils.nn import AllenNLPAttentionWrapper, filter_cat
 
 class AdaptiveSeq2Seq(allennlp.models.Model):
     def __init__(self,
                  vocab: Vocabulary,
                  encoder: torch.nn.Module,
                  decoder: AdaptiveRNNCell,
+                 word_projection: torch.nn.Module,
                  source_embedding: TokenEmbedder,
                  target_embedding: TokenEmbedder,
                  target_namespace: str = "target_tokens",
@@ -26,22 +27,21 @@ class AdaptiveSeq2Seq(allennlp.models.Model):
                  max_decoding_step: int = 50,
                  use_bleu: bool = True,
                  label_smoothing: Optional[float] = None,
-                 attention: Union[AllenNLPAttentionWrapper, SingleTokenMHAttentionWrapper, None] = None,
+                 enc_attention: Union[AllenNLPAttentionWrapper, SingleTokenMHAttentionWrapper, None] = None,
+                 dec_hist_attn: Union[AllenNLPAttentionWrapper, SingleTokenMHAttentionWrapper, None] = None,
                  scheduled_sampling_ratio: float = 0.,
                  act_loss_weight: float = 1.,
                  prediction_dropout: float = .1,
                  embedding_dropout: float = .1,
                  ):
         super(AdaptiveSeq2Seq, self).__init__(vocab)
-        self._attention = attention
+        self._enc_attn = enc_attention
+        self._dec_hist_attn = dec_hist_attn
         self._scheduled_sampling_ratio = scheduled_sampling_ratio
         self._encoder = encoder
-        hidden_dim = self._encoder.get_output_dim()
         self._decoder = decoder
         self._src_embedding = source_embedding
         self._tgt_embedding = target_embedding
-
-        self._attn_mapping = torch.nn.Linear(hidden_dim, hidden_dim)
 
         self._start_id = vocab.get_token_index(start_symbol, target_namespace)
         self._eos_id = vocab.get_token_index(eos_symbol, target_namespace)
@@ -54,11 +54,10 @@ class AdaptiveSeq2Seq(allennlp.models.Model):
 
         self._pre_projection_dropout = torch.nn.Dropout(prediction_dropout)
         self._embedding_dropout = torch.nn.Dropout(embedding_dropout)
-        self._output_projection_layer = torch.nn.Linear(decoder.hidden_dim,
-                                                        vocab.get_vocab_size(target_namespace))
+        self._output_projection = word_projection
 
         if use_bleu:
-            pad_index = self.vocab.get_token_index(self.vocab._padding_token, self._target_namespace)
+            pad_index = self.vocab.get_token_index(self.vocab._padding_token, target_namespace)
             self._bleu = BLEU(exclude_indices={pad_index, self._eos_id, self._start_id})
         else:
             self._bleu = None
@@ -91,7 +90,7 @@ class AdaptiveSeq2Seq(allennlp.models.Model):
                                                                 label_smoothing=self._label_smoothing)
             if acc_halting_probs is not None and n_updates is not None:
                 # acc_halting_probs will get maximized while n_updates will get minimized
-                loss_act = (acc_halting_probs * (- n_updates - 1).float() * target_mask[:, 1:].float()).sum()
+                loss_act = (acc_halting_probs * (- n_updates - 1).float() * target_mask[:, 1:].float()).mean()
             else:
                 loss_act = 0
 
@@ -188,6 +187,7 @@ class AdaptiveSeq2Seq(allennlp.models.Model):
         acc_halting_probs_by_step = []
         updated_num_by_step = []
         logits_by_step = []
+        output_by_step = []
         predictions_by_step = [batch_start]
         for timestep in range(num_decoding_steps):
             if self.training and np.random.rand(1).item() < self._scheduled_sampling_ratio:
@@ -207,25 +207,44 @@ class AdaptiveSeq2Seq(allennlp.models.Model):
             inputs_embedding = self._tgt_embedding(step_inputs)
             inputs_embedding = self._embedding_dropout(inputs_embedding)
 
-            context = self._attention(step_output, source_state, source_mask)
-            context = self._attn_mapping(context)
+            if self._enc_attn is not None:
+                enc_attn_fn = lambda out: self._enc_attn(out, source_state, source_mask)
+            else:
+                enc_attn_fn = None
 
-            inputs_embedding = inputs_embedding + context
+            if self._dec_hist_attn is None:
+                dec_hist_attn_fn = None
+
+            elif len(output_by_step) > 0:
+                dec_hist = torch.stack(output_by_step, dim=1)
+                dec_hist_mask = target_mask[:, :timestep]
+                dec_hist_attn_fn = lambda out: self._dec_hist_attn(out, dec_hist, dec_hist_mask)
+
+            else:
+                dec_hist_attn_fn = lambda out: torch.zeros_like(out)
+
+            # compute attention context before the output is updated
+            enc_context = enc_attn_fn(step_output) if enc_attn_fn else None
+            dec_hist_context = dec_hist_attn_fn(step_output) if dec_hist_attn_fn else None
 
             # step_hidden: some_hidden_var_with_unknown_internals
             # step_output: (batch, hidden_dim)
             # step_acc_halting_probs: (batch, )
-            step_hidden, step_output, step_acc_halting_probs, _ = self._decoder(
+            # update_num: (batch, )
+            step_hidden, step_output, step_acc_halting_probs, update_num = self._decoder(
                 inputs_embedding, step_hidden,
-                lambda out: self._attn_mapping(self._attention(out, source_state, source_mask))
+                enc_attn_fn, dec_hist_attn_fn
             )
 
             if step_acc_halting_probs is not None:
                 acc_halting_probs_by_step.append(step_acc_halting_probs)
+                updated_num_by_step.append(update_num)
 
             # step_logit: (batch, vocab_size)
-            step_logit = self._output_projection_layer(self._pre_projection_dropout(step_output + context))
+            proj_input = filter_cat([step_output, enc_context, dec_hist_context], dim=-1)
+            step_logit = self._output_projection(self._pre_projection_dropout(proj_input))
 
+            output_by_step.append(step_output)
             logits_by_step.append(step_logit)
 
             # greedy decoding
@@ -240,7 +259,7 @@ class AdaptiveSeq2Seq(allennlp.models.Model):
         predictions = torch.stack(predictions_by_step[1:], dim=1)
         logits = torch.stack(logits_by_step, dim=1)
         acc_halting_probs = torch.stack(acc_halting_probs_by_step, dim=1) if acc_halting_probs_by_step else None
-        n_updated = torch.stack(updated_num_by_step, dim=1) if updated_num_by_step else None
+        n_updated = torch.stack(updated_num_by_step, dim=1) if len(updated_num_by_step) > 0 else None
 
         return predictions, logits, acc_halting_probs, n_updated
 

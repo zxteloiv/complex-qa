@@ -111,19 +111,21 @@ ADA_TRANS2SEQ_CONF[DS_ATIS] = dict(
     num_enc_layers=2,
     encoder='lstm',
     decoder='lstm',
-    max_num_layers=1,
+    act_max_layer=1,
     act=False,
     act_dropout=.1,
     act_epsilon=.1,
     residual_dropout=.1,
     attention_dropout=.1,
     feedforward_dropout=.1,
+    embedding_dropout=.1,
+    prediction_dropout=.1,
     vanilla_wiring=False,
-    dwa=True,
-    depth_emb='sinusoid',
     act_loss_weight=-0.1,
-    decoder_attn="dot_product",
-    act_mode='mean_field'
+    dwa="dot_product",
+    enc_attn="bilinear",
+    dec_hist_attn="dot_product",
+    act_mode='mean_field',
 )
 
 ST_TRANSFORMER = 'transformer'
