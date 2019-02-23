@@ -217,7 +217,7 @@ class AdaptiveSeq2Seq(allennlp.models.Model):
 
             elif len(output_by_step) > 0:
                 dec_hist = torch.stack(output_by_step, dim=1)
-                dec_hist_mask = target_mask[:, :timestep] if target_mask else None
+                dec_hist_mask = target_mask[:, :timestep] if target_mask is not None else None
                 dec_hist_attn_fn = lambda out: self._dec_hist_attn(out, dec_hist, dec_hist_mask)
 
             else:

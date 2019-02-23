@@ -91,6 +91,9 @@ def main():
         testing_set = reader.read(config.DATASETS[args.dataset].test_path)
         model.eval()
 
+        if config.DEVICE > -1:
+            model = model.cuda(config.DEVICE)
+
         predictor = allennlp.predictors.SimpleSeq2SeqPredictor(model, reader)
 
         for instance in tqdm.tqdm(testing_set, total=len(testing_set)):
