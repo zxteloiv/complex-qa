@@ -151,7 +151,7 @@ def get_model(vocab, st_ds_conf):
     halting_in_dim = dec_out_dim + sum_attn_dims([enc_attn, dec_hist_attn, dwa],
                                                  [enc_out_dim, dec_out_dim, dec_out_dim])
     halting_fn = torch.nn.Sequential(
-        torch.nn.Dropout(st_ds_conf['act_dropout']),
+        # torch.nn.Dropout(st_ds_conf['act_dropout']),
         torch.nn.Linear(halting_in_dim, halting_in_dim),
         torch.nn.ReLU(),
         torch.nn.Dropout(st_ds_conf['act_dropout']),
