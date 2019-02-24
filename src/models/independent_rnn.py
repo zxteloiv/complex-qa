@@ -4,7 +4,7 @@ import torch.nn.modules
 
 class IndRNNCell(torch.nn.Module):
     """
-    An independent recurrent unit.
+    An independent recurrent unit. From a CVPR2018 paper (https://arxiv.org/abs/1803.04831).
 
     .. math::
        \begin{array}
