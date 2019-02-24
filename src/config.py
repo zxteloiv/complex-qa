@@ -18,6 +18,8 @@ ADAM_LR = 1e-3
 ADAM_BETAS = (.9, .98)
 ADAM_EPS = 1e-9
 
+GRAD_CLIPPING = 5
+
 # ======================
 # dataset config
 
