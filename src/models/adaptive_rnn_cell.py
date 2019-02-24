@@ -31,6 +31,7 @@ class ACTRNNCell(AdaptiveRNNCell):
                  use_act: bool,
                  act_max_layer: int = 10,
                  act_epsilon: float = .1,
+                 rnn_input_dropout: float = .2,
                  depth_wise_attention: Union[AllenNLPAttentionWrapper, SingleTokenMHAttentionWrapper, None] = None,
                  state_mode: str = AdaptiveStateMode.BASIC,
                  ):
@@ -50,6 +51,8 @@ class ACTRNNCell(AdaptiveRNNCell):
 
         self._threshold = 1 - act_epsilon
         self._max_computing_time = act_max_layer
+
+        self._input_dropout = torch.nn.Dropout(rnn_input_dropout)
 
         self._depth_wise_attention = depth_wise_attention
 
@@ -82,8 +85,10 @@ class ACTRNNCell(AdaptiveRNNCell):
         # if ACT is disabled, depth is kept 0, depth-wise attn is untouched
         output = self._rnn_cell.get_output_state(hidden)
 
-        enc_context = enc_attn_fn(output) if enc_attn_fn else None
-        dec_hist_context = dec_hist_attn_fn(output) if dec_hist_attn_fn else None
+        # manually dropout these vectors, in order to keep depth flag
+        enc_context = self._input_dropout(enc_attn_fn(output)) if enc_attn_fn else None
+        dec_hist_context = self._input_dropout(dec_hist_attn_fn(output)) if dec_hist_attn_fn else None
+        inputs = self._input_dropout(inputs)
 
         # depth
         rnn_inputs = filter_cat([inputs, enc_context, dec_hist_context, self._get_depth_flag(0, inputs)], dim=-1)
@@ -151,8 +156,10 @@ class ACTRNNCell(AdaptiveRNNCell):
             halting_prob_list.append(step_halting_prob)
 
             # step_inputs: (batch, hidden_dim)
-            depth_flag = self._get_depth_flag(depth, inputs)
-            step_inputs = filter_cat([inputs, enc_context, dec_hist_context, depth_flag], dim=-1)
+            step_inputs = filter_cat([self._input_dropout(inputs),
+                                      self._input_dropout(enc_context),
+                                      self._input_dropout(dec_hist_context),
+                                      self._get_depth_flag(depth, inputs)], dim=-1)
             hidden, output = self._rnn_cell(step_inputs, hidden)
 
             depth += 1
