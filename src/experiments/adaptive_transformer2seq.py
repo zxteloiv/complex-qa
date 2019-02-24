@@ -83,6 +83,7 @@ def main():
             serialization_dir=savepath,
             cuda_device=config.DEVICE,
             num_epochs=config.TRAINING_LIMIT,
+            grad_clipping=config.GRAD_CLIPPING,
         )
 
         trainer.train()
