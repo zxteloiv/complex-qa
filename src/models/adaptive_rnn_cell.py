@@ -88,7 +88,6 @@ class ACTRNNCell(AdaptiveRNNCell):
         # manually dropout these vectors, in order to keep depth flag
         enc_context = self._input_dropout(enc_attn_fn(output)) if enc_attn_fn else None
         dec_hist_context = self._input_dropout(dec_hist_attn_fn(output)) if dec_hist_attn_fn else None
-        inputs = self._input_dropout(inputs)
 
         # depth
         rnn_inputs = filter_cat([inputs, enc_context, dec_hist_context, self._get_depth_flag(0, inputs)], dim=-1)
@@ -156,7 +155,7 @@ class ACTRNNCell(AdaptiveRNNCell):
             halting_prob_list.append(step_halting_prob)
 
             # step_inputs: (batch, hidden_dim)
-            step_inputs = filter_cat([self._input_dropout(inputs),
+            step_inputs = filter_cat([inputs,
                                       self._input_dropout(enc_context),
                                       self._input_dropout(dec_hist_context),
                                       self._get_depth_flag(depth, inputs)], dim=-1)
@@ -171,7 +170,7 @@ class ACTRNNCell(AdaptiveRNNCell):
         merged_hidden = self._adaptively_merge_hidden_list(hidden_list, halting_probs, alive_masks)
         merged_output = self._rnn_cell.get_output_state(merged_hidden)
 
-        # halting_prob_acc = (halting_probs * alive_masks).sum(1)
+        halting_prob_acc = (halting_probs * alive_masks).sum(1)
         num_updated = alive_masks.sum(1)
 
         return merged_hidden, merged_output, halting_prob_acc, num_updated
