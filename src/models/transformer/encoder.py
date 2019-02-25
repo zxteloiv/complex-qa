@@ -2,41 +2,11 @@ from typing import Dict, List, Tuple, Mapping, Optional
 import torch
 
 from allennlp.modules import LayerNorm, FeedForward
-from allennlp.modules.seq2seq_encoders.stacked_self_attention import StackedSelfAttentionEncoder
-# from allennlp.nn.util import add_positional_features
 from utils.nn import add_position_and_timestep_sinusoid, add_positional_features
 from allennlp.nn import Activation
 
 from .multi_head_attention import MultiHeadSelfAttention
 from .adaptive_computing import AdaptiveComputing
-
-class ProtoStackedSelfAttentionEncoder(StackedSelfAttentionEncoder):
-    """
-    Proto Encoder as the original <<Attention is All You Needs>> paper.
-    Attention layers are first and then feedforward layers, which is reversed in the implementation of AllenNLP
-    """
-    def forward(self, inputs: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
-        if self._use_positional_encoding:
-            output = add_positional_features(inputs)
-        else:
-            output = inputs
-
-        for (attention,
-             feedforward,
-             feedforward_layer_norm,
-             layer_norm) in zip(self._attention_layers,
-                                self._feedfoward_layers,
-                                self._feed_forward_layer_norm_layers,
-                                self._layer_norm_layers
-                                ):
-            cached_input = output
-            attention_out = attention(output, mask)
-            attention_out = layer_norm(self.dropout(attention_out) + cached_input)
-            feedforward_out = feedforward(attention_out)
-            output = feedforward_layer_norm(attention_out + self.dropout(feedforward_out))
-
-        return output
-
 
 class TransformerEncoder(torch.nn.Module):
     def __init__(self,
