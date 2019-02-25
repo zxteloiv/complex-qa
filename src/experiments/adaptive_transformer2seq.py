@@ -135,7 +135,8 @@ def get_model(vocab, st_ds_conf):
     enc_out_dim = encoder.get_output_dim()
     dec_out_dim = emb_sz
 
-    dwa = get_attention(st_ds_conf, st_ds_conf['dwa'])
+    # depth wise attention can only be enabled for ACT mode.
+    dwa = get_attention(st_ds_conf, st_ds_conf['dwa'] if st_ds_conf['act'] else "none")
     dec_hist_attn = get_attention(st_ds_conf, st_ds_conf['dec_hist_attn'])
     enc_attn = get_attention(st_ds_conf, st_ds_conf['enc_attn'])
     if st_ds_conf['enc_attn'] == 'dot_product':
@@ -144,14 +145,14 @@ def get_model(vocab, st_ds_conf):
     def sum_attn_dims(attns, dims):
         return sum(dim for attn, dim in zip(attns, dims) if attn is not None)
 
-    dec_in_dim = dec_out_dim + 1 + sum_attn_dims([enc_attn, dec_hist_attn],
-                                                 [enc_out_dim, dec_out_dim])
+    dec_in_dim = dec_out_dim + 1 + sum_attn_dims([enc_attn, dec_hist_attn, dwa],
+                                                 [enc_out_dim, dec_out_dim, dec_out_dim])
     rnn_cell = get_rnn_cell(st_ds_conf['decoder'], dec_in_dim, dec_out_dim)
 
     halting_in_dim = dec_out_dim + sum_attn_dims([enc_attn, dec_hist_attn, dwa],
                                                  [enc_out_dim, dec_out_dim, dec_out_dim])
     halting_fn = torch.nn.Sequential(
-        # torch.nn.Dropout(st_ds_conf['act_dropout']),
+        torch.nn.Dropout(st_ds_conf['act_dropout']),
         torch.nn.Linear(halting_in_dim, halting_in_dim),
         torch.nn.ReLU(),
         torch.nn.Dropout(st_ds_conf['act_dropout']),
