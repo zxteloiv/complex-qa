@@ -3,7 +3,6 @@ from typing import Dict, List, Tuple, Mapping, Optional, Union
 import numpy as np
 import torch
 import torch.nn
-from torch.nn import functional as F
 import allennlp.models
 from allennlp.data.vocabulary import Vocabulary
 from allennlp.modules import TokenEmbedder
@@ -91,11 +90,7 @@ class AdaptiveSeq2Seq(allennlp.models.Model):
                                                                 label_smoothing=self._label_smoothing)
             if acc_halting_probs is not None and n_updates is not None:
                 # acc_halting_probs will get maximized while n_updates will get minimized
-                # halting_probs <= 1 - epsilon, but reserved
-                loss_halting = 1 - acc_halting_probs
-                loss_updates = n_updates.float() * target_mask[:, 1:].float()
-                loss_act = (loss_halting * loss_updates).mean()
-
+                loss_act = (acc_halting_probs * (- n_updates - 1).float() * target_mask[:, 1:].float()).mean()
             else:
                 loss_act = 0
 
@@ -184,7 +179,6 @@ class AdaptiveSeq2Seq(allennlp.models.Model):
         batch_start = source_mask.new_full((batch,), fill_value=self._start_id)
         step_hidden, step_output = self._decoder.init_hidden_states(source_state, source_mask,
                                                                     self._encoder.is_bidirectional())
-        last_depth_context = step_output
 
         # acc_halting_probs: [(batch,)]
         # updated_num_by_step: [(batch,)]
@@ -237,8 +231,8 @@ class AdaptiveSeq2Seq(allennlp.models.Model):
             # step_output: (batch, hidden_dim)
             # step_acc_halting_probs: (batch, )
             # update_num: (batch, )
-            step_hidden, step_output, last_depth_context, step_acc_halting_probs, update_num = self._decoder(
-                inputs_embedding, step_hidden, last_depth_context,
+            step_hidden, step_output, step_acc_halting_probs, update_num = self._decoder(
+                inputs_embedding, step_hidden,
                 enc_attn_fn, dec_hist_attn_fn
             )
 
@@ -273,6 +267,5 @@ class AdaptiveSeq2Seq(allennlp.models.Model):
         all_metrics: Dict[str, float] = {}
         if self._bleu: # and not self.training:
             all_metrics.update(self._bleu.get_metric(reset=reset))
-
         return all_metrics
 

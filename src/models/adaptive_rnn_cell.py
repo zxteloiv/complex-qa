@@ -61,7 +61,6 @@ class ACTRNNCell(AdaptiveRNNCell):
     def forward(self,
                 inputs: torch.Tensor,
                 hidden,
-                last_depth_context,
                 enc_attn_fn: Optional[Callable] = None,
                 dec_hist_attn_fn: Optional[Callable] = None):
         """
@@ -76,7 +75,7 @@ class ACTRNNCell(AdaptiveRNNCell):
         :return: (batch, hidden_dim) or [(batch, hidden_dim)]
         """
         if self._use_act:
-            return self._forward_act(inputs, hidden, last_depth_context, enc_attn_fn, dec_hist_attn_fn)
+            return self._forward_act(inputs, hidden, enc_attn_fn, dec_hist_attn_fn)
 
         else:
             hidden, out = self._forward_normal(inputs, hidden, enc_attn_fn, dec_hist_attn_fn)
@@ -86,17 +85,17 @@ class ACTRNNCell(AdaptiveRNNCell):
         # if ACT is disabled, depth is kept 0, depth-wise attn is untouched
         output = self._rnn_cell.get_output_state(hidden)
 
-        # manually dropout these attention vectors,
-        # but input and depth flag will be kept intact, because input is passed from the embedding dropout layer
+        # manually dropout these vectors, in order to keep depth flag
         enc_context = self._input_dropout(enc_attn_fn(output)) if enc_attn_fn else None
         dec_hist_context = self._input_dropout(dec_hist_attn_fn(output)) if dec_hist_attn_fn else None
+        inputs = self._input_dropout(inputs)
 
         # depth
         rnn_inputs = filter_cat([inputs, enc_context, dec_hist_context, self._get_depth_flag(0, inputs)], dim=-1)
         h, o = self._rnn_cell(rnn_inputs, hidden)
         return h, o
 
-    def _forward_act(self, inputs: torch.Tensor, hidden, last_depth_context, enc_attn_fn, dec_hist_attn_fn):
+    def _forward_act(self, inputs: torch.Tensor, hidden, enc_attn_fn, dec_hist_attn_fn):
         """
         :param inputs: (batch, hidden_dim)
         :param hidden: some hidden state recognizable by the universal RNN cell wrapper
@@ -107,7 +106,7 @@ class ACTRNNCell(AdaptiveRNNCell):
         """
         output = self._rnn_cell.get_output_state(hidden) # output initialized as in the last time
 
-        # halting_prob_accumulation: (batch,)
+        # halting_prob_cumulation: (batch,)
         # halting_prob_list: [(batch,)]
         # hidden_list: [hidden]
         # alive_mask_list: [(batch,)]
@@ -118,7 +117,6 @@ class ACTRNNCell(AdaptiveRNNCell):
         alive_mask_list = []
 
         depth = 0
-        depth_context = last_depth_context
         while depth < self._max_computing_time and (halting_prob_acc < 1.).any():
             # current all alive tokens, which need further computation
             # alive_mask: (batch,)
@@ -127,8 +125,7 @@ class ACTRNNCell(AdaptiveRNNCell):
 
             enc_context = enc_attn_fn(output) if enc_attn_fn else None
             dec_hist_context = dec_hist_attn_fn(output) if dec_hist_attn_fn else None
-            if len(hidden_list) > 0:
-                depth_context = self._get_depth_wise_attention(output, hidden_list, alive_mask_list)
+            depth_context = self._get_depth_wise_attention(output, hidden_list)
 
             halting_input = filter_cat([output, enc_context, dec_hist_context, depth_context], dim=-1)
             # halting_prob: (batch, ) <- (batch, 1)
@@ -146,7 +143,7 @@ class ACTRNNCell(AdaptiveRNNCell):
             # alive_mask: (batch, )
             alive_mask *= (1 - new_halted)
 
-            # accumulations for newly halted positions will reach 1.0 after adding up remainder at the current timestep
+            # cumulations for newly halted positions will reach 1.0 after adding up remainder at the current timestep
             step_halting_prob = halting_prob * alive_mask + remainder * new_halted
             halting_prob_acc = halting_prob_acc + step_halting_prob
 
@@ -159,10 +156,9 @@ class ACTRNNCell(AdaptiveRNNCell):
             halting_prob_list.append(step_halting_prob)
 
             # step_inputs: (batch, hidden_dim)
-            step_inputs = filter_cat([inputs,
+            step_inputs = filter_cat([self._input_dropout(inputs),
                                       self._input_dropout(enc_context),
                                       self._input_dropout(dec_hist_context),
-                                      self._input_dropout(depth_context),
                                       self._get_depth_flag(depth, inputs)], dim=-1)
             hidden, output = self._rnn_cell(step_inputs, hidden)
 
@@ -175,12 +171,10 @@ class ACTRNNCell(AdaptiveRNNCell):
         merged_hidden = self._adaptively_merge_hidden_list(hidden_list, halting_probs, alive_masks)
         merged_output = self._rnn_cell.get_output_state(merged_hidden)
 
-        # previously, halting_prob_acc is only used for mask generation.
-        # TODO: why is this line crucial for gradients of halting_fn?
-        halting_prob_acc = (halting_probs * alive_masks).sum(1)
+        # halting_prob_acc = (halting_probs * alive_masks).sum(1)
         num_updated = alive_masks.sum(1)
 
-        return merged_hidden, merged_output, depth_context, halting_prob_acc, num_updated
+        return merged_hidden, merged_output, halting_prob_acc, num_updated
 
     def _get_depth_flag(self, depth: int, inputs: torch.Tensor):
         batch = inputs.size()[0]
@@ -216,8 +210,7 @@ class ACTRNNCell(AdaptiveRNNCell):
 
     def _get_depth_wise_attention(self,
                                   output: torch.Tensor,
-                                  previous_hidden_list: List[torch.Tensor],
-                                  alive_mask_list: List[torch.Tensor]) -> Optional[torch.Tensor]:
+                                  previous_hidden_list: List[torch.Tensor]) -> Optional[torch.Tensor]:
         """
         Get depth-wise attention over the previous hiddens
 
@@ -229,19 +222,16 @@ class ACTRNNCell(AdaptiveRNNCell):
         if self._depth_wise_attention is None:
             return None
 
-        # undefined attention for empty hidden list
-        assert len(previous_hidden_list) > 0
-
         previous_output_list = [self._rnn_cell.get_output_state(hidden)
                                 for hidden in previous_hidden_list]
 
+        if len(previous_output_list) == 0:
+            return torch.zeros_like(output)
 
         # attend_over: (batch, steps, hidden_dim)
-        # attend_mask: (batch, steps)
         # context: (batch, hidden_dim)
         attend_over = torch.stack(previous_output_list, dim=1)
-        attend_mask = torch.stack(alive_mask_list, dim=1)
-        context = self._depth_wise_attention(output, attend_over, attend_mask)
+        context = self._depth_wise_attention(output, attend_over)
 
         return context
 
