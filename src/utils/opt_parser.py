@@ -8,6 +8,8 @@ def get_trainer_opt_parser() -> argparse.ArgumentParser:
     parser.add_argument('--dataset', '-d', choices=config.DATASETS.keys(), required=True)
     # parser.add_argument('--setting', '-s', choices=config.EXPERIMENT_SETTINGS, required=True)
 
+    parser.add_argument('--seed', type=int, help='manually set the seeds for torch')
+
     parser.add_argument('--device', type=int, default=-1, help="the gpu device number to override")
     parser.add_argument('--batch', type=int, help="the batch size to override")
 

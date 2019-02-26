@@ -7,6 +7,7 @@ import os.path
 # general config
 
 DEVICE = 0
+SEED = 0
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
 SNAPSHOT_PATH = os.path.join(ROOT, 'snapshots')
 
