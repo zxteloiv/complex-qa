@@ -130,6 +130,7 @@ ADA_TRANS2SEQ_CONF[DS_ATIS] = dict(
     enc_attn="dot_product",
     dec_hist_attn="dot_product",
     act_mode='mean_field',
+    dec_cell_height=2,
 )
 
 ST_TRANSFORMER = 'transformer'

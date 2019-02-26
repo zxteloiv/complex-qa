@@ -26,6 +26,7 @@ from utils.nn import AllenNLPAttentionWrapper
 from models.transformer.encoder import TransformerEncoder
 from models.adaptive_rnn_cell import ACTRNNCell
 from models.universal_hidden_state_wrapper import UniversalHiddenStateWrapper, RNNType
+from models.stacked_rnn_cell import StackedLSTMCell, StackedGRUCell
 from allennlp.common.util import START_SYMBOL, END_SYMBOL
 
 def main():
@@ -40,7 +41,8 @@ def main():
     parser.add_argument('--enc-layers', type=int, help="layers in encoder")
     parser.add_argument('--act-mode', choices=['basic', 'random', 'mean_field'])
     parser.add_argument('--encoder', choices=['transformer', 'lstm', 'bilstm'])
-    parser.add_argument('--decoder', choices=['lstm', 'rnn', 'gru', 'ind_rnn'])
+    parser.add_argument('--decoder', choices=['lstm', 'rnn', 'gru', 'ind_rnn', 'n_lstm', 'n_gru'], )
+    parser.add_argument('--dec-cell-height', type=int, help="the height for n_layer lstm/gru")
 
     args = parser.parse_args()
 
@@ -146,7 +148,7 @@ def get_model(vocab, st_ds_conf):
 
     dec_in_dim = dec_out_dim + 1 + sum_attn_dims([enc_attn, dec_hist_attn],
                                                  [enc_out_dim, dec_out_dim])
-    rnn_cell = get_rnn_cell(st_ds_conf['decoder'], dec_in_dim, dec_out_dim)
+    rnn_cell = get_rnn_cell(st_ds_conf, dec_in_dim, dec_out_dim)
 
     halting_in_dim = dec_out_dim + sum_attn_dims([enc_attn, dec_hist_attn, dwa],
                                                  [enc_out_dim, dec_out_dim, dec_out_dim])
@@ -208,9 +210,12 @@ def get_updated_settings(args):
         st_ds_conf['encoder'] = args.encoder
     if args.decoder:
         st_ds_conf['decoder'] = args.decoder
+    if args.dec_cell_height:
+        st_ds_conf['dec_cell_height'] = args.dec_cell_height
     return st_ds_conf
 
-def get_rnn_cell(cell_type: str, input_dim: int, hidden_dim: int):
+def get_rnn_cell(st_ds_conf: dict, input_dim: int, hidden_dim: int):
+    cell_type = st_ds_conf['decoder']
     if cell_type == "lstm":
         return RNNType.LSTM(input_dim, hidden_dim)
     elif cell_type == "gru":
@@ -219,6 +224,14 @@ def get_rnn_cell(cell_type: str, input_dim: int, hidden_dim: int):
         return RNNType.IndRNN(input_dim, hidden_dim)
     elif cell_type == "rnn":
         return RNNType.VanillaRNN(input_dim, hidden_dim)
+    elif cell_type == 'n_lstm':
+        n_layer = st_ds_conf['dec_cell_height']
+        assert input_dim == hidden_dim, "for stacked rnn layer, input size must equal output size"
+        return StackedLSTMCell(hidden_dim, n_layer)
+    elif cell_type == 'n_gru':
+        n_layer = st_ds_conf['dec_cell_height']
+        assert input_dim == hidden_dim, "for stacked rnn layer, input size must equal output size"
+        return StackedGRUCell(hidden_dim, n_layer)
     else:
         raise ValueError(f"RNN type of {cell_type} not found.")
 
