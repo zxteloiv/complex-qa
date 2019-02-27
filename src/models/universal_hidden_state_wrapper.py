@@ -2,6 +2,7 @@ from typing import List, Mapping, Dict, Optional, Tuple, Union, Callable, Sequen
 import torch.nn
 
 from models.independent_rnn import IndRNNCell
+from utils.nn import filter_cat
 
 class RNNType:
     VanillaRNN = torch.nn.RNNCell
@@ -21,8 +22,13 @@ class UniversalHiddenStateWrapper(torch.nn.Module):
         self._get_output_fn = get_output_fn
         self._merge_hidden_list_fn = merge_hidden_list_fn
 
-    def forward(self, inputs, hidden):
-        hidden = self._rnn_cell(inputs, hidden)
+    def forward(self, inputs, hidden, input_aux: Optional[List] = None):
+        if input_aux is None:
+            rnn_input = inputs
+        else:
+            rnn_input = filter_cat([inputs] + input_aux, dim=1)
+
+        hidden = self._rnn_cell(rnn_input, hidden)
         output = self.get_output_state(hidden)
         return hidden, output
 

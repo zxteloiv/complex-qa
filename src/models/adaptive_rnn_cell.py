@@ -5,6 +5,7 @@ import torch.nn
 from utils.nn import AllenNLPAttentionWrapper, filter_cat
 from models.transformer.multi_head_attention import SingleTokenMHAttentionWrapper
 from models.universal_hidden_state_wrapper import UniversalHiddenStateWrapper
+from models.stacked_rnn_cell import StackedRNNCell
 
 class AdaptiveStateMode:
     BASIC = "basic"
@@ -26,7 +27,7 @@ class ACTRNNCell(AdaptiveRNNCell):
     An RNN-based cell, which adaptively computing the hidden states along depth dimension.
     """
     def __init__(self,
-                 rnn_cell: UniversalHiddenStateWrapper,
+                 rnn_cell: Union[UniversalHiddenStateWrapper, StackedRNNCell],
                  halting_fn: Callable,
                  use_act: bool,
                  act_max_layer: int = 10,
@@ -44,7 +45,7 @@ class ACTRNNCell(AdaptiveRNNCell):
         """
         super(ACTRNNCell, self).__init__()
 
-        self._rnn_cell: UniversalHiddenStateWrapper = rnn_cell
+        self._rnn_cell = rnn_cell
         self._use_act = use_act
 
         self._halting_fn = halting_fn
@@ -90,8 +91,10 @@ class ACTRNNCell(AdaptiveRNNCell):
         dec_hist_context = self._input_dropout(dec_hist_attn_fn(output)) if dec_hist_attn_fn else None
 
         # depth
-        rnn_inputs = filter_cat([inputs, enc_context, dec_hist_context, self._get_depth_flag(0, inputs)], dim=-1)
-        h, o = self._rnn_cell(rnn_inputs, hidden)
+        input_aux = [self._input_dropout(enc_context),
+                     self._input_dropout(dec_hist_context),
+                     self._get_depth_flag(0, inputs)]
+        h, o = self._rnn_cell(inputs, hidden, input_aux)
         return h, o
 
     def _forward_act(self, inputs: torch.Tensor, hidden, enc_attn_fn, dec_hist_attn_fn):
@@ -155,11 +158,10 @@ class ACTRNNCell(AdaptiveRNNCell):
             halting_prob_list.append(step_halting_prob)
 
             # step_inputs: (batch, hidden_dim)
-            step_inputs = filter_cat([inputs,
-                                      self._input_dropout(enc_context),
-                                      self._input_dropout(dec_hist_context),
-                                      self._get_depth_flag(depth, inputs)], dim=-1)
-            hidden, output = self._rnn_cell(step_inputs, hidden)
+            input_aux = [self._input_dropout(enc_context),
+                         self._input_dropout(dec_hist_context),
+                         self._get_depth_flag(depth, inputs)]
+            hidden, output = self._rnn_cell(inputs, hidden, input_aux)
 
             depth += 1
 
@@ -175,7 +177,8 @@ class ACTRNNCell(AdaptiveRNNCell):
 
         return merged_hidden, merged_output, halting_prob_acc, num_updated
 
-    def _get_depth_flag(self, depth: int, inputs: torch.Tensor):
+    @staticmethod
+    def _get_depth_flag(depth: int, inputs: torch.Tensor):
         batch = inputs.size()[0]
         if depth > 1:
             return inputs.new_zeros(batch, 1)

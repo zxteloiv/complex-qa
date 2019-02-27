@@ -2,24 +2,34 @@ from typing import List, Mapping, Dict, Optional, Tuple, Union, Callable, Sequen
 import torch
 import torch.nn
 from models.universal_hidden_state_wrapper import UniversalHiddenStateWrapper, RNNType
+from utils.nn import filter_cat
 
 class StackedRNNCell(torch.nn.Module):
-    def __init__(self, RNNType, hidden_dim, n_layers):
+    def __init__(self, RNNType, input_dim, hidden_dim, n_layers):
         super(StackedRNNCell, self).__init__()
 
         self.layer_rnns = torch.nn.ModuleList([
-            UniversalHiddenStateWrapper(RNNType(hidden_dim, hidden_dim)) for _ in range(n_layers)
+            UniversalHiddenStateWrapper(RNNType(input_dim, hidden_dim)) for _ in range(n_layers)
         ])
 
         self.hidden_dim = hidden_dim
+        self.input_dim = input_dim
 
-    def forward(self, inputs, hidden):
+    def forward(self, inputs, hidden, input_aux:Optional[List] = None):
         # hidden is a list of subhidden
         last_layer_output = inputs
 
+        if inputs.size()[1] < self.input_dim and input_aux is None:
+            raise ValueError('Dimension not match')
+
         updated_hiddens = []
         for i, rnn in enumerate(self.layer_rnns):
-            layer_hidden, last_layer_output = rnn(last_layer_output, hidden[i])
+            if input_aux is None:
+                rnn_input = last_layer_output
+            else:
+                rnn_input = filter_cat([last_layer_output] + input_aux, dim=1)
+
+            layer_hidden, last_layer_output = rnn(rnn_input, hidden[i])
             updated_hiddens.append(layer_hidden)
 
         return updated_hiddens, last_layer_output
@@ -44,17 +54,17 @@ class StackedRNNCell(torch.nn.Module):
         return init_hidden, self.get_output_state(init_hidden)
 
 class StackedLSTMCell(StackedRNNCell):
-    def __init__(self, hidden_dim, n_layers):
-        super(StackedLSTMCell, self).__init__(RNNType.LSTM, hidden_dim, n_layers)
+    def __init__(self, input_dim, hidden_dim, n_layers):
+        super(StackedLSTMCell, self).__init__(RNNType.LSTM, input_dim, hidden_dim, n_layers)
 
 class StackedGRUCell(StackedRNNCell):
-    def __init__(self, hidden_dim, n_layers):
-        super(StackedGRUCell, self).__init__(RNNType.GRU, hidden_dim, n_layers)
+    def __init__(self, input_dim, hidden_dim, n_layers):
+        super(StackedGRUCell, self).__init__(RNNType.GRU, input_dim, hidden_dim, n_layers)
 
 
 if __name__ == '__main__':
     batch, dim, L = 5, 10, 2
-    cell = StackedLSTMCell(dim, L)
+    cell = StackedLSTMCell(dim, L, L)
     f_out = torch.randn(batch, dim).float()
     h, o = cell.init_hidden_states(f_out, None)
 

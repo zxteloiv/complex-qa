@@ -161,7 +161,7 @@ def get_model(vocab, st_ds_conf):
         torch.nn.Sigmoid(),
     )
 
-    decoder = ACTRNNCell(rnn_cell=UniversalHiddenStateWrapper(rnn_cell),
+    decoder = ACTRNNCell(rnn_cell=rnn_cell,
                          halting_fn=halting_fn,
                          use_act=st_ds_conf['act'],
                          act_max_layer=st_ds_conf['act_max_layer'],
@@ -217,21 +217,19 @@ def get_updated_settings(args):
 def get_rnn_cell(st_ds_conf: dict, input_dim: int, hidden_dim: int):
     cell_type = st_ds_conf['decoder']
     if cell_type == "lstm":
-        return RNNType.LSTM(input_dim, hidden_dim)
+        return UniversalHiddenStateWrapper(RNNType.LSTM(input_dim, hidden_dim))
     elif cell_type == "gru":
-        return RNNType.GRU(input_dim, hidden_dim)
+        return UniversalHiddenStateWrapper(RNNType.GRU(input_dim, hidden_dim))
     elif cell_type == "ind_rnn":
-        return RNNType.IndRNN(input_dim, hidden_dim)
+        return UniversalHiddenStateWrapper(RNNType.IndRNN(input_dim, hidden_dim))
     elif cell_type == "rnn":
-        return RNNType.VanillaRNN(input_dim, hidden_dim)
+        return UniversalHiddenStateWrapper(RNNType.VanillaRNN(input_dim, hidden_dim))
     elif cell_type == 'n_lstm':
         n_layer = st_ds_conf['dec_cell_height']
-        assert input_dim == hidden_dim, "for stacked rnn layer, input size must equal output size"
-        return StackedLSTMCell(hidden_dim, n_layer)
+        return StackedLSTMCell(input_dim, hidden_dim, n_layer)
     elif cell_type == 'n_gru':
         n_layer = st_ds_conf['dec_cell_height']
-        assert input_dim == hidden_dim, "for stacked rnn layer, input size must equal output size"
-        return StackedGRUCell(hidden_dim, n_layer)
+        return StackedGRUCell(input_dim, hidden_dim, n_layer)
     else:
         raise ValueError(f"RNN type of {cell_type} not found.")
 
