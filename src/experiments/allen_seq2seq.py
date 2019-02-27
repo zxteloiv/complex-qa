@@ -14,11 +14,9 @@ import allennlp.common
 import allennlp.models
 import allennlp.modules
 import allennlp.predictors
-from allennlp.modules.seq2seq_encoders import Seq2SeqEncoder, PytorchSeq2SeqWrapper, StackedSelfAttentionEncoder
-from allennlp.modules.text_field_embedders import BasicTextFieldEmbedder, TextFieldEmbedder
+from allennlp.modules.seq2seq_encoders import PytorchSeq2SeqWrapper
+from allennlp.modules.text_field_embedders import BasicTextFieldEmbedder
 from allennlp.modules.token_embedders import TokenEmbedder, Embedding
-from allennlp.modules.attention import LinearAttention, BilinearAttention, DotProductAttention
-from allennlp.common.util import START_SYMBOL, END_SYMBOL
 
 import config
 

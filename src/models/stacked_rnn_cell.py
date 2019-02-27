@@ -16,6 +16,8 @@ class StackedRNNCell(torch.nn.Module):
         self.input_dim = input_dim
         self._input_dropout = torch.nn.Dropout(intermediate_dropout)
 
+    def get_layer_num(self):
+        return len(self.layer_rnns)
 
     def forward(self, inputs, hidden, input_aux:Optional[List] = None):
         # hidden is a list of subhidden
@@ -26,8 +28,7 @@ class StackedRNNCell(torch.nn.Module):
 
         updated_hiddens = []
         for i, rnn in enumerate(self.layer_rnns):
-            if i > 0:
-                last_layer_output = self._input_dropout(last_layer_output)
+            last_layer_output = self._input_dropout(last_layer_output)
 
             if input_aux is None:
                 rnn_input = last_layer_output
@@ -51,12 +52,20 @@ class StackedRNNCell(torch.nn.Module):
                   for i, layer_hidden in enumerate(layered_list) ]
         return merged
 
-    def init_hidden_states(self, forward_out, backward_out):
+    def init_hidden_states(self, forward_out, backward_out: Optional):
         init_hidden = []
         for i in range(len(self.layer_rnns)):
             h, _ = self.layer_rnns[i].init_hidden_states(forward_out, backward_out)
             init_hidden.append(h)
         return init_hidden, self.get_output_state(init_hidden)
+
+    def init_hidden_states_by_layer(self, layer_forward: List, layer_backward: Optional[List]):
+        layer_hidden = []
+        for i, rnn in enumerate(self.layer_rnns):
+            h, _ = rnn.init_hidden_states(layer_forward[i], None if layer_backward is None else layer_backward[i])
+            layer_hidden.append(h)
+
+        return layer_hidden, self.get_output_state(layer_hidden)
 
 class StackedLSTMCell(StackedRNNCell):
     def __init__(self, input_dim, hidden_dim, n_layers, intermediate_dropout = 0.):

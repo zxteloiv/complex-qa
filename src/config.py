@@ -104,6 +104,28 @@ TRANS2SEQ_CONF[DS_ATIS] = dict(
     vanilla_wiring=False,
 )
 
+ST_BASE_S2S = 'base_s2s'
+BASE_S2S_CONF = dict()
+BASE_S2S_CONF[DS_ATIS] = dict(
+    emb_sz=256,
+    batch_sz=20,
+    max_decoding_len=60,
+    num_heads=8,
+    num_enc_layers=2,
+    encoder='lstm',
+    decoder='lstm',
+    residual_dropout=.1,
+    attention_dropout=.1,
+    feedforward_dropout=.1,
+    intermediate_dropout=.5,
+    prediction_dropout=.5,
+    vanilla_wiring=False,
+    enc_attn="dot_product",
+    dec_hist_attn="dot_product",
+    dec_cell_height=2,
+    concat_attn_to_dec_input=False,
+)
+
 ST_ADA_TRANS2SEQ = 'ada_trans2s'
 ADA_TRANS2SEQ_CONF = dict()
 ADA_TRANS2SEQ_CONF[DS_ATIS] = dict(
