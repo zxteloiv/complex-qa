@@ -118,7 +118,6 @@ BASE_S2S_CONF[DS_ATIS] = dict(
     attention_dropout=.1,
     feedforward_dropout=.1,
     intermediate_dropout=.5,
-    prediction_dropout=.5,
     vanilla_wiring=False,
     enc_attn="dot_product",
     dec_hist_attn="dot_product",

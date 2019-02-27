@@ -29,7 +29,6 @@ class BaseSeq2Seq(allennlp.models.Model):
                  enc_attention: Union[AllenNLPAttentionWrapper, SingleTokenMHAttentionWrapper, None] = None,
                  dec_hist_attn: Union[AllenNLPAttentionWrapper, SingleTokenMHAttentionWrapper, None] = None,
                  scheduled_sampling_ratio: float = 0.,
-                 prediction_dropout: float = .1,
                  intermediate_dropout: float = .1,
                  concat_attn_to_dec_input: bool = False,
                  ):
@@ -56,7 +55,6 @@ class BaseSeq2Seq(allennlp.models.Model):
         self._target_namespace = target_namespace
         self._label_smoothing = label_smoothing
 
-        self._pre_projection_dropout = torch.nn.Dropout(prediction_dropout)
         self._output_projection = word_projection
 
         self._concat_attn = concat_attn_to_dec_input
@@ -195,9 +193,7 @@ class BaseSeq2Seq(allennlp.models.Model):
             inputs_embedding = self._dropout(inputs_embedding)
 
             if self._enc_attn is not None:
-                enc_attn_fn = lambda out: self._dropout(self._enc_attn_mapping(
-                    self._enc_attn(out, source_state, source_mask)
-                ))
+                enc_attn_fn = lambda out: self._enc_attn_mapping(self._enc_attn(out, source_state, source_mask))
             else:
                 enc_attn_fn = None
 
@@ -207,9 +203,9 @@ class BaseSeq2Seq(allennlp.models.Model):
             elif len(output_by_step) > 0:
                 dec_hist = torch.stack(output_by_step, dim=1)
                 dec_hist_mask = target_mask[:, :timestep] if target_mask is not None else None
-                dec_hist_attn_fn = lambda out: self._dropout(self._dec_hist_attn_mapping(
+                dec_hist_attn_fn = lambda out: self._dec_hist_attn_mapping(
                     self._dec_hist_attn(out, dec_hist, dec_hist_mask)
-                ))
+                )
 
             else:
                 dec_hist_attn_fn = lambda out: torch.zeros_like(out)
@@ -221,20 +217,19 @@ class BaseSeq2Seq(allennlp.models.Model):
 
             # step_hidden: some_hidden_var_with_unknown_internals
             # step_output: (batch, hidden_dim)
-            cat_context = [enc_context, dec_hist_context] if self._concat_attn else None
+            cat_context = [self._dropout(enc_context), self._dropout(dec_hist_context)] if self._concat_attn else None
             dec_output = self._decoder(inputs_embedding, step_hidden, cat_context)
             step_hidden, step_output = dec_output[:2]
             if len(dec_output) > 2:
                 other_output_by_step.append(tuple(dec_output[2:]))
 
             # step_logit: (batch, vocab_size)
-            step_output = self._dropout(step_output)
             if self._concat_attn:
                 proj_input = filter_cat([step_output, enc_context, dec_hist_context], dim=-1)
             else:
                 proj_input = filter_sum([step_output, enc_context, dec_hist_context])
 
-            proj_input = torch.tanh(proj_input)
+            proj_input = torch.tanh(self._dropout(proj_input))
             step_logit = self._output_projection(proj_input)
 
             output_by_step.append(step_output)

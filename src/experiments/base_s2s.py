@@ -180,7 +180,6 @@ def get_model(vocab, st_ds_conf):
                         max_decoding_step=st_ds_conf['max_decoding_len'],
                         enc_attention=enc_attn,
                         dec_hist_attn=dec_hist_attn,
-                        prediction_dropout=st_ds_conf['prediction_dropout'],
                         intermediate_dropout=st_ds_conf['intermediate_dropout'],
                         concat_attn_to_dec_input=st_ds_conf['concat_attn_to_dec_input'],
                         )
