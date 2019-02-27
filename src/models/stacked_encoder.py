@@ -16,7 +16,9 @@ class StackedEncoder(torch.nn.Module):
         last_output = inputs
         layered_output = []
         for i, enc in enumerate(self.layer_encs):
-            last_output = self.input_dropout(last_output)
+            if i > 0:
+                last_output = self.input_dropout(last_output)
+
             last_output = enc(last_output, mask)
             layered_output.append(last_output)
 

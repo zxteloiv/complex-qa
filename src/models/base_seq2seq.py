@@ -134,6 +134,7 @@ class BaseSeq2Seq(allennlp.models.Model):
         # source_mask: (batch, max_input_length), source sequence padding mask
         # source_embedding: (batch, max_input_length, embedding_sz)
         source_embedding = self._src_embedding(source)
+        source_embedding = self._dropout(source_embedding)
         source_hidden, layered_hidden = self._encoder(source_embedding, source_mask)
         return source_hidden, layered_hidden
 
@@ -166,7 +167,6 @@ class BaseSeq2Seq(allennlp.models.Model):
         # batch_start: (batch_size,)
         batch_start = source_mask.new_full((batch,), fill_value=self._start_id)
         step_hidden, step_output = init_hidden, self._decoder.get_output_state(init_hidden)
-        step_output = self._dropout(step_output)
 
         # acc_halting_probs: [(batch,)]
         # updated_num_by_step: [(batch,)]
@@ -192,6 +192,7 @@ class BaseSeq2Seq(allennlp.models.Model):
 
             # inputs_embedding: (batch, embedding_dim)
             inputs_embedding = self._tgt_embedding(step_inputs)
+            inputs_embedding = self._dropout(inputs_embedding)
 
             if self._enc_attn is not None:
                 enc_attn_fn = lambda out: self._dropout(self._enc_attn_mapping(
@@ -223,18 +224,18 @@ class BaseSeq2Seq(allennlp.models.Model):
             cat_context = [enc_context, dec_hist_context] if self._concat_attn else None
             dec_output = self._decoder(inputs_embedding, step_hidden, cat_context)
             step_hidden, step_output = dec_output[:2]
-            step_output = self._dropout(step_output)
             if len(dec_output) > 2:
                 other_output_by_step.append(tuple(dec_output[2:]))
 
             # step_logit: (batch, vocab_size)
+            step_output = self._dropout(step_output)
             if self._concat_attn:
                 proj_input = filter_cat([step_output, enc_context, dec_hist_context], dim=-1)
             else:
                 proj_input = filter_sum([step_output, enc_context, dec_hist_context])
 
             proj_input = torch.tanh(proj_input)
-            step_logit = self._output_projection(self._pre_projection_dropout(proj_input))
+            step_logit = self._output_projection(proj_input)
 
             output_by_step.append(step_output)
             logits_by_step.append(step_logit)
