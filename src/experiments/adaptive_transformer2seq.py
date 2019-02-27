@@ -226,10 +226,10 @@ def get_rnn_cell(st_ds_conf: dict, input_dim: int, hidden_dim: int):
         return UniversalHiddenStateWrapper(RNNType.VanillaRNN(input_dim, hidden_dim))
     elif cell_type == 'n_lstm':
         n_layer = st_ds_conf['dec_cell_height']
-        return StackedLSTMCell(input_dim, hidden_dim, n_layer)
+        return StackedLSTMCell(input_dim, hidden_dim, n_layer, st_ds_conf['decoder_dropout'])
     elif cell_type == 'n_gru':
         n_layer = st_ds_conf['dec_cell_height']
-        return StackedGRUCell(input_dim, hidden_dim, n_layer)
+        return StackedGRUCell(input_dim, hidden_dim, n_layer, st_ds_conf['decoder_dropout'])
     else:
         raise ValueError(f"RNN type of {cell_type} not found.")
 
