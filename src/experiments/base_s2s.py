@@ -161,7 +161,11 @@ def get_model(vocab, st_ds_conf):
         dec_in_dim = dec_out_dim
     rnn_cell = get_rnn_cell(st_ds_conf, dec_in_dim, dec_out_dim)
 
-    proj_in_dim = dec_out_dim + sum_attn_dims([enc_attn, dec_hist_attn], [enc_out_dim, dec_out_dim])
+    if st_ds_conf['concat_attn_to_dec_input']:
+        proj_in_dim = dec_out_dim + sum_attn_dims([enc_attn, dec_hist_attn], [enc_out_dim, dec_out_dim])
+    else:
+        proj_in_dim = dec_out_dim
+
     word_proj = torch.nn.Linear(proj_in_dim, vocab.get_vocab_size('lftokens'))
 
     model = BaseSeq2Seq(vocab=vocab,
@@ -177,6 +181,7 @@ def get_model(vocab, st_ds_conf):
                         enc_attention=enc_attn,
                         dec_hist_attn=dec_hist_attn,
                         prediction_dropout=st_ds_conf['prediction_dropout'],
+                        intermediate_dropout=st_ds_conf['intermediate_dropout'],
                         concat_attn_to_dec_input=st_ds_conf['concat_attn_to_dec_input'],
                         )
     return model

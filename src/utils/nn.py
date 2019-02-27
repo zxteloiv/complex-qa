@@ -137,3 +137,13 @@ def filter_cat(iterable, dim):
     items = [item for item in iterable if item is not None]
     res = torch.cat(items, dim=dim)
     return res
+
+def filter_sum(iterable):
+    items = [item for item in iterable if item is not None]
+    res = None
+    for item in items:
+        if res is None:
+            res = item
+        else:
+            res = res + item
+    return res
