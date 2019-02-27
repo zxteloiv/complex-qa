@@ -196,7 +196,7 @@ class BaseSeq2Seq(allennlp.models.Model):
 
             if self._enc_attn is not None:
                 enc_attn_fn = lambda out: self._dropout(self._enc_attn_mapping(
-                    self._dropout(self._enc_attn(out, source_state, source_mask))
+                    self._enc_attn(out, source_state, source_mask)
                 ))
             else:
                 enc_attn_fn = None
@@ -208,7 +208,7 @@ class BaseSeq2Seq(allennlp.models.Model):
                 dec_hist = torch.stack(output_by_step, dim=1)
                 dec_hist_mask = target_mask[:, :timestep] if target_mask is not None else None
                 dec_hist_attn_fn = lambda out: self._dropout(self._dec_hist_attn_mapping(
-                    self._dropout(self._dec_hist_attn(out, dec_hist, dec_hist_mask))
+                    self._dec_hist_attn(out, dec_hist, dec_hist_mask)
                 ))
 
             else:
