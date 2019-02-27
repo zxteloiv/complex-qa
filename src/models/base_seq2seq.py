@@ -229,7 +229,7 @@ class BaseSeq2Seq(allennlp.models.Model):
             else:
                 proj_input = filter_sum([step_output, enc_context, dec_hist_context])
 
-            proj_input = torch.tanh(self._dropout(proj_input))
+            proj_input = self._dropout(proj_input)
             step_logit = self._output_projection(proj_input)
 
             output_by_step.append(step_output)
