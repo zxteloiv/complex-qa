@@ -84,13 +84,10 @@ class BaseSeq2Seq(allennlp.models.Model):
 
             # predictions: (batch, seq_len)
             # logits: (batch, seq_len, vocab_size)
-            # acc_halting_probs: (batch, seq_len)
-            # n_updated: (batch, seq_len)
             predictions, logits, others = self._forward_loop(state, source_mask, init_hidden,
                                                              target[:, :-1], target_mask[:, :-1])
             loss = self._get_loss(target[:, 1:].contiguous(), target_mask[:, 1:].float(), logits, others)
-            if self._bleu:
-                self._bleu(predictions, target[:, 1:])
+            self._compute_metric(predictions, target[:, 1:])
 
         else:
             predictions, logits, others = self._forward_loop(state, source_mask, init_hidden, None, None)
@@ -242,8 +239,6 @@ class BaseSeq2Seq(allennlp.models.Model):
 
         # predictions: (batch, seq_len)
         # logits: (batch, seq_len, vocab_size)
-        # acc_halting_probs: (batch, seq_len)
-        # n_updated: (batch, seq_len)
         predictions = torch.stack(predictions_by_step[1:], dim=1)
         logits = torch.stack(logits_by_step, dim=1)
 
@@ -281,4 +276,7 @@ class BaseSeq2Seq(allennlp.models.Model):
 
         return self._decoder.init_hidden_states_by_layer(forward, backward)
 
+    def _compute_metric(self, predictions, labels):
+        if self._bleu:
+            self._bleu(predictions, labels)
 
