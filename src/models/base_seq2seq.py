@@ -84,9 +84,8 @@ class BaseSeq2Seq(allennlp.models.Model):
 
             # predictions: (batch, seq_len)
             # logits: (batch, seq_len, vocab_size)
-            predictions, logits, others = self._forward_loop(state, source_mask, init_hidden,
-                                                             target[:, :-1], target_mask[:, :-1])
-            loss = self._get_loss(target[:, 1:].contiguous(), target_mask[:, 1:].float(), logits, others)
+            predictions, logits, others = self._forward_loop(state, source_mask, init_hidden, target, target_mask)
+            loss = self._get_loss(target, target_mask.float(), logits, others)
             self._compute_metric(predictions, target[:, 1:])
 
         else:
@@ -154,7 +153,7 @@ class BaseSeq2Seq(allennlp.models.Model):
         batch = source_state.size()[0]
 
         if target is not None:
-            num_decoding_steps = target.size()[1]
+            num_decoding_steps = target.size()[1] - 1
         else:
             num_decoding_steps = self._max_decoding_step
 
@@ -162,6 +161,11 @@ class BaseSeq2Seq(allennlp.models.Model):
         # batch_start: (batch_size,)
         batch_start = source_mask.new_full((batch,), fill_value=self._start_id)
         step_hidden, step_output = init_hidden, self._decoder.get_output_state(init_hidden)
+
+        if self._enc_attn is not None:
+            enc_attn_fn = lambda out: self._enc_attn_mapping(self._enc_attn(out, source_state, source_mask))
+        else:
+            enc_attn_fn = None
 
         # acc_halting_probs: [(batch,)]
         # updated_num_by_step: [(batch,)]
@@ -189,11 +193,6 @@ class BaseSeq2Seq(allennlp.models.Model):
             inputs_embedding = self._tgt_embedding(step_inputs)
             inputs_embedding = self._dropout(inputs_embedding)
 
-            if self._enc_attn is not None:
-                enc_attn_fn = lambda out: self._enc_attn_mapping(self._enc_attn(out, source_state, source_mask))
-            else:
-                enc_attn_fn = None
-
             if self._dec_hist_attn is None:
                 dec_hist_attn_fn = None
 
@@ -208,7 +207,6 @@ class BaseSeq2Seq(allennlp.models.Model):
                 dec_hist_attn_fn = lambda out: torch.zeros_like(out)
 
             # compute attention context before the output is updated
-
             enc_context = enc_attn_fn(step_output) if enc_attn_fn else None
             dec_hist_context = dec_hist_attn_fn(step_output) if dec_hist_attn_fn else None
 
@@ -251,7 +249,7 @@ class BaseSeq2Seq(allennlp.models.Model):
         return all_metrics
 
     def _get_loss(self, target, target_mask, logits, other_output_by_step):
-        loss_pred = util.sequence_cross_entropy_with_logits(logits, target, target_mask,
+        loss_pred = util.sequence_cross_entropy_with_logits(logits, target[:, 1:].contiguous(), target_mask[:, 1:],
                                                             label_smoothing=self._label_smoothing)
         loss = loss_pred
         return loss
