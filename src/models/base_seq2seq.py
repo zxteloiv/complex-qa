@@ -206,7 +206,8 @@ class BaseSeq2Seq(allennlp.models.Model):
             else:
                 dec_hist_attn_fn = lambda out: torch.zeros_like(out)
 
-            dec_out = self._run_decoder(target[:, timestep + 1], inputs_embedding, step_hidden, step_output,
+            dec_out = self._run_decoder(target[:, timestep + 1] if target is not None else None,
+                                        inputs_embedding, step_hidden, step_output,
                                         enc_attn_fn, dec_hist_attn_fn)
             step_hidden, step_output, step_logit = dec_out[:3]
             if len(dec_out) > 3:
@@ -236,12 +237,11 @@ class BaseSeq2Seq(allennlp.models.Model):
         # step_hidden: some_hidden_var_with_unknown_internals
         # step_output: (batch, hidden_dim)
         cat_context = [self._dropout(enc_context),
-                       self._dropout(dec_hist_context),
-                       inputs_embedding.new_zeros(batch,)] if self._concat_attn else None
+                       self._dropout(dec_hist_context)] if self._concat_attn else None
         dec_output = self._decoder(inputs_embedding, step_hidden, cat_context)
         step_hidden, step_output = dec_output[:2]
 
-        step_logit = self._get_step_projection([step_output, enc_context, dec_hist_context])
+        step_logit = self._get_step_projection(step_output, enc_context, dec_hist_context)
 
         return step_hidden, step_output, step_logit
 

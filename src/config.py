@@ -122,7 +122,7 @@ BASE_S2S_CONF[DS_ATIS] = dict(
     enc_attn="dot_product",
     dec_hist_attn="dot_product",
     dec_cell_height=2,
-    concat_attn_to_dec_input=False,
+    concat_attn_to_dec_input=True,
 )
 
 ST_ADA_TRANS2SEQ = 'ada_trans2s'
