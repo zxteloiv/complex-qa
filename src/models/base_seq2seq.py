@@ -1,4 +1,4 @@
-from typing import Union, Optional, List, Tuple, Dict
+from typing import Union, Optional, List, Tuple, Dict, Any
 import numpy as np
 import torch
 import torch.nn
@@ -84,12 +84,12 @@ class BaseSeq2Seq(allennlp.models.Model):
 
             # predictions: (batch, seq_len)
             # logits: (batch, seq_len, vocab_size)
-            predictions, logits = self._forward_loop(state, source_mask, init_hidden, target, target_mask)
-            loss = self._get_loss(target, target_mask.float(), logits)
+            predictions, logits, others = self._forward_loop(state, source_mask, init_hidden, target, target_mask)
+            loss = self._get_loss(target, target_mask.float(), logits, others)
             self._compute_metric(predictions, target[:, 1:])
 
         else:
-            predictions, logits = self._forward_loop(state, source_mask, init_hidden, None, None)
+            predictions, logits, _ = self._forward_loop(state, source_mask, init_hidden, None, None)
             loss = [-1]
 
         output = {
@@ -138,7 +138,7 @@ class BaseSeq2Seq(allennlp.models.Model):
                       init_hidden: torch.Tensor,
                       target: Optional[torch.LongTensor],
                       target_mask: Optional[torch.LongTensor],
-                      ) -> Tuple[torch.Tensor, torch.Tensor]:
+                      ) -> Tuple[torch.Tensor, torch.Tensor, Any]:
         """
         Do the decoding process for training and prediction
 
@@ -173,6 +173,7 @@ class BaseSeq2Seq(allennlp.models.Model):
         # a list of predicted token ids at each step: [(batch,)]
         logits_by_step = []
         output_by_step = []
+        others_by_step = []
         predictions_by_step = [batch_start]
         for timestep in range(num_decoding_steps):
             if self.training and np.random.rand(1).item() < self._scheduled_sampling_ratio:
@@ -205,24 +206,11 @@ class BaseSeq2Seq(allennlp.models.Model):
             else:
                 dec_hist_attn_fn = lambda out: torch.zeros_like(out)
 
-            # compute attention context before the output is updated
-            enc_context = enc_attn_fn(step_output) if enc_attn_fn else None
-            dec_hist_context = dec_hist_attn_fn(step_output) if dec_hist_attn_fn else None
-
-            # step_hidden: some_hidden_var_with_unknown_internals
-            # step_output: (batch, hidden_dim)
-            cat_context = [self._dropout(enc_context), self._dropout(dec_hist_context)] if self._concat_attn else None
-            dec_output = self._decoder(inputs_embedding, step_hidden, cat_context)
-            step_hidden, step_output = dec_output[:2]
-
-            # step_logit: (batch, vocab_size)
-            if self._concat_attn:
-                proj_input = filter_cat([step_output, enc_context, dec_hist_context], dim=-1)
-            else:
-                proj_input = filter_sum([step_output, enc_context, dec_hist_context])
-
-            proj_input = self._dropout(proj_input)
-            step_logit = self._output_projection(proj_input)
+            dec_out = self._run_decoder(target[:, timestep + 1], inputs_embedding, step_hidden, step_output,
+                                        enc_attn_fn, dec_hist_attn_fn)
+            step_hidden, step_output, step_logit = dec_out[:3]
+            if len(dec_out) > 3:
+                others_by_step.append(dec_out[3:])
 
             output_by_step.append(step_output)
             logits_by_step.append(step_logit)
@@ -237,7 +225,37 @@ class BaseSeq2Seq(allennlp.models.Model):
         predictions = torch.stack(predictions_by_step[1:], dim=1)
         logits = torch.stack(logits_by_step, dim=1)
 
-        return predictions, logits
+        return predictions, logits, others_by_step
+
+    def _run_decoder(self, step_target, inputs_embedding, step_hidden, step_output, enc_attn_fn, dec_hist_attn_fn):
+        batch = inputs_embedding.size()[0]
+        # compute attention context before the output is updated
+        enc_context = enc_attn_fn(step_output) if enc_attn_fn else None
+        dec_hist_context = dec_hist_attn_fn(step_output) if dec_hist_attn_fn else None
+
+        # step_hidden: some_hidden_var_with_unknown_internals
+        # step_output: (batch, hidden_dim)
+        cat_context = [self._dropout(enc_context),
+                       self._dropout(dec_hist_context),
+                       inputs_embedding.new_zeros(batch,)] if self._concat_attn else None
+        dec_output = self._decoder(inputs_embedding, step_hidden, cat_context)
+        step_hidden, step_output = dec_output[:2]
+
+        step_logit = self._get_step_projection([step_output, enc_context, dec_hist_context])
+
+        return step_hidden, step_output, step_logit
+
+    def _get_step_projection(self, *inputs):
+        # step_logit: (batch, vocab_size)
+        if self._concat_attn:
+            proj_input = filter_cat(inputs, dim=-1)
+        else:
+            proj_input = filter_sum(inputs)
+
+        proj_input = self._dropout(proj_input)
+        step_logit = self._output_projection(proj_input)
+        return step_logit
+
 
     def get_metrics(self, reset: bool = False) -> Dict[str, float]:
         all_metrics: Dict[str, float] = {}
@@ -245,7 +263,7 @@ class BaseSeq2Seq(allennlp.models.Model):
             all_metrics.update(self._bleu.get_metric(reset=reset))
         return all_metrics
 
-    def _get_loss(self, target, target_mask, logits):
+    def _get_loss(self, target, target_mask, logits, other):
         loss_pred = util.sequence_cross_entropy_with_logits(logits, target[:, 1:].contiguous(), target_mask[:, 1:],
                                                             label_smoothing=self._label_smoothing)
         loss = loss_pred
