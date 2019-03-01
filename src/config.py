@@ -125,6 +125,32 @@ BASE_S2S_CONF[DS_ATIS] = dict(
     concat_attn_to_dec_input=True,
 )
 
+ST_UNC_S2S = 'unc_s2s'
+UNC_S2S_CONF = dict()
+UNC_S2S_CONF[DS_ATIS] = dict(
+    emb_sz=256,
+    batch_sz=20,
+    max_decoding_len=60,
+    num_heads=2,
+    num_enc_layers=2,
+    encoder='lstm',
+    residual_dropout=.1,
+    attention_dropout=.1,
+    feedforward_dropout=.1,
+    intermediate_dropout=.5,
+    vanilla_wiring=False,
+    decoder='n_lstm',
+    enc_attn="dot_product",
+    dec_hist_attn="dot_product",
+    dec_cell_height=2,
+    concat_attn_to_dec_input=True,
+    model_mode=0,   # 0: train s2s; 1: train RL unc; 2: joint
+    scheduled_sampling=.2,
+    pondering_limit=3,
+    uncertainty_sample_num=10,
+    uncertainty_loss_weight=1.,
+)
+
 ST_ADA_TRANS2SEQ = 'ada_trans2s'
 ADA_TRANS2SEQ_CONF = dict()
 ADA_TRANS2SEQ_CONF[DS_ATIS] = dict(

@@ -207,8 +207,7 @@ class BaseSeq2Seq(allennlp.models.Model):
                 dec_hist_attn_fn = lambda out: torch.zeros_like(out)
 
             dec_out = self._run_decoder(target[:, timestep + 1] if target is not None else None,
-                                        inputs_embedding, step_hidden, step_output,
-                                        enc_attn_fn, dec_hist_attn_fn)
+                                        inputs_embedding, step_hidden, step_output, enc_attn_fn, dec_hist_attn_fn)
             step_hidden, step_output, step_logit = dec_out[:3]
             if len(dec_out) > 3:
                 others_by_step.append(dec_out[3:])
