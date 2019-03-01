@@ -147,7 +147,7 @@ UNC_S2S_CONF[DS_ATIS] = dict(
     model_mode=0,   # 0: train s2s; 1: train RL unc; 2: joint
     scheduled_sampling=.2,
     pondering_limit=3,
-    uncertainty_sample_num=10,
+    uncertainty_sample_num=5,
     uncertainty_loss_weight=1.,
 )
 

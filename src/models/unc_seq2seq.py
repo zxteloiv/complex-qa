@@ -62,7 +62,7 @@ class UncSeq2Seq(BaseSeq2Seq):
         out_dim = self._decoder.hidden_dim
         self.unc_fn = torch.nn.Sequential(
             torch.nn.Linear(out_dim, out_dim),
-            torch.nn.SELU(),
+            torch.nn.Tanh(),
             torch.nn.Linear(out_dim, 1),
             torch.nn.Sigmoid()
         )
@@ -72,7 +72,7 @@ class UncSeq2Seq(BaseSeq2Seq):
         batch = inputs_embedding.size()[0]
         enc_context, dec_hist_context = None, None
         # alive: (batch, 1)
-        alive = inputs_embedding.new_ones(batch, 1, dtype=torch.long, requires_grad=False)
+        alive = inputs_embedding.new_ones(batch, 1, requires_grad=False)
 
         # all_action_log_probs = [(batch, 1)]
         # all_action_rewards = [(batch, 1)]
@@ -110,15 +110,22 @@ class UncSeq2Seq(BaseSeq2Seq):
             # make a choice that is either 0 or 1 at every position
             choice = halting_prob.bernoulli()
 
-            if self.training and step_target is not None:
+            if step_target is not None:
                 action_probs = halting_prob * choice + (1 - halting_prob) * (1 - choice)
                 all_action_log_probs.append(alive * (action_probs + 1e-20).log())
 
                 # compute for the current step the rewards
-                # step_reward: (batch,)
-                step_reward = self._get_step_reward(step_target, inputs_embedding,
-                                                    last_hidden, cat_context, pondering_flag)
-                all_action_rewards.append(step_reward.unsqueeze(-1))
+                # step_unc: (batch,)
+                step_unc = self._get_step_uncertainty(step_target, inputs_embedding,
+                                                      last_hidden, cat_context, pondering_flag)
+                step_unc = step_unc.unsqueeze(-1)
+                step_reward = choice * step_unc + (1 - choice) * (1 - step_unc)
+
+                new_logit = self._get_step_projection(new_output, enc_context, dec_hist_context)
+                new_pred = new_logit.argmax(dim=-1)
+                correctness = (new_pred == step_target).float()
+                step_reward *= correctness.unsqueeze(-1)
+                all_action_rewards.append(step_reward)
 
             # if an item within this batch is alive, the new_output will be used next time,
             # otherwise, the last_output will be retained.
@@ -132,7 +139,7 @@ class UncSeq2Seq(BaseSeq2Seq):
 
         return last_hidden, last_output, step_logit, all_action_log_probs, all_action_rewards
 
-    def _get_step_reward(self, step_target, inputs_embedding, last_hidden, cat_context, pondering_flag):
+    def _get_step_uncertainty(self, step_target, inputs_embedding, last_hidden, cat_context, pondering_flag):
         with torch.no_grad():
             is_orignally_training = self.training
             if not self.training:
@@ -144,7 +151,7 @@ class UncSeq2Seq(BaseSeq2Seq):
 
             all_pass_prob = []
             for _ in range(self._unc_est_num):
-                dec_output = self._decoder(inputs_embedding, last_hidden, cat_context + pondering_flag)
+                dec_output = self._decoder(inputs_embedding, last_hidden, cat_context + [pondering_flag])
                 _, new_output = dec_output[:2]
 
                 if self._concat_attn:
@@ -164,11 +171,18 @@ class UncSeq2Seq(BaseSeq2Seq):
             # uncertainty: (batch,)
             concated_probs = torch.cat(all_pass_prob, dim=-1)
             uncertainty = concated_probs.var(dim=1)
+            # prob_mean = concated_probs.mean(dim=1)
+
+            # the lower uncertainty the better, the greater probability the better
+            # reward = (-uncertainty) * prob_mean
+            # reward = -uncertainty
+
+            scaled_unc = torch.stack([uncertainty, torch.full_like(uncertainty, 0.15)], dim=1).max(-1)[0] / 0.15
 
             if not is_orignally_training:
                 self.eval()
 
-            return uncertainty
+            return scaled_unc
 
     def _get_loss(self, target, target_mask, logits, others_by_step):
         loss_nll = super(UncSeq2Seq, self)._get_loss(target, target_mask, logits, others_by_step)
@@ -184,8 +198,8 @@ class UncSeq2Seq(BaseSeq2Seq):
         action_rewards = torch.cat(all_action_rewards, dim=1)
         action_log_probs = torch.cat(all_action_log_probs, dim=1)
 
-        loss_unc = action_rewards * action_log_probs
-        loss_unc = loss_unc.mean(dim=1).mean(dim=0) # average on the tokens then within the batch
+        loss_unc = - action_rewards * action_log_probs * 10
+        loss_unc = loss_unc.sum(dim=1).mean(dim=0) # sum for the tokens then average within the batch
 
         if self._model_mode == 1:
             return loss_unc
