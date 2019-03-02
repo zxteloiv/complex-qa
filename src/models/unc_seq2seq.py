@@ -123,9 +123,8 @@ class UncSeq2Seq(BaseSeq2Seq):
 
                 new_logit = self._get_step_projection(new_output, enc_context, dec_hist_context)
                 new_pred = new_logit.argmax(dim=-1)
-                correctness = (new_pred == step_target).float().unsqueeze(-1)
-                penalty = torch.full_like(step_reward, -0.2)  # a fixed negative reward
-                step_reward = correctness * step_reward + (1 - correctness) * penalty
+                correctness = (new_pred == step_target).float()
+                step_reward *= correctness.unsqueeze(-1)
                 all_action_rewards.append(step_reward)
 
             # if an item within this batch is alive, the new_output will be used next time,
