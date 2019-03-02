@@ -165,6 +165,7 @@ def get_model(vocab, st_ds_conf):
                        max_pondering=st_ds_conf['pondering_limit'],
                        uncertainty_sample_num=st_ds_conf['uncertainty_sample_num'],
                        uncertainty_loss_weight=st_ds_conf['uncertainty_loss_weight'],
+                       reinforcement_discount=st_ds_conf['reward_discount'],
                        )
     return model
 

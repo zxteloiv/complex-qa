@@ -149,6 +149,7 @@ UNC_S2S_CONF[DS_ATIS] = dict(
     pondering_limit=3,
     uncertainty_sample_num=5,
     uncertainty_loss_weight=1.,
+    reward_discount=.5,
 )
 
 ST_ADA_TRANS2SEQ = 'ada_trans2s'

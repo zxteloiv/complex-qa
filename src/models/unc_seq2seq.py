@@ -37,6 +37,7 @@ class UncSeq2Seq(BaseSeq2Seq):
                  max_pondering: int = 3,
                  uncertainty_sample_num: int = 10,
                  uncertainty_loss_weight: int = 1.,
+                 reinforcement_discount: float = 0.,
                  ):
         super(UncSeq2Seq, self).__init__(vocab, encoder, decoder, word_projection,
                                          source_embedding, target_embedding, target_namespace,
@@ -58,6 +59,8 @@ class UncSeq2Seq(BaseSeq2Seq):
         self._unc_est_num = uncertainty_sample_num
 
         self._unc_loss_weight = uncertainty_loss_weight
+
+        self._reward_discount = reinforcement_discount
 
         out_dim = self._decoder.hidden_dim
         self.unc_fn = torch.nn.Sequential(
@@ -194,6 +197,11 @@ class UncSeq2Seq(BaseSeq2Seq):
         all_action_rewards = reduce(lambda x, y: x + y, action_rewards_segment)
 
         assert len(all_action_rewards) == len(all_action_log_probs)
+
+        n_steps = len(all_action_rewards)
+        if n_steps > 1:
+            for step in range(n_steps - 2, -1, -1): # [L - 2, L - 1, ..., 0]
+                all_action_rewards[step] += all_action_rewards[step + 1] * self._reward_discount
 
         action_rewards = torch.cat(all_action_rewards, dim=1)
         action_log_probs = torch.cat(all_action_log_probs, dim=1)
