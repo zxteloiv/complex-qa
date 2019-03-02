@@ -92,6 +92,7 @@ def run_model(args):
             cuda_device=config.DEVICE,
             num_epochs=config.TRAINING_LIMIT,
             grad_clipping=config.GRAD_CLIPPING,
+            num_serialized_models_to_keep=-1,
         )
 
         trainer.train()
