@@ -134,7 +134,9 @@ class UncSeq2Seq(BaseSeq2Seq):
             # otherwise, the last_output will be retained.
             # i.e., last_output = new_output if alive == 1, otherwise last_output = last_output if alive == 0
             last_output = last_output * (1 - alive) + new_output * alive
-            last_hidden = new_hidden
+            last_hidden = self._decoder.merge_hidden_list([last_hidden, new_hidden],
+                                                          torch.cat([1 - alive, alive], dim=1))
+
             # udpate survivors for the next time step
             alive = alive * choice
 
