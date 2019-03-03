@@ -76,6 +76,8 @@ def run_model(args):
         iterator.index_with(vocab)
 
         optim = torch.optim.Adam(model.parameters(), lr=config.ADAM_LR, betas=config.ADAM_BETAS, eps=config.ADAM_EPS)
+        if args.fine_tune:
+            optim = torch.optim.SGD(model.parameters(), lr=config.SGD_LR)
 
         savepath = os.path.join(config.SNAPSHOT_PATH, args.dataset, 'unc_s2s',
                                 datetime.datetime.now().strftime('%Y%m%d-%H%M%S') + "--" + args.memo)

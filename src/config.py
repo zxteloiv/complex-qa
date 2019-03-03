@@ -21,6 +21,8 @@ ADAM_EPS = 1e-9
 
 GRAD_CLIPPING = 5
 
+SGD_LR = 1e-2
+
 # ======================
 # dataset config
 

@@ -18,6 +18,7 @@ def get_trainer_opt_parser() -> argparse.ArgumentParser:
 
     parser.add_argument('--memo', type=str, default="", help="used to remember some runtime configurations")
     parser.add_argument('--epoch', type=int, help="the training limit in number of epochs")
+    parser.add_argument('--fine-tune', action="store_true")
 
     return parser
 
