@@ -122,25 +122,23 @@ def get_model(vocab, st_ds_conf):
                                                   embedding_dim=emb_sz)
 
     encoder = get_encoder(st_ds_conf)
-    enc_out_dim = encoder.get_output_dim()
     dec_out_dim = emb_sz
 
     dec_hist_attn = get_attention(st_ds_conf, st_ds_conf['dec_hist_attn'])
-    enc_attn = get_attention(st_ds_conf, st_ds_conf['enc_attn'])
-    if st_ds_conf['enc_attn'] == 'dot_product':
-        assert enc_out_dim == dec_out_dim, "encoder hidden states must be able to multiply with decoder output"
+    enc_attn = get_attention(st_ds_conf, st_ds_conf['enc_attn'], dec_out_dim, encoder.get_output_dim())
 
     def sum_attn_dims(attns, dims):
         return sum(dim for attn, dim in zip(attns, dims) if attn is not None)
 
+    # encoder attention also uses the decoder output dimension because of the attention linear mapping
     if st_ds_conf['concat_attn_to_dec_input']:
-        dec_in_dim = dec_out_dim + sum_attn_dims([enc_attn, dec_hist_attn], [enc_out_dim, dec_out_dim]) + 1
+        dec_in_dim = dec_out_dim + 1 + sum_attn_dims([enc_attn, dec_hist_attn], [dec_out_dim, dec_out_dim])
     else:
         dec_in_dim = dec_out_dim + 1
     rnn_cell = get_rnn_cell(st_ds_conf, dec_in_dim, dec_out_dim)
 
     if st_ds_conf['concat_attn_to_dec_input']:
-        proj_in_dim = dec_out_dim + sum_attn_dims([enc_attn, dec_hist_attn], [enc_out_dim, dec_out_dim])
+        proj_in_dim = dec_out_dim + sum_attn_dims([enc_attn, dec_hist_attn], [dec_out_dim, dec_out_dim])
     else:
         proj_in_dim = dec_out_dim
 
@@ -195,10 +193,15 @@ def get_encoder(st_ds_conf: dict):
             for _ in range(st_ds_conf['num_enc_layers'])
         ], emb_sz, emb_sz, input_dropout=st_ds_conf['intermediate_dropout'])
     elif st_ds_conf['encoder'] == 'bilstm':
-        encoder = StackedEncoder([
-            PytorchSeq2SeqWrapper(torch.nn.LSTM(emb_sz, emb_sz, batch_first=True, bidirectional=True))
-            for _ in range(st_ds_conf['num_enc_layers'])
-        ], emb_sz, emb_sz, input_dropout=st_ds_conf['intermediate_dropout'])
+        encoder = StackedEncoder(
+            [
+                PytorchSeq2SeqWrapper(torch.nn.LSTM(emb_sz, emb_sz, batch_first=True, bidirectional=True))
+            ] + [
+                PytorchSeq2SeqWrapper(torch.nn.LSTM(emb_sz * 2, emb_sz, batch_first=True, bidirectional=True))
+                for _ in range(st_ds_conf['num_enc_layers'] - 1)
+            ],
+            emb_sz, emb_sz * 2, input_dropout=st_ds_conf['intermediate_dropout']
+        )
     elif st_ds_conf['encoder'] == 'transformer':
         encoder = StackedEncoder([
             TransformerEncoder(input_dim=emb_sz,
@@ -210,7 +213,7 @@ def get_encoder(st_ds_conf: dict):
                                attention_dropout=st_ds_conf['attention_dropout'],
                                )
             for _ in range(st_ds_conf['num_enc_layers'])
-        ], emb_sz, emb_sz, input_dropout=st_ds_conf['intermediate_dropout'])
+        ], emb_sz, emb_sz, input_dropout=0.)
     else:
         assert False
     return encoder
@@ -234,13 +237,17 @@ def get_rnn_cell(st_ds_conf: dict, input_dim: int, hidden_dim: int):
     else:
         raise ValueError(f"RNN type of {cell_type} not found.")
 
-def get_attention(st_ds_conf, attn_type):
+def get_attention(st_ds_conf, attn_type, *dims):
     emb_sz = st_ds_conf['emb_sz']   # dim for both the decoder output and the encoder output
     attn_type = attn_type.lower()
     if attn_type == "bilinear":
-        attn = BilinearAttention(vector_dim=emb_sz, matrix_dim=emb_sz)
+        if len(dims) < 2:
+            dims = [emb_sz, emb_sz]
+        attn = BilinearAttention(vector_dim=dims[0], matrix_dim=dims[1])
         attn = AllenNLPAttentionWrapper(attn, st_ds_conf['attention_dropout'])
     elif attn_type == "dot_product":
+        if len(dims) >= 2:
+            assert dims[0] == dims[1], "encoder hidden states must be able to multiply with decoder output"
         attn = DotProductAttention()
         attn = AllenNLPAttentionWrapper(attn, st_ds_conf['attention_dropout'])
     elif attn_type == "multihead":

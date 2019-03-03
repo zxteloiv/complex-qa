@@ -235,8 +235,11 @@ class BaseSeq2Seq(allennlp.models.Model):
 
         # step_hidden: some_hidden_var_with_unknown_internals
         # step_output: (batch, hidden_dim)
-        cat_context = [self._dropout(enc_context),
-                       self._dropout(dec_hist_context)] if self._concat_attn else None
+        cat_context = []
+        if self._concat_attn and enc_context is not None:
+            cat_context.append(self._dropout(enc_context))
+        if self._concat_attn and dec_hist_context is not None:
+            cat_context.append(self._dropout(dec_hist_context))
         dec_output = self._decoder(inputs_embedding, step_hidden, cat_context)
         step_hidden, step_output = dec_output[:2]
 

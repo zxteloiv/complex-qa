@@ -93,8 +93,11 @@ class UncSeq2Seq(BaseSeq2Seq):
 
             # step_hidden: some_hidden_var_with_unknown_internals
             # step_output: (batch, hidden_dim)
-            cat_context = [self._dropout(enc_context) if self._concat_attn else None,
-                           self._dropout(dec_hist_context) if self._concat_attn else None,]
+            cat_context = []
+            if self._concat_attn and enc_context is not None:
+                cat_context.append(self._dropout(enc_context))
+            if self._concat_attn and dec_hist_context is not None:
+                cat_context.append(self._dropout(dec_hist_context))
             dec_output = self._decoder(inputs_embedding, last_hidden, cat_context + [pondering_flag])
             new_hidden, new_output = dec_output[:2]
 

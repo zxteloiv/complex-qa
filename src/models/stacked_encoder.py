@@ -35,5 +35,5 @@ class StackedEncoder(torch.nn.Module):
         return self.output_size
 
     def is_bidirectional(self) -> bool:
-        return self.layer_encs[0].is_bidirectional()
+        return self.layer_encs[-1].is_bidirectional()
 
