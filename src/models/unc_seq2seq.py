@@ -38,6 +38,7 @@ class UncSeq2Seq(BaseSeq2Seq):
                  uncertainty_sample_num: int = 10,
                  uncertainty_loss_weight: int = 1.,
                  reinforcement_discount: float = 0.,
+                 skip_loss: bool = False,
                  ):
         super(UncSeq2Seq, self).__init__(vocab, encoder, decoder, word_projection,
                                          source_embedding, target_embedding, target_namespace,
@@ -61,6 +62,8 @@ class UncSeq2Seq(BaseSeq2Seq):
         self._unc_loss_weight = uncertainty_loss_weight
 
         self._reward_discount = reinforcement_discount
+
+        self.skip_loss = skip_loss
 
         out_dim = self._decoder.hidden_dim
         self.unc_fn = torch.nn.Sequential(
@@ -116,7 +119,7 @@ class UncSeq2Seq(BaseSeq2Seq):
             # make a choice that is either 0 or 1 at every position
             choice = halting_prob.bernoulli()
 
-            if step_target is not None:
+            if step_target is not None and not self.skip_loss:
                 action_probs = halting_prob * choice + (1 - halting_prob) * (1 - choice)
                 all_action_log_probs.append(alive * (action_probs + 1e-20).log())
 
@@ -193,6 +196,9 @@ class UncSeq2Seq(BaseSeq2Seq):
             return scaled_unc
 
     def _get_loss(self, target, target_mask, logits, others_by_step):
+        if self.skip_loss:
+            return 0
+
         loss_nll = super(UncSeq2Seq, self)._get_loss(target, target_mask, logits, others_by_step)
         if self._model_mode == 0:
             return loss_nll

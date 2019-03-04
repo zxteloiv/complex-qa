@@ -28,12 +28,15 @@ from models.transformer.encoder import TransformerEncoder
 from models.universal_hidden_state_wrapper import UniversalHiddenStateWrapper, RNNType
 from models.stacked_rnn_cell import StackedLSTMCell, StackedGRUCell
 from allennlp.common.util import START_SYMBOL, END_SYMBOL
+from allennlp.nn.util import move_to_device
 from models.stacked_encoder import StackedEncoder
 
 def main():
     parser = utils.opt_parser.get_trainer_opt_parser()
     parser.add_argument('models', nargs='*', help='pretrained models for the same setting')
     parser.add_argument('--test', action="store_true", help='use testing mode')
+    parser.add_argument('--test-on-val', action="store_true", help='use testing mode')
+    parser.add_argument('--dump-test', action="store_true", help='use testing mode')
     parser.add_argument('--emb-dim', type=int, help='basic embedding dimension')
 
     parser.add_argument('--enc-layers', type=int, help="layers in encoder")
@@ -100,20 +103,37 @@ def run_model(args):
         trainer.train()
 
     else:
-        testing_set = reader.read(config.DATASETS[args.dataset].test_path)
+        if args.test_on_val:
+            testing_set = reader.read(config.DATASETS[args.dataset].dev_path)
+        else:
+            testing_set = reader.read(config.DATASETS[args.dataset].test_path)
+
         model.eval()
+        model.skip_loss = True  # skip loss computation on testing set for faster evaluation
 
         if config.DEVICE > -1:
             model = model.cuda(config.DEVICE)
 
-        predictor = allennlp.predictors.SimpleSeq2SeqPredictor(model, reader)
+        # batch testing
+        iterator = BucketIterator(sorting_keys=[("source_tokens", "num_tokens")], batch_size=st_ds_conf['batch_sz'])
+        iterator.index_with(vocab)
+        eval_generator = iterator(testing_set, num_epochs=1, shuffle=False)
+        for batch in tqdm.tqdm(eval_generator, total=iterator.get_num_batches(testing_set)):
+            batch = move_to_device(batch, config.DEVICE)
+            output = model(**batch)
+        metrics = model.get_metrics()
+        print(metrics)
 
-        for instance in tqdm.tqdm(testing_set, total=len(testing_set)):
-            print('SRC: ', instance.fields['source_tokens'].tokens)
-            print('GOLD:', ' '.join(str(x) for x in instance.fields['target_tokens'].tokens[1:-1]))
-            del instance.fields['target_tokens']
-            output = predictor.predict_instance(instance)
-            print('PRED:', ' '.join(output['predicted_tokens']))
+        if args.dump_test:
+
+            predictor = allennlp.predictors.SimpleSeq2SeqPredictor(model, reader)
+
+            for instance in tqdm.tqdm(testing_set, total=len(testing_set)):
+                print('SRC: ', instance.fields['source_tokens'].tokens)
+                print('GOLD:', ' '.join(str(x) for x in instance.fields['target_tokens'].tokens[1:-1]))
+                del instance.fields['target_tokens']
+                output = predictor.predict_instance(instance)
+                print('PRED:', ' '.join(output['predicted_tokens']))
 
 def get_model(vocab, st_ds_conf):
     emb_sz = st_ds_conf['emb_sz']
