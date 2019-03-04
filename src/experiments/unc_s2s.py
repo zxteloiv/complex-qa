@@ -3,6 +3,8 @@ import datetime
 import torch
 import torch.nn
 import tqdm
+import random
+import numpy as np
 
 import allennlp.data
 from allennlp.data.iterators import BucketIterator
@@ -51,6 +53,9 @@ def main():
         config.TRAINING_LIMIT = args.epoch
     if args.device:
         config.DEVICE = args.device
+    if args.seed:
+        # if the argument is not given, seed will not be fixed
+        fix_seed(args.seed)
 
     if config.DEVICE < 0:
         run_model(args)
@@ -292,6 +297,13 @@ def get_attention(st_ds_conf, attn_type, *dims):
         assert False
 
     return attn
+
+def fix_seed(seed):
+    if seed:
+        torch.manual_seed(seed)
+        torch.cuda.manual_seed(seed)
+        random.seed(seed)
+        np.random.seed(seed)
 
 if __name__ == '__main__':
     import colored_traceback
