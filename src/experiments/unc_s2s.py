@@ -44,6 +44,7 @@ def main():
     parser.add_argument('--decoder', choices=['lstm', 'rnn', 'gru', 'ind_rnn', 'n_lstm', 'n_gru'], )
     parser.add_argument('--dec-cell-height', type=int, help="the height used for n_layer lstm/gru")
     parser.add_argument('--mode', type=int, help="0: train with only s2s; 1: train RL only; 2: joint training")
+    parser.add_argument('--model-dropout', type=float, help="override the intermediate_dropout in config")
 
     args = parser.parse_args()
     if args.epoch:
@@ -205,6 +206,8 @@ def get_updated_settings(args):
         st_ds_conf['dec_cell_height'] = args.dec_cell_height
     if args.mode:
         st_ds_conf['model_mode'] = args.mode
+    if args.model_dropout:
+        st_ds_conf['intermediate_dropout'] = args.model_dropout
     return st_ds_conf
 
 def get_encoder(st_ds_conf: dict):
