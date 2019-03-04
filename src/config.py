@@ -32,6 +32,7 @@ from utils.dataset_path import DatasetPath
 DS_ATIS = 'atis'
 DS_SQA = 'sqa'
 DS_GEOQUERY = 'geoqueries'
+DS_GEOQUERY_SP = 'geoqueries_sp'
 DS_WIKISQL = 'wikisql'
 DS_DJANGO = 'django'
 
@@ -48,9 +49,15 @@ DATASETS = dict([
         test_path=os.path.join(DATA_PATH, DS_SQA, 'test.tsv'),
     )),
 
-    (DS_GEOQUERY, DatasetPath(
+    (DS_GEOQUERY_SP, DatasetPath(
         train_path=os.path.join(DATA_PATH, DS_GEOQUERY, 'train.json'),
         dev_path=os.path.join(DATA_PATH, DS_GEOQUERY, 'dev.json'),
+        test_path=os.path.join(DATA_PATH, DS_GEOQUERY, 'test.json'),
+    )),
+
+    (DS_GEOQUERY, DatasetPath(
+        train_path=os.path.join(DATA_PATH, DS_GEOQUERY, 'orig.train.json'),
+        dev_path="",
         test_path=os.path.join(DATA_PATH, DS_GEOQUERY, 'test.json'),
     )),
 
@@ -152,6 +159,7 @@ UNC_S2S_CONF[DS_GEOQUERY] = dict(
     uncertainty_loss_weight=1.,
     reward_discount=.5,
 )
+UNC_S2S_CONF[DS_GEOQUERY_SP] = UNC_S2S_CONF[DS_GEOQUERY]
 UNC_S2S_CONF[DS_ATIS] = dict(
     emb_sz=256,
     batch_sz=20,
