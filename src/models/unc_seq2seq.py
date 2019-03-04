@@ -128,12 +128,12 @@ class UncSeq2Seq(BaseSeq2Seq):
                 step_unc = self._get_step_uncertainty(step_target, inputs_embedding,
                                                       last_hidden, cat_context, pondering_flag)
                 step_unc = step_unc.unsqueeze(-1)
-                step_reward = choice * step_unc + (1 - choice) * (1 - step_unc)
 
                 new_logit = self._get_step_projection(new_output, enc_context, dec_hist_context)
                 new_pred = new_logit.argmax(dim=-1)
-                correctness = (new_pred == step_target).float()
-                step_reward *= correctness.unsqueeze(-1)
+                correctness = (new_pred == step_target).float().unsqueeze(-1)
+
+                step_reward = choice * step_unc * (1 - correctness) + (1 - choice) * (1 - step_unc) * correctness
                 all_action_rewards.append(step_reward)
 
             # if an item within this batch is alive, the new_output will be used next time,
