@@ -50,7 +50,7 @@ DATASETS = dict([
 
     (DS_GEOQUERY, DatasetPath(
         train_path=os.path.join(DATA_PATH, DS_GEOQUERY, 'train.json'),
-        dev_path="",
+        dev_path=os.path.join(DATA_PATH, DS_GEOQUERY, 'dev.json'),
         test_path=os.path.join(DATA_PATH, DS_GEOQUERY, 'test.json'),
     )),
 
