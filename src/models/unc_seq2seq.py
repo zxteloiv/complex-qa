@@ -144,7 +144,7 @@ class UncSeq2Seq(BaseSeq2Seq):
 
         step_logit = self._get_step_projection(last_output, enc_context, dec_hist_context)
         correctness = (step_logit.argmax(dim=-1) == step_target).float().unsqueeze(-1)
-        all_action_rewards = map(lambda x: x * correctness, all_action_rewards) # only the final correctness matters
+        all_action_rewards = list(map(lambda x: x * correctness, all_action_rewards)) # only the final correctness matters
 
         return last_hidden, last_output, step_logit, all_action_log_probs, all_action_rewards
 
