@@ -129,11 +129,7 @@ class UncSeq2Seq(BaseSeq2Seq):
                                                       last_hidden, cat_context, pondering_flag)
                 step_unc = step_unc.unsqueeze(-1)
 
-                new_logit = self._get_step_projection(new_output, enc_context, dec_hist_context)
-                new_pred = new_logit.argmax(dim=-1)
-                correctness = (new_pred == step_target).float().unsqueeze(-1)
-
-                step_reward = choice * step_unc * (1 - correctness) + (1 - choice) * (1 - step_unc) * correctness
+                step_reward = step_unc.pow(- pondering_step - 1)
                 all_action_rewards.append(step_reward)
 
             # if an item within this batch is alive, the new_output will be used next time,
@@ -147,6 +143,8 @@ class UncSeq2Seq(BaseSeq2Seq):
             alive = alive * choice
 
         step_logit = self._get_step_projection(last_output, enc_context, dec_hist_context)
+        correctness = (step_logit.argmax(dim=-1) == step_target).float().unsqueeze(-1)
+        all_action_rewards = map(lambda x: x * correctness, all_action_rewards) # only the final correctness matters
 
         return last_hidden, last_output, step_logit, all_action_log_probs, all_action_rewards
 
