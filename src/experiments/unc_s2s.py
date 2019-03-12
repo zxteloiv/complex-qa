@@ -7,6 +7,7 @@ import random
 import numpy as np
 
 import allennlp.data
+from allennlp.data.dataset import Batch
 from allennlp.data.iterators import BucketIterator
 
 import allennlp.training
@@ -40,6 +41,7 @@ def main():
     parser.add_argument('--test-on-val', action="store_true", help='use testing mode')
     parser.add_argument('--dump-test', action="store_true", help='use testing mode')
     parser.add_argument('--emb-dim', type=int, help='basic embedding dimension')
+    parser.add_argument('--inspection', action="store_true", default=False, help='basic embedding dimension')
 
     parser.add_argument('--enc-layers', type=int, help="layers in encoder")
     parser.add_argument('--encoder', choices=['transformer', 'lstm', 'bilstm'])
@@ -116,6 +118,7 @@ def run_model(args):
 
         model.eval()
         model.skip_loss = True  # skip loss computation on testing set for faster evaluation
+        model.inspection = args.inspection
 
         if config.DEVICE > -1:
             model = model.cuda(config.DEVICE)
@@ -131,15 +134,17 @@ def run_model(args):
         print(metrics)
 
         if args.dump_test:
-
-            predictor = allennlp.predictors.SimpleSeq2SeqPredictor(model, reader)
-
             for instance in tqdm.tqdm(testing_set, total=len(testing_set)):
                 print('SRC: ', instance.fields['source_tokens'].tokens)
                 print('GOLD:', ' '.join(str(x) for x in instance.fields['target_tokens'].tokens[1:-1]))
                 del instance.fields['target_tokens']
-                output = predictor.predict_instance(instance)
-                print('PRED:', ' '.join(output['predicted_tokens']))
+                dataset = Batch([instance])
+                dataset.index_instances(vocab)
+                model_input = move_to_device(dataset.as_tensor_dict(), config.DEVICE)
+                output = model.decode(model(**model_input))
+                print('PRED:', ' '.join(output['predicted_tokens'][0]))
+                if args.inspection:
+                    print('AdaN:', ' '.join(str(x) for x in output['n_ponder'][0][:len(output['predicted_tokens'][0])]))
 
 def get_model(vocab, st_ds_conf):
     emb_sz = st_ds_conf['emb_sz']

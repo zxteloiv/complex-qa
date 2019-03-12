@@ -7,6 +7,7 @@ from functools import reduce
 from allennlp.data.vocabulary import Vocabulary
 from allennlp.modules import TokenEmbedder
 from allennlp.nn.util import masked_softmax
+from allennlp.nn import util as allen_util
 from utils.nn import AllenNLPAttentionWrapper, filter_cat, filter_sum
 from models.transformer.multi_head_attention import SingleTokenMHAttentionWrapper
 from models.base_seq2seq import BaseSeq2Seq
@@ -40,6 +41,7 @@ class UncSeq2Seq(BaseSeq2Seq):
                  uncertainty_loss_weight: int = 1.,
                  reinforcement_discount: float = 0.,
                  skip_loss: bool = False,
+                 inspection: bool = False,
                  ):
         super(UncSeq2Seq, self).__init__(vocab, encoder, decoder, word_projection,
                                          source_embedding, target_embedding, target_namespace,
@@ -63,8 +65,8 @@ class UncSeq2Seq(BaseSeq2Seq):
         self._unc_loss_weight = uncertainty_loss_weight
 
         # self._reward_discount = reinforcement_discount
-
         self.skip_loss = skip_loss
+        self.inspection = inspection
 
         out_dim = self._decoder.hidden_dim
         self.unc_fn = torch.nn.Sequential(
@@ -73,6 +75,44 @@ class UncSeq2Seq(BaseSeq2Seq):
             torch.nn.Linear(out_dim, 1),
             torch.nn.Sigmoid()
         )
+
+    def forward(self,
+                source_tokens: Dict[str, torch.LongTensor],
+                target_tokens: Dict[str, torch.LongTensor] = None) -> Dict[str, torch.Tensor]:
+        """Run the network, and dispatch work to helper functions based on the runtime"""
+
+        # source: (batch, source_length), containing the input word IDs
+        # target: (batch, target_length), containing the output IDs
+
+        source, source_mask = source_tokens['tokens'], allen_util.get_text_field_mask(source_tokens)
+        state, layer_states = self._encode(source, source_mask)
+        init_hidden, _ = self._init_hidden_states(layer_states, source_mask)
+
+        if target_tokens is not None:
+            target, target_mask = target_tokens['tokens'], allen_util.get_text_field_mask(target_tokens)
+
+            # predictions: (batch, seq_len)
+            # logits: (batch, seq_len, vocab_size)
+            predictions, logits, others = self._forward_loop(state, source_mask, init_hidden, target, target_mask)
+            loss = self._get_loss(target, target_mask.float(), logits, others)
+            self._compute_metric(predictions, target[:, 1:])
+
+        else:
+            predictions, logits, others = self._forward_loop(state, source_mask, init_hidden, None, None)
+            loss = [-1]
+
+        output = {
+            "predictions": predictions,
+            "logits": logits,
+            "loss": loss,
+        }
+
+        if self.inspection:
+            _, _, alive_mask_segment = zip(*others)
+            all_ponder_step = torch.stack([alive.sum(1) for alive in alive_mask_segment], dim=-1)
+            output['n_ponder'] = all_ponder_step.cpu().tolist()
+
+        return output
 
     def _run_decoder(self, step_target, inputs_embedding, last_hidden, last_output, enc_attn_fn, dec_hist_attn_fn):
         # ponder with the output
@@ -86,6 +126,7 @@ class UncSeq2Seq(BaseSeq2Seq):
         all_action_log_probs, all_action_stock, all_alive_mask = [], [], []
         for pondering_step in range(self._max_pondering):
             pondering_flag = zeros if pondering_step == 0 else ones
+            all_alive_mask.append(alive)
 
             # compute attention context before the output is updated
             enc_context = enc_attn_fn(last_output) if enc_attn_fn else None
@@ -111,7 +152,6 @@ class UncSeq2Seq(BaseSeq2Seq):
 
             halting_prob = self.unc_fn(new_output)
             choice = halting_prob.bernoulli()
-
             if step_target is not None and not self.skip_loss:
                 action_probs = halting_prob * choice + (1 - halting_prob) * (1 - choice)
                 all_action_log_probs.append((action_probs + 1e-20).log())
@@ -121,9 +161,7 @@ class UncSeq2Seq(BaseSeq2Seq):
                 #                                       cat_context, pondering_flag)
                 # step_unc = step_unc.unsqueeze(-1) + 1
                 # step_reward = step_unc.pow(- pondering_step - 1)
-                step_reward = ones
-                all_action_stock.append(step_reward)
-                all_alive_mask.append(alive)
+                all_action_stock.append(ones)
 
             # if an item within this batch is alive, the new_output will be used next time,
             # otherwise, the last_output will be retained.
@@ -138,23 +176,24 @@ class UncSeq2Seq(BaseSeq2Seq):
         step_logit = self._get_step_projection(last_output, enc_context, dec_hist_context)
 
         # reprocess the reward
+        alive_mask = torch.cat(all_alive_mask, dim=-1)
         if self._model_mode > 0 and step_target is not None and not self.skip_loss:
             # only the final correctness matters
             correctness = (step_logit.argmax(dim=-1) == step_target).float().unsqueeze(-1)
-            alive_mask = torch.cat(all_alive_mask, dim=-1)
             action_log_probs = torch.cat(all_action_log_probs, dim=-1) * alive_mask * correctness
             action_stock = torch.cat(all_action_stock, dim=-1)
 
             depth_id = (alive_mask > 0).sum(1) - 1
-            depth_reward_quota = torch.arange(1, 0.1, step=-0.9/self._max_pondering)
             if correctness.is_cuda:
-                depth_reward_quota = depth_reward_quota.cuda()
+                depth_reward_quota = torch.arange(1, 0.1, step=-0.9/self._max_pondering, device=correctness.device)
+            else:
+                depth_reward_quota = torch.arange(1, 0.1, step=-0.9/self._max_pondering)
             batch_quota = depth_reward_quota[depth_id].unsqueeze(-1)
             action_rewards = masked_softmax(action_stock, alive_mask) * batch_quota
         else:
             action_rewards, action_log_probs = None, None
 
-        return last_hidden, last_output, step_logit, action_log_probs, action_rewards
+        return last_hidden, last_output, step_logit, action_log_probs, action_rewards, alive_mask
 
     def _get_step_uncertainty(self, step_target, inputs_embedding, last_hidden, cat_context, pondering_flag):
         with torch.no_grad():
@@ -209,7 +248,7 @@ class UncSeq2Seq(BaseSeq2Seq):
         if self._model_mode == 0:
             return loss_nll
 
-        action_log_probs_segment, action_rewards_segment = zip(*others_by_step)
+        action_log_probs_segment, action_rewards_segment, _ = zip(*others_by_step)
         action_log_probs = torch.cat(action_log_probs_segment, dim=-1)
         action_rewards = torch.cat(action_rewards_segment, dim=-1)
 
