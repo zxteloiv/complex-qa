@@ -6,6 +6,7 @@ from functools import reduce
 
 from allennlp.data.vocabulary import Vocabulary
 from allennlp.modules import TokenEmbedder
+from allennlp.nn.util import masked_softmax
 from utils.nn import AllenNLPAttentionWrapper, filter_cat, filter_sum
 from models.transformer.multi_head_attention import SingleTokenMHAttentionWrapper
 from models.base_seq2seq import BaseSeq2Seq
@@ -61,7 +62,7 @@ class UncSeq2Seq(BaseSeq2Seq):
 
         self._unc_loss_weight = uncertainty_loss_weight
 
-        self._reward_discount = reinforcement_discount
+        # self._reward_discount = reinforcement_discount
 
         self.skip_loss = skip_loss
 
@@ -77,18 +78,14 @@ class UncSeq2Seq(BaseSeq2Seq):
         # ponder with the output
         batch = inputs_embedding.size()[0]
         enc_context, dec_hist_context = None, None
-        # alive: (batch, 1)
         alive = inputs_embedding.new_ones(batch, 1, requires_grad=False)
+        zeros = inputs_embedding.new_zeros(batch, 1, requires_grad=False)
+        ones = inputs_embedding.new_ones(batch, 1, requires_grad=False)
 
-        # all_action_log_probs = [(batch, 1)]
-        # all_action_rewards = [(batch, 1)]
-        all_action_log_probs = []
-        all_action_rewards = []
+        # all_action_log_probs, all_action_rewards, all_alive_mask = [(batch, 1)]
+        all_action_log_probs, all_action_stock, all_alive_mask = [], [], []
         for pondering_step in range(self._max_pondering):
-            if pondering_step == 0:
-                pondering_flag = inputs_embedding.new_zeros(batch, 1)
-            else:
-                pondering_flag = inputs_embedding.new_ones(batch, 1)
+            pondering_flag = zeros if pondering_step == 0 else ones
 
             # compute attention context before the output is updated
             enc_context = enc_attn_fn(last_output) if enc_attn_fn else None
@@ -96,11 +93,10 @@ class UncSeq2Seq(BaseSeq2Seq):
 
             # step_hidden: some_hidden_var_with_unknown_internals
             # step_output: (batch, hidden_dim)
-            cat_context = []
-            if self._concat_attn and enc_context is not None:
-                cat_context.append(self._dropout(enc_context))
-            if self._concat_attn and dec_hist_context is not None:
-                cat_context.append(self._dropout(dec_hist_context))
+            cat_context = [
+                self._dropout(enc_context) if self._concat_attn and enc_context is not None else None,
+                self._dropout(dec_hist_context) if self._concat_attn and dec_hist_context is not None else None,
+            ]
             dec_output = self._decoder(inputs_embedding, last_hidden, cat_context + [pondering_flag])
             new_hidden, new_output = dec_output[:2]
 
@@ -109,28 +105,25 @@ class UncSeq2Seq(BaseSeq2Seq):
                 break
 
             # compute the probability that we need to continue (1 means we are uncertain, and need to go further)
-            # halting_prob: (batch, 1)
-            # choice: (batch, 1)
+            # halting_prob, choice: (batch, 1)
             if self._model_mode == 1:   # mode 1 deals only with the uncertainty part
                 new_output = new_output.detach()
 
             halting_prob = self.unc_fn(new_output)
-
-            # make a choice that is either 0 or 1 at every position
             choice = halting_prob.bernoulli()
 
             if step_target is not None and not self.skip_loss:
                 action_probs = halting_prob * choice + (1 - halting_prob) * (1 - choice)
-                all_action_log_probs.append(alive * (action_probs + 1e-20).log())
-
+                all_action_log_probs.append((action_probs + 1e-20).log())
                 # compute for the current step the rewards
                 # step_unc: (batch,)
-                step_unc = self._get_step_uncertainty(step_target, inputs_embedding,
-                                                      last_hidden, cat_context, pondering_flag)
-                step_unc = step_unc.unsqueeze(-1) + 1
-
-                step_reward = step_unc.pow(- pondering_step - 1)
-                all_action_rewards.append(step_reward)
+                # step_unc = self._get_step_uncertainty(step_target, inputs_embedding, last_hidden,
+                #                                       cat_context, pondering_flag)
+                # step_unc = step_unc.unsqueeze(-1) + 1
+                # step_reward = step_unc.pow(- pondering_step - 1)
+                step_reward = ones
+                all_action_stock.append(step_reward)
+                all_alive_mask.append(alive)
 
             # if an item within this batch is alive, the new_output will be used next time,
             # otherwise, the last_output will be retained.
@@ -143,10 +136,25 @@ class UncSeq2Seq(BaseSeq2Seq):
             alive = alive * choice
 
         step_logit = self._get_step_projection(last_output, enc_context, dec_hist_context)
-        correctness = (step_logit.argmax(dim=-1) == step_target).float().unsqueeze(-1)
-        all_action_rewards = list(map(lambda x: x * correctness, all_action_rewards)) # only the final correctness matters
 
-        return last_hidden, last_output, step_logit, all_action_log_probs, all_action_rewards
+        # reprocess the reward
+        if self._model_mode > 0 and step_target is not None and not self.skip_loss:
+            # only the final correctness matters
+            correctness = (step_logit.argmax(dim=-1) == step_target).float().unsqueeze(-1)
+            alive_mask = torch.cat(all_alive_mask, dim=-1)
+            action_log_probs = torch.cat(all_action_log_probs, dim=-1) * alive_mask * correctness
+            action_stock = torch.cat(all_action_stock, dim=-1)
+
+            depth_id = (alive_mask > 0).sum(1) - 1
+            depth_reward_quota = torch.arange(1, 0.1, step=-0.9/self._max_pondering)
+            if correctness.is_cuda:
+                depth_reward_quota = depth_reward_quota.cuda()
+            batch_quota = depth_reward_quota[depth_id].unsqueeze(-1)
+            action_rewards = masked_softmax(action_stock, alive_mask) * batch_quota
+        else:
+            action_rewards, action_log_probs = None, None
+
+        return last_hidden, last_output, step_logit, action_log_probs, action_rewards
 
     def _get_step_uncertainty(self, step_target, inputs_embedding, last_hidden, cat_context, pondering_flag):
         with torch.no_grad():
@@ -202,20 +210,12 @@ class UncSeq2Seq(BaseSeq2Seq):
             return loss_nll
 
         action_log_probs_segment, action_rewards_segment = zip(*others_by_step)
-        all_action_log_probs = reduce(lambda x, y: x + y, action_log_probs_segment)
-        all_action_rewards = reduce(lambda x, y: x + y, action_rewards_segment)
+        action_log_probs = torch.cat(action_log_probs_segment, dim=-1)
+        action_rewards = torch.cat(action_rewards_segment, dim=-1)
 
-        assert len(all_action_rewards) == len(all_action_log_probs)
+        assert action_rewards.size() == action_log_probs.size()
 
-        n_steps = len(all_action_rewards)
-        if n_steps > 1:
-            for step in range(n_steps - 2, -1, -1): # [L - 2, L - 1, ..., 0]
-                all_action_rewards[step] += all_action_rewards[step + 1] * self._reward_discount
-
-        action_rewards = torch.cat(all_action_rewards, dim=1)
-        action_log_probs = torch.cat(all_action_log_probs, dim=1)
-
-        loss_unc = - action_rewards * action_log_probs * 10
+        loss_unc = - action_rewards * action_log_probs
         loss_unc = loss_unc.sum(dim=1).mean(dim=0) # sum for the tokens then average within the batch
 
         if self._model_mode == 1:
