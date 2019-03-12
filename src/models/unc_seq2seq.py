@@ -127,7 +127,7 @@ class UncSeq2Seq(BaseSeq2Seq):
                 # step_unc: (batch,)
                 step_unc = self._get_step_uncertainty(step_target, inputs_embedding,
                                                       last_hidden, cat_context, pondering_flag)
-                step_unc = step_unc.unsqueeze(-1)
+                step_unc = step_unc.unsqueeze(-1) + 1
 
                 step_reward = step_unc.pow(- pondering_step - 1)
                 all_action_rewards.append(step_reward)
