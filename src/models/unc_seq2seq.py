@@ -183,13 +183,7 @@ class UncSeq2Seq(BaseSeq2Seq):
             action_log_probs = torch.cat(all_action_log_probs, dim=-1) * alive_mask * correctness
             action_stock = torch.cat(all_action_stock, dim=-1)
 
-            depth_id = (alive_mask > 0).sum(1) - 1
-            if correctness.is_cuda:
-                depth_reward_quota = torch.arange(1, 0.1, step=-0.9/self._max_pondering, device=correctness.device)
-            else:
-                depth_reward_quota = torch.arange(1, 0.1, step=-0.9/self._max_pondering)
-            batch_quota = depth_reward_quota[depth_id].unsqueeze(-1)
-            action_rewards = masked_softmax(action_stock, alive_mask) * batch_quota
+            action_rewards = masked_softmax(action_stock, alive_mask)
         else:
             action_rewards, action_log_probs = None, None
 
