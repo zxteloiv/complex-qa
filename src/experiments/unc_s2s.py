@@ -49,6 +49,8 @@ def main():
     parser.add_argument('--dec-cell-height', type=int, help="the height used for n_layer lstm/gru")
     parser.add_argument('--mode', type=int, help="0: train with only s2s; 1: train RL only; 2: joint training")
     parser.add_argument('--model-dropout', type=float, help="override the intermediate_dropout in config")
+    parser.add_argument('--unc-loss-weight', type=float)
+
 
     args = parser.parse_args()
     if args.epoch:
@@ -218,6 +220,8 @@ def get_updated_settings(args):
         st_ds_conf['model_mode'] = args.mode
     if args.model_dropout:
         st_ds_conf['intermediate_dropout'] = args.model_dropout
+    if args.unc_loss_weight:
+        st_ds_conf['uncertainty_loss_weight'] = args.unc_loss_weight
     return st_ds_conf
 
 def get_encoder(st_ds_conf: dict):
