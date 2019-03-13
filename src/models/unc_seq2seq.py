@@ -156,12 +156,11 @@ class UncSeq2Seq(BaseSeq2Seq):
                 action_probs = halting_prob * choice + (1 - halting_prob) * (1 - choice)
                 all_action_log_probs.append((action_probs + 1e-20).log())
                 # compute for the current step the rewards
-                # step_unc: (batch,)
-                # step_unc = self._get_step_uncertainty(step_target, inputs_embedding, last_hidden,
-                #                                       cat_context, pondering_flag)
-                # step_unc = step_unc.unsqueeze(-1) + 1
-                # step_reward = step_unc.pow(- pondering_step - 1)
-                all_action_stock.append(ones)
+                step_unc: (batch,)
+                step_unc = self._get_step_uncertainty(step_target, inputs_embedding, last_hidden,
+                                                      cat_context, pondering_flag)
+                step_unc = step_unc.unsqueeze(-1)
+                all_action_stock.append(step_unc)
 
             # if an item within this batch is alive, the new_output will be used next time,
             # otherwise, the last_output will be retained.
@@ -221,18 +220,13 @@ class UncSeq2Seq(BaseSeq2Seq):
             # uncertainty: (batch,)
             concated_probs = torch.cat(all_pass_prob, dim=-1)
             uncertainty = concated_probs.var(dim=1)
-            # prob_mean = concated_probs.mean(dim=1)
 
-            # the lower uncertainty the better, the greater probability the better
-            # reward = (-uncertainty) * prob_mean
-            # reward = -uncertainty
-
-            scaled_unc = torch.stack([uncertainty, torch.full_like(uncertainty, 0.15)], dim=1).max(-1)[0] / 0.15
+            # scaled_unc = torch.stack([uncertainty, torch.full_like(uncertainty, 0.15)], dim=1).max(-1)[0] / 0.15
 
             if not is_orignally_training:
                 self.eval()
 
-            return scaled_unc
+            return uncertainty
 
     def _get_loss(self, target, target_mask, logits, others_by_step):
         if self.skip_loss:
