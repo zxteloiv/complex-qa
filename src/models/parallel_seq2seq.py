@@ -68,9 +68,17 @@ class ParallelSeq2Seq(allennlp.models.Model):
             if self._bleu:
                 self._bleu(predictions, target[:, 1:])
 
-        else:
+        elif target_tokens is not None: # validation, requires model in eval mode
+            target, target_mask = target_tokens['tokens'], util.get_text_field_mask(target_tokens)
             predictions, logits = self._forward_prediction(state, source_mask)
-            loss = [-1]
+            max_len = min(logits.size()[1], target.size()[1] - 1)
+            loss = util.sequence_cross_entropy_with_logits(logits[:, :max_len, :].contiguous(),
+                                                           target[:, 1:(max_len + 1)].contiguous(),
+                                                           target_mask[:, 1:(max_len + 1)].float().contiguous(),
+                                                           label_smoothing=self._label_smoothing)
+        else: # testing
+            predictions, logits = self._forward_prediction(state, source_mask)
+            loss = -1
 
         output = {
             "predictions": predictions,
@@ -148,7 +156,7 @@ class ParallelSeq2Seq(allennlp.models.Model):
         """
         batch_size = state.size()[0]
         # batch_start: (batch,)
-        batch_start = torch.ones((batch_size,), dtype=torch.long) * self._start_id
+        batch_start = source_mask.new_ones((batch_size,), dtype=torch.long) * self._start_id
 
         # step_logits: a list of logits, [(batch, seq_len, vocab_size)]
         logits_by_step = []

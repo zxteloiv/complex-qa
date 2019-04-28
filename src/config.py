@@ -1,265 +1,280 @@
 # config
 
 import os.path
-
+import json
 
 # ======================
 # general config
 
-DEVICE = 0
-ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
-SNAPSHOT_PATH = os.path.join(ROOT, 'snapshots')
+class HyperParamSet:
+    def __str__(self):
+        json_obj = dict((attr, getattr(self, attr)) for attr in dir(self)
+                        if hasattr(self, attr) and not attr.startswith('_'))
+        return json.dumps(json_obj)
 
-LOG_REPORT_INTERVAL = (1, 'iteration')
-TRAINING_LIMIT = 500  # in num of epochs
-SAVE_INTERVAL = (100, 'iteration')
+def general_config():
+    conf = HyperParamSet()
 
-ADAM_LR = 1e-3
-ADAM_BETAS = (.9, .98)
-ADAM_EPS = 1e-9
+    conf.DEVICE = -1
+    ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
+    conf.ROOT = ROOT
+    conf.SNAPSHOT_PATH = os.path.join(ROOT, 'snapshots')
 
-GRAD_CLIPPING = 5
+    conf.LOG_REPORT_INTERVAL = (1, 'iteration')
+    conf.TRAINING_LIMIT = 500  # in num of epochs
+    conf.SAVE_INTERVAL = (100, 'iteration')
 
-SGD_LR = 1e-2
+    conf.ADAM_LR = 1e-3
+    conf.ADAM_BETAS = (.9, .98)
+    conf.ADAM_EPS = 1e-9
+
+    conf.GRAD_CLIPPING = 5
+
+    conf.SGD_LR = 1e-2
+    conf.DATA_PATH = os.path.join(ROOT, 'data')
+
+    return conf
 
 # ======================
 # dataset config
 
-DATA_PATH = os.path.join(ROOT, 'data')
-
 from utils.dataset_path import DatasetPath
 
-DS_ATIS = 'atis'
-DS_SQA = 'sqa'
-DS_GEOQUERY = 'geoqueries'
-DS_GEOQUERY_SP = 'geoqueries_sp'
-DS_WIKISQL = 'wikisql'
-DS_DJANGO = 'django'
+DATA_PATH = general_config().DATA_PATH
+DATASETS = dict()
+DATASETS["atis"] = DatasetPath(
+    train_path=os.path.join(DATA_PATH, 'atis', 'train.json'),
+    dev_path=os.path.join(DATA_PATH, 'atis', 'dev.json'),
+    test_path=os.path.join(DATA_PATH, 'atis', 'test.json'),
+)
+DATASETS["weibo"] = DatasetPath(
+    train_path=os.path.join(DATA_PATH, 'weibo', 'train_data'),
+    dev_path=os.path.join(DATA_PATH, 'weibo', 'valid_data'),
+    test_path=os.path.join(DATA_PATH, 'weibo', 'test_data'),
+)
+DATASETS["small_weibo"] = DatasetPath(
+    train_path=os.path.join(DATA_PATH, 'small_weibo', 'train_data'),
+    dev_path=os.path.join(DATA_PATH, 'small_weibo', 'valid_data'),
+    test_path=os.path.join(DATA_PATH, 'small_weibo', 'test_data'),
+)
+DATASETS['sqa'] = DatasetPath(
+    train_path=os.path.join(DATA_PATH, 'sqa', 'train.tsv'),
+    dev_path=os.path.join(DATA_PATH, 'sqa', 'dev.tsv'),
+    test_path=os.path.join(DATA_PATH, 'sqa', 'test.tsv'),
+)
+DATASETS['geoqueries_sp'] = DatasetPath(
+    train_path=os.path.join(DATA_PATH, 'geoqueries_sp', 'train.json'),
+    dev_path=os.path.join(DATA_PATH, 'geoqueries_sp', 'dev.json'),
+    test_path=os.path.join(DATA_PATH, 'geoqueries_sp', 'test.json'),
+)
 
-DATASETS = dict([
-    (DS_ATIS, DatasetPath(
-        train_path=os.path.join(DATA_PATH, DS_ATIS, 'train.json'),
-        dev_path=os.path.join(DATA_PATH, DS_ATIS, 'dev.json'),
-        test_path=os.path.join(DATA_PATH, DS_ATIS, 'test.json'),
-    )),
-
-    (DS_SQA, DatasetPath(
-        train_path=os.path.join(DATA_PATH, DS_SQA, 'train.tsv'),
-        dev_path=os.path.join(DATA_PATH, DS_SQA, 'dev.tsv'),
-        test_path=os.path.join(DATA_PATH, DS_SQA, 'test.tsv'),
-    )),
-
-    (DS_GEOQUERY_SP, DatasetPath(
-        train_path=os.path.join(DATA_PATH, DS_GEOQUERY, 'train.json'),
-        dev_path=os.path.join(DATA_PATH, DS_GEOQUERY, 'dev.json'),
-        test_path=os.path.join(DATA_PATH, DS_GEOQUERY, 'test.json'),
-    )),
-
-    (DS_GEOQUERY, DatasetPath(
-        train_path=os.path.join(DATA_PATH, DS_GEOQUERY, 'orig.train.json'),
-        dev_path="",
-        test_path=os.path.join(DATA_PATH, DS_GEOQUERY, 'test.json'),
-    )),
-
-    (DS_WIKISQL, DatasetPath(
-        train_path=os.path.join(DATA_PATH, DS_WIKISQL, 'train.json'),
-        dev_path="",
-        test_path=os.path.join(DATA_PATH, DS_WIKISQL, 'test.json'),
-    )),
-
-    (DS_DJANGO, DatasetPath(
-        train_path=os.path.join(DATA_PATH, DS_DJANGO, 'train.json'),
-        dev_path="",
-        test_path=os.path.join(DATA_PATH, DS_DJANGO, 'test.json'),
-    )),
-
-])
+DATASETS['geoqueries'] = DatasetPath(
+    train_path=os.path.join(DATA_PATH, 'geoqueries', 'orig.train.json'),
+    dev_path="",
+    test_path=os.path.join(DATA_PATH, 'geoqueries', 'test.json'),
+)
+DATASETS['wikisql'] = DatasetPath(
+    train_path=os.path.join(DATA_PATH, 'wikisql', 'train.json'),
+    dev_path="",
+    test_path=os.path.join(DATA_PATH, 'wikisql', 'test.json'),
+)
+DATASETS['django'] = DatasetPath(
+    train_path=os.path.join(DATA_PATH, 'django', 'train.json'),
+    dev_path="",
+    test_path=os.path.join(DATA_PATH, 'django', 'test.json'),
+)
 
 # ======================
-# setting config
+# model config
 
-ST_SEQ2SEQ = 'seq2seq'
-SEQ2SEQ_CONF = dict()
-SEQ2SEQ_CONF[DS_GEOQUERY] = dict(
-    emb_sz=50,
-    batch_sz=32,
-    max_decoding_len=50,
-)
-SEQ2SEQ_CONF[DS_ATIS] = dict(
-    emb_sz=200,
-    batch_sz=32,
-    max_decoding_len=60,
+def s2s_geoquery_conf():
+    conf = general_config()
+    conf.emb_sz = 50
+    conf.batch_sz = 32
+    conf.max_decoding_len = 50
+    return conf
 
-)
+def s2s_atis_conf():
+    conf = general_config()
+    conf.emb_sz = 200
+    conf.batch_sz = 32
+    conf.max_decoding_len = 60
+    return conf
 
-ST_TRANS2SEQ = 'transformer2seq'
-TRANS2SEQ_CONF = dict()
-TRANS2SEQ_CONF[DS_GEOQUERY] = dict(
-    emb_sz=256,
-    batch_sz=32,
-    max_decoding_len=50,
-)
-TRANS2SEQ_CONF[DS_ATIS] = dict(
-    emb_sz=256,
-    batch_sz=32,
-    max_decoding_len=50,
-    num_heads=8,
-    max_num_layers=1,
-    act=False,
-    residual_dropout=.1,
-    attention_dropout=.1,
-    feedforward_dropout=.1,
-    vanilla_wiring=False,
-)
+def t2s_geoquery_conf():
+    conf = general_config()
+    conf.emb_sz = 256
+    conf.batch_sz = 32
+    conf.max_decoding_len = 50
+    return conf
 
-ST_BASE_S2S = 'base_s2s'
-BASE_S2S_CONF = dict()
-BASE_S2S_CONF[DS_ATIS] = dict(
-    emb_sz=256,
-    batch_sz=20,
-    max_decoding_len=60,
-    num_heads=8,
-    num_enc_layers=2,
-    encoder='lstm',
-    decoder='lstm',
-    residual_dropout=.1,
-    attention_dropout=.1,
-    feedforward_dropout=.1,
-    intermediate_dropout=.5,
-    vanilla_wiring=False,
-    enc_attn="dot_product",
-    dec_hist_attn="dot_product",
-    dec_cell_height=2,
-    concat_attn_to_dec_input=True,
-)
+def t2s_atis_conf():
+    conf = general_config()
+    conf.emb_sz = 256
+    conf.batch_sz = 32
+    conf.max_decoding_len = 50
+    conf.num_heads = 8
+    conf.max_num_layers = 1
+    conf.act = False
+    conf.residual_dropout = .1
+    conf.attention_dropout = .1
+    conf.feedforward_dropout = .1
+    conf.vanilla_wiring = False
+    return conf
 
-ST_UNC_S2S = 'unc_s2s'
-UNC_S2S_CONF = dict()
-UNC_S2S_CONF[DS_GEOQUERY] = dict(
-    emb_sz=256,
-    batch_sz=20,
-    max_decoding_len=60,
-    num_heads=2,
-    num_enc_layers=2,
-    encoder='bilstm',
-    residual_dropout=.1,
-    attention_dropout=.1,
-    feedforward_dropout=.1,
-    intermediate_dropout=.5,
-    vanilla_wiring=True,
-    decoder='n_lstm',
-    enc_attn="bilinear",
-    dec_hist_attn="dot_product",
-    dec_cell_height=2,
-    concat_attn_to_dec_input=True,
-    model_mode=0,   # 0: train s2s; 1: train RL unc; 2: joint
-    scheduled_sampling=.2,
-    pondering_limit=3,
-    uncertainty_sample_num=5,
-    uncertainty_loss_weight=1.,
-    reward_discount=.5,
-)
-UNC_S2S_CONF[DS_GEOQUERY_SP] = UNC_S2S_CONF[DS_GEOQUERY]
-UNC_S2S_CONF[DS_ATIS] = dict(
-    emb_sz=256,
-    batch_sz=20,
-    max_decoding_len=60,
-    num_heads=2,
-    num_enc_layers=2,
-    encoder='lstm',
-    residual_dropout=.1,
-    attention_dropout=.1,
-    feedforward_dropout=.1,
-    intermediate_dropout=.5,
-    vanilla_wiring=True,
-    decoder='n_lstm',
-    enc_attn="bilinear",
-    dec_hist_attn="dot_product",
-    dec_cell_height=2,
-    concat_attn_to_dec_input=True,
-    model_mode=0,   # 0: train s2s; 1: train RL unc; 2: joint
-    scheduled_sampling=.2,
-    pondering_limit=3,
-    uncertainty_sample_num=5,
-    uncertainty_loss_weight=1.,
-    reward_discount=.5,
-)
+def base_s2s_atis_conf():
+    conf = general_config()
+    conf.emb_sz = 256
+    conf.batch_sz = 20
+    conf.max_decoding_len = 60
+    conf.num_heads = 8
+    conf.num_enc_layers = 2
+    conf.encoder = 'lstm'
+    conf.decoder = 'lstm'
+    conf.residual_dropout = .1
+    conf.attention_dropout = .1
+    conf.feedforward_dropout = .1
+    conf.intermediate_dropout = .5
+    conf.vanilla_wiring = False
+    conf.enc_attn = "dot_product"
+    conf.dec_hist_attn = "dot_product"
+    conf.dec_cell_height = 2
+    conf.concat_attn_to_dec_input = True
+    return conf
 
-ST_ADA_TRANS2SEQ = 'ada_trans2s'
-ADA_TRANS2SEQ_CONF = dict()
-ADA_TRANS2SEQ_CONF[DS_ATIS] = dict(
-    emb_sz=256,
-    batch_sz=20,
-    max_decoding_len=60,
-    num_heads=8,
-    num_enc_layers=2,
-    encoder='lstm',
-    decoder='lstm',
-    act_max_layer=3,
-    act=False,
-    act_dropout=.3,
-    act_epsilon=.1,
-    residual_dropout=.1,
-    attention_dropout=.1,
-    feedforward_dropout=.1,
-    embedding_dropout=.5,
-    decoder_dropout=.5,
-    prediction_dropout=.4,
-    vanilla_wiring=False,
-    act_loss_weight=-0.1,
-    dwa="dot_product",
-    enc_attn="dot_product",
-    dec_hist_attn="dot_product",
-    act_mode='mean_field',
-    dec_cell_height=2,
-)
+def unc_s2s_geoquery_conf():
+    conf = general_config()
+    conf.emb_sz = 256
+    conf.batch_sz = 20
+    conf.max_decoding_len = 60
+    conf.num_heads = 2
+    conf.num_enc_layers = 2
+    conf.encoder = 'bilstm'
+    conf.residual_dropout = .1
+    conf.attention_dropout = .1
+    conf.feedforward_dropout = .1
+    conf.intermediate_dropout = .5
+    conf.vanilla_wiring = True
+    conf.decoder = 'n_lstm'
+    conf.enc_attn = "bilinear"
+    conf.dec_hist_attn = "dot_product"
+    conf.dec_cell_height = 2
+    conf.concat_attn_to_dec_input = True
+    conf.model_mode = 0,   # 0: train s2s; 1: train RL unc; 2: joint
+    conf.scheduled_sampling = .2
+    conf.pondering_limit = 3
+    conf.uncertainty_sample_num = 5
+    conf.uncertainty_loss_weight = 1.
+    conf.reward_discount = .5
+    return conf
 
-ST_TRANSFORMER = 'transformer'
-TRANSFORMER_CONF = dict()
-TRANSFORMER_CONF[DS_GEOQUERY] = dict(
-    emb_sz=256,
-    batch_sz=32,
-    max_decoding_len=60,
-    num_heads=8,
-    num_layers=6,
-)
-TRANSFORMER_CONF[DS_ATIS] = dict(
-    emb_sz=256,
-    batch_sz=32,
-    max_decoding_len=70,
-    num_heads=8,
-    num_layers=2,
-)
+def unc_s2s_atis_conf():
+    conf = general_config()
+    conf.emb_sz = 256
+    conf.batch_sz = 20
+    conf.max_decoding_len = 60
+    conf.num_heads = 2
+    conf.num_enc_layers = 2
+    conf.encoder = 'lstm'
+    conf.residual_dropout = .1
+    conf.attention_dropout = .1
+    conf.feedforward_dropout = .1
+    conf.intermediate_dropout = .5
+    conf.vanilla_wiring = True
+    conf.decoder = 'n_lstm'
+    conf.enc_attn = "bilinear"
+    conf.dec_hist_attn = "dot_product"
+    conf.dec_cell_height = 2
+    conf.concat_attn_to_dec_input = True
+    conf.model_mode = 0,   # 0: train s2s; 1: train RL unc; 2: joint
+    conf.scheduled_sampling = .2
+    conf.pondering_limit = 3
+    conf.uncertainty_sample_num = 5
+    conf.uncertainty_loss_weight = 1.
+    conf.reward_discount = .5
+    return conf
 
-ST_UTRANSFORMER = 'ut'
-UTRANSFORMER_CONF = dict()
-UTRANSFORMER_CONF[DS_GEOQUERY] = dict(
-    emb_sz=256,
-    batch_sz=100,
-    max_decoding_len=60,
-    num_heads=8,
-    max_num_layers=1,
-    act=True,
-)
-UTRANSFORMER_CONF[DS_ATIS] = dict(
-    emb_sz=256,
-    batch_sz=100,
-    max_decoding_len=70,
-    num_heads=8,
-    max_num_layers=1,
-    act=True,
-    residual_dropout=.05,
-    attention_dropout=.001,
-    feedforward_dropout=.05,
-    vanilla_wiring=False,
-)
+def ada_t2s_atis_conf():
+    conf = general_config()
+    conf.emb_sz = 256
+    conf.batch_sz = 20
+    conf.max_decoding_len = 60
+    conf.num_heads = 8
+    conf.num_enc_layers = 2
+    conf.encoder = 'lstm'
+    conf.decoder = 'lstm'
+    conf.act_max_layer = 3
+    conf.act = False
+    conf.act_dropout = .3
+    conf.act_epsilon = .1
+    conf.residual_dropout = .1
+    conf.attention_dropout = .1
+    conf.feedforward_dropout = .1
+    conf.embedding_dropout = .5
+    conf.decoder_dropout = .5
+    conf.prediction_dropout = .4
+    conf.vanilla_wiring = False
+    conf.act_loss_weight = -0.1
+    conf.dwa = "dot_product"
+    conf.enc_attn = "dot_product"
+    conf.dec_hist_attn = "dot_product"
+    conf.act_mode = 'mean_field'
+    conf.dec_cell_height = 2
+    return conf
 
-SETTINGS = {
-    ST_SEQ2SEQ: SEQ2SEQ_CONF,
-    ST_UNC_S2S: UNC_S2S_CONF,
-    ST_TRANS2SEQ: TRANS2SEQ_CONF,
-    ST_TRANSFORMER: TRANSFORMER_CONF,
-    ST_UTRANSFORMER: UTRANSFORMER_CONF,
-    ST_ADA_TRANS2SEQ: ADA_TRANS2SEQ_CONF,
-}
+def transformer_weibo_conf():
+    conf = general_config()
+    conf.emb_sz = 256
+    conf.batch_sz = 128
+    conf.max_decoding_len = 15
+    conf.num_heads = 8
+    conf.num_layers = 6
+    conf.feedforward_dropout = 0.1
+    return conf
+
+def transformer_geoquery_conf():
+    conf = general_config()
+    conf.emb_sz = 256
+    conf.batch_sz = 32
+    conf.max_decoding_len = 60
+    conf.num_heads = 8
+    conf.num_layers = 6
+    conf.feedforward_dropout = 0.1
+    return conf
+
+def transformer_atis_conf():
+    conf = general_config()
+    conf.emb_sz = 256
+    conf.batch_sz = 32
+    conf.max_decoding_len = 70
+    conf.num_heads = 8
+    conf.num_layers = 2
+    conf.feedforward_dropout = 0.1
+    return conf
+
+def ut_geoquery_conf():
+    conf = general_config()
+    conf.emb_sz = 256
+    conf.batch_sz = 100
+    conf.max_decoding_len = 60
+    conf.num_heads = 8
+    conf.max_num_layers = 1
+    conf.act = True
+    return conf
+
+def ut_atis_conf():
+    conf = general_config()
+    conf.emb_sz = 256
+    conf.batch_sz = 100
+    conf.max_decoding_len = 70
+    conf.num_heads = 8
+    conf.max_num_layers = 1
+    conf.act = True
+    conf.residual_dropout = .05
+    conf.attention_dropout = .001
+    conf.feedforward_dropout = .05
+    conf.vanilla_wiring = False
+    return conf
+
+SETTINGS = [x for x in dir() if x.endswith('_conf')]
 

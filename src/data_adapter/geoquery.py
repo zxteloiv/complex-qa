@@ -13,7 +13,6 @@ class GeoQueryDatasetReader(allennlp.data.DatasetReader):
     def __init__(self, lazy=False):
         super(GeoQueryDatasetReader, self).__init__(lazy)
 
-        self.instance_keys = ("question", "logic_form")
         self.instance_keys = ("source_tokens", "target_tokens")
 
     def _read(self, file_path: str) -> Iterable[Instance]:
@@ -26,9 +25,9 @@ class GeoQueryDatasetReader(allennlp.data.DatasetReader):
     def text_to_instance(self, question: List[str], logic_form: List[str]) -> Instance:
 
         x = TextField(list(map(Token, question)),
-                      {'tokens': SingleIdTokenIndexer('nltokens')})
+                      {'tokens': SingleIdTokenIndexer('src_tokens')})
         z = TextField(list(map(Token, [START_SYMBOL] + logic_form + [END_SYMBOL])),
-                      {'tokens': SingleIdTokenIndexer('lftokens')})
+                      {'tokens': SingleIdTokenIndexer('tgt_tokens')})
         instance = Instance(dict(zip(self.instance_keys, (x, z))))
 
         return instance
