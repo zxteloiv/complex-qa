@@ -14,7 +14,7 @@ import allennlp.predictors
 import pickle
 
 from allennlp.data.iterators import BucketIterator
-from models.parallel_seq2seq import ParallelSeq2Seq
+from models.transformer.parallel_seq2seq import ParallelSeq2Seq
 from models.transformer.encoder import TransformerEncoder
 from models.transformer.decoder import TransformerDecoder
 from allennlp.common.util import START_SYMBOL, END_SYMBOL

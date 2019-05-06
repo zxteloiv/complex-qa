@@ -1,11 +1,11 @@
-from typing import List, Mapping, Dict, Optional, Tuple, Union, Callable, Sequence
+from typing import List, Optional, Tuple, Union, Callable
 import torch
 import torch.nn
 
 from utils.nn import AllenNLPAttentionWrapper, filter_cat
 from models.transformer.multi_head_attention import SingleTokenMHAttentionWrapper
-from models.universal_hidden_state_wrapper import UniversalHiddenStateWrapper
-from models.stacked_rnn_cell import StackedRNNCell
+from models.modules.universal_hidden_state_wrapper import UniversalHiddenStateWrapper
+from models.modules.stacked_rnn_cell import StackedRNNCell
 
 class AdaptiveStateMode:
     BASIC = "basic"

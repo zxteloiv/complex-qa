@@ -14,7 +14,7 @@ import tqdm
 import logging
 
 from allennlp.data.iterators import BucketIterator
-from models.parallel_seq2seq import ParallelSeq2Seq
+from models.transformer.parallel_seq2seq import ParallelSeq2Seq
 from models.transformer.encoder import UTEncoder
 from models.transformer.decoder import UTDecoder
 from allennlp.common.util import START_SYMBOL, END_SYMBOL

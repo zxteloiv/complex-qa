@@ -21,14 +21,14 @@ import config
 
 import data_adapter
 import utils.opt_parser
-from models.base_seq2seq import BaseSeq2Seq
+from models.base_s2s.base_seq2seq import BaseSeq2Seq
 from models.transformer.multi_head_attention import SingleTokenMHAttentionWrapper, GeneralMultiHeadAttention
 from utils.nn import AllenNLPAttentionWrapper
 from models.transformer.encoder import TransformerEncoder
-from models.universal_hidden_state_wrapper import UniversalHiddenStateWrapper, RNNType
-from models.stacked_rnn_cell import StackedLSTMCell, StackedGRUCell
+from models.modules.universal_hidden_state_wrapper import UniversalHiddenStateWrapper, RNNType
+from models.modules.stacked_rnn_cell import StackedLSTMCell, StackedGRUCell
 from allennlp.common.util import START_SYMBOL, END_SYMBOL
-from models.stacked_encoder import StackedEncoder
+from models.modules.stacked_encoder import StackedEncoder
 
 def main():
     parser = utils.opt_parser.get_trainer_opt_parser()

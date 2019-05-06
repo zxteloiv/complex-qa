@@ -1,5 +1,4 @@
-from typing import Dict, List, Tuple, Mapping, Optional, Union
-
+from typing import Union, Optional, Tuple, Dict, Any
 import numpy as np
 import torch
 import torch.nn
@@ -7,17 +6,17 @@ import allennlp.models
 from allennlp.data.vocabulary import Vocabulary
 from allennlp.modules import TokenEmbedder
 from allennlp.nn import util
-
 from models.transformer.multi_head_attention import SingleTokenMHAttentionWrapper
-from models.adaptive_rnn_cell import AdaptiveRNNCell
+from models.modules.stacked_rnn_cell import StackedRNNCell
+from utils.nn import AllenNLPAttentionWrapper, filter_cat, filter_sum
 from allennlp.training.metrics import BLEU
-from utils.nn import AllenNLPAttentionWrapper, filter_cat
+from models.modules.stacked_encoder import StackedEncoder
 
-class AdaptiveSeq2Seq(allennlp.models.Model):
+class BaseSeq2Seq(allennlp.models.Model):
     def __init__(self,
                  vocab: Vocabulary,
-                 encoder: torch.nn.Module,
-                 decoder: AdaptiveRNNCell,
+                 encoder: StackedEncoder,
+                 decoder: StackedRNNCell,
                  word_projection: torch.nn.Module,
                  source_embedding: TokenEmbedder,
                  target_embedding: TokenEmbedder,
@@ -30,18 +29,24 @@ class AdaptiveSeq2Seq(allennlp.models.Model):
                  enc_attention: Union[AllenNLPAttentionWrapper, SingleTokenMHAttentionWrapper, None] = None,
                  dec_hist_attn: Union[AllenNLPAttentionWrapper, SingleTokenMHAttentionWrapper, None] = None,
                  scheduled_sampling_ratio: float = 0.,
-                 act_loss_weight: float = 1.,
-                 prediction_dropout: float = .1,
-                 embedding_dropout: float = .1,
+                 intermediate_dropout: float = .1,
+                 concat_attn_to_dec_input: bool = False,
                  ):
-        super(AdaptiveSeq2Seq, self).__init__(vocab)
+        super(BaseSeq2Seq, self).__init__(vocab)
         self._enc_attn = enc_attention
         self._dec_hist_attn = dec_hist_attn
+
         self._scheduled_sampling_ratio = scheduled_sampling_ratio
         self._encoder = encoder
         self._decoder = decoder
         self._src_embedding = source_embedding
         self._tgt_embedding = target_embedding
+
+        src_hidden_dim = self._encoder.get_output_dim()
+        tgt_hidden_dim = self._decoder.hidden_dim
+
+        self._enc_attn_mapping = torch.nn.Linear(src_hidden_dim, tgt_hidden_dim)
+        self._dec_hist_attn_mapping = torch.nn.Linear(tgt_hidden_dim, tgt_hidden_dim)
 
         self._start_id = vocab.get_token_index(start_symbol, target_namespace)
         self._eos_id = vocab.get_token_index(eos_symbol, target_namespace)
@@ -50,11 +55,10 @@ class AdaptiveSeq2Seq(allennlp.models.Model):
         self._target_namespace = target_namespace
         self._label_smoothing = label_smoothing
 
-        self._act_loss_weight = act_loss_weight
-
-        self._pre_projection_dropout = torch.nn.Dropout(prediction_dropout)
-        self._embedding_dropout = torch.nn.Dropout(embedding_dropout)
         self._output_projection = word_projection
+
+        self._concat_attn = concat_attn_to_dec_input
+        self._dropout = torch.nn.Dropout(intermediate_dropout)
 
         if use_bleu:
             pad_index = self.vocab.get_token_index(self.vocab._padding_token, target_namespace)
@@ -72,34 +76,20 @@ class AdaptiveSeq2Seq(allennlp.models.Model):
         # target: (batch, target_length), containing the output IDs
 
         source, source_mask = source_tokens['tokens'], util.get_text_field_mask(source_tokens)
-        state = self._encode(source, source_mask)
+        state, layer_states = self._encode(source, source_mask)
+        init_hidden, _ = self._init_hidden_states(layer_states, source_mask)
 
         if target_tokens is not None:
             target, target_mask = target_tokens['tokens'], util.get_text_field_mask(target_tokens)
 
             # predictions: (batch, seq_len)
             # logits: (batch, seq_len, vocab_size)
-            # acc_halting_probs: (batch, seq_len)
-            # n_updated: (batch, seq_len)
-            predictions, logits, acc_halting_probs, n_updates =\
-                self._forward_loop(state, source_mask, target[:, :-1], target_mask[:, :-1])
-
-            loss_pred = util.sequence_cross_entropy_with_logits(logits,
-                                                                target[:, 1:].contiguous(),
-                                                                target_mask[:, 1:].float(),
-                                                                label_smoothing=self._label_smoothing)
-            if acc_halting_probs is not None and n_updates is not None:
-                # acc_halting_probs will get maximized while n_updates will get minimized
-                loss_act = (acc_halting_probs * (- n_updates - 1).float() * target_mask[:, 1:].float()).mean()
-            else:
-                loss_act = 0
-
-            loss = loss_pred + self._act_loss_weight * loss_act
-            if self._bleu:
-                self._bleu(predictions, target[:, 1:])
+            predictions, logits, others = self._forward_loop(state, source_mask, init_hidden, target, target_mask)
+            loss = self._get_loss(target, target_mask.float(), logits, others)
+            self._compute_metric(predictions, target[:, 1:])
 
         else:
-            predictions, logits, acc_halting_probs, n_updates = self._forward_loop(state, source_mask, None, None)
+            predictions, logits, _ = self._forward_loop(state, source_mask, init_hidden, None, None)
             loss = [-1]
 
         output = {
@@ -133,29 +123,22 @@ class AdaptiveSeq2Seq(allennlp.models.Model):
 
     def _encode(self,
                 source: torch.LongTensor,
-                source_mask: torch.LongTensor) -> torch.Tensor:
-        """
-        Do the encoder work: embedding + encoder(which adds positional features and do stacked multi-head attention)
-
-        :param source: (batch, max_input_length), source sequence token ids
-        :param source_mask: (batch, max_input_length), source sequence padding mask
-        :return: source hidden states output from encoder, which has shape
-                 (batch, max_input_length, hidden_dim)
-        """
-
+                source_mask: torch.LongTensor):
+        # source: (batch, max_input_length), source sequence token ids
+        # source_mask: (batch, max_input_length), source sequence padding mask
         # source_embedding: (batch, max_input_length, embedding_sz)
         source_embedding = self._src_embedding(source)
-        source_embedding = self._embedding_dropout(source_embedding)
-        source_hidden = self._encoder(source_embedding, source_mask)
-        return source_hidden
-
+        source_embedding = self._dropout(source_embedding)
+        source_hidden, layered_hidden = self._encoder(source_embedding, source_mask)
+        return source_hidden, layered_hidden
 
     def _forward_loop(self,
                       source_state: torch.Tensor,
                       source_mask: Optional[torch.LongTensor],
+                      init_hidden: torch.Tensor,
                       target: Optional[torch.LongTensor],
                       target_mask: Optional[torch.LongTensor],
-                      ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+                      ) -> Tuple[torch.Tensor, torch.Tensor, Any]:
         """
         Do the decoding process for training and prediction
 
@@ -170,24 +153,27 @@ class AdaptiveSeq2Seq(allennlp.models.Model):
         batch = source_state.size()[0]
 
         if target is not None:
-            num_decoding_steps = target.size()[1]
+            num_decoding_steps = target.size()[1] - 1
         else:
             num_decoding_steps = self._max_decoding_step
 
         # Initialize target predictions with the start index.
         # batch_start: (batch_size,)
         batch_start = source_mask.new_full((batch,), fill_value=self._start_id)
-        step_hidden, step_output = self._decoder.init_hidden_states(source_state, source_mask,
-                                                                    self._encoder.is_bidirectional())
+        step_hidden, step_output = init_hidden, self._decoder.get_output_state(init_hidden)
+
+        if self._enc_attn is not None:
+            enc_attn_fn = lambda out: self._enc_attn_mapping(self._enc_attn(out, source_state, source_mask))
+        else:
+            enc_attn_fn = None
 
         # acc_halting_probs: [(batch,)]
         # updated_num_by_step: [(batch,)]
         # step_logits: [(batch, seq_len, vocab_size)]
         # a list of predicted token ids at each step: [(batch,)]
-        acc_halting_probs_by_step = []
-        updated_num_by_step = []
         logits_by_step = []
         output_by_step = []
+        others_by_step = []
         predictions_by_step = [batch_start]
         for timestep in range(num_decoding_steps):
             if self.training and np.random.rand(1).item() < self._scheduled_sampling_ratio:
@@ -205,12 +191,7 @@ class AdaptiveSeq2Seq(allennlp.models.Model):
 
             # inputs_embedding: (batch, embedding_dim)
             inputs_embedding = self._tgt_embedding(step_inputs)
-            inputs_embedding = self._embedding_dropout(inputs_embedding)
-
-            if self._enc_attn is not None:
-                enc_attn_fn = lambda out: self._enc_attn(out, source_state, source_mask)
-            else:
-                enc_attn_fn = None
+            inputs_embedding = self._dropout(inputs_embedding)
 
             if self._dec_hist_attn is None:
                 dec_hist_attn_fn = None
@@ -218,31 +199,18 @@ class AdaptiveSeq2Seq(allennlp.models.Model):
             elif len(output_by_step) > 0:
                 dec_hist = torch.stack(output_by_step, dim=1)
                 dec_hist_mask = target_mask[:, :timestep] if target_mask is not None else None
-                dec_hist_attn_fn = lambda out: self._dec_hist_attn(out, dec_hist, dec_hist_mask)
+                dec_hist_attn_fn = lambda out: self._dec_hist_attn_mapping(
+                    self._dec_hist_attn(out, dec_hist, dec_hist_mask)
+                )
 
             else:
                 dec_hist_attn_fn = lambda out: torch.zeros_like(out)
 
-            # compute attention context before the output is updated
-            enc_context = enc_attn_fn(step_output) if enc_attn_fn else None
-            dec_hist_context = dec_hist_attn_fn(step_output) if dec_hist_attn_fn else None
-
-            # step_hidden: some_hidden_var_with_unknown_internals
-            # step_output: (batch, hidden_dim)
-            # step_acc_halting_probs: (batch, )
-            # update_num: (batch, )
-            step_hidden, step_output, step_acc_halting_probs, update_num = self._decoder(
-                inputs_embedding, step_hidden,
-                enc_attn_fn, dec_hist_attn_fn
-            )
-
-            if step_acc_halting_probs is not None:
-                acc_halting_probs_by_step.append(step_acc_halting_probs)
-                updated_num_by_step.append(update_num)
-
-            # step_logit: (batch, vocab_size)
-            proj_input = filter_cat([step_output, enc_context, dec_hist_context], dim=-1)
-            step_logit = self._output_projection(self._pre_projection_dropout(proj_input))
+            dec_out = self._run_decoder(target[:, timestep + 1] if target is not None else None,
+                                        inputs_embedding, step_hidden, step_output, enc_attn_fn, dec_hist_attn_fn)
+            step_hidden, step_output, step_logit = dec_out[:3]
+            if len(dec_out) > 3:
+                others_by_step.append(dec_out[3:])
 
             output_by_step.append(step_output)
             logits_by_step.append(step_logit)
@@ -254,18 +222,76 @@ class AdaptiveSeq2Seq(allennlp.models.Model):
 
         # predictions: (batch, seq_len)
         # logits: (batch, seq_len, vocab_size)
-        # acc_halting_probs: (batch, seq_len)
-        # n_updated: (batch, seq_len)
         predictions = torch.stack(predictions_by_step[1:], dim=1)
         logits = torch.stack(logits_by_step, dim=1)
-        acc_halting_probs = torch.stack(acc_halting_probs_by_step, dim=1) if acc_halting_probs_by_step else None
-        n_updated = torch.stack(updated_num_by_step, dim=1) if len(updated_num_by_step) > 0 else None
 
-        return predictions, logits, acc_halting_probs, n_updated
+        return predictions, logits, others_by_step
+
+    def _run_decoder(self, step_target, inputs_embedding, step_hidden, step_output, enc_attn_fn, dec_hist_attn_fn):
+        batch = inputs_embedding.size()[0]
+        # compute attention context before the output is updated
+        enc_context = enc_attn_fn(step_output) if enc_attn_fn else None
+        dec_hist_context = dec_hist_attn_fn(step_output) if dec_hist_attn_fn else None
+
+        # step_hidden: some_hidden_var_with_unknown_internals
+        # step_output: (batch, hidden_dim)
+        cat_context = []
+        if self._concat_attn and enc_context is not None:
+            cat_context.append(self._dropout(enc_context))
+        if self._concat_attn and dec_hist_context is not None:
+            cat_context.append(self._dropout(dec_hist_context))
+        dec_output = self._decoder(inputs_embedding, step_hidden, cat_context)
+        step_hidden, step_output = dec_output[:2]
+
+        step_logit = self._get_step_projection(step_output, enc_context, dec_hist_context)
+
+        return step_hidden, step_output, step_logit
+
+    def _get_step_projection(self, *inputs):
+        # step_logit: (batch, vocab_size)
+        if self._concat_attn:
+            proj_input = filter_cat(inputs, dim=-1)
+        else:
+            proj_input = filter_sum(inputs)
+
+        proj_input = self._dropout(proj_input)
+        step_logit = self._output_projection(proj_input)
+        return step_logit
+
 
     def get_metrics(self, reset: bool = False) -> Dict[str, float]:
         all_metrics: Dict[str, float] = {}
         if self._bleu: # and not self.training:
             all_metrics.update(self._bleu.get_metric(reset=reset))
         return all_metrics
+
+    def _get_loss(self, target, target_mask, logits, other):
+        loss_pred = util.sequence_cross_entropy_with_logits(logits, target[:, 1:].contiguous(), target_mask[:, 1:],
+                                                            label_smoothing=self._label_smoothing)
+        loss = loss_pred
+        return loss
+
+    def _init_hidden_states(self, layer_state, source_mask: torch.LongTensor):
+        batch, _, hidden_dim = layer_state[0].size()
+
+        last_word_indices = source_mask.sum(1).long() - 1
+        expanded_indices = last_word_indices.view(-1, 1, 1).expand(batch, 1, hidden_dim)
+
+        # [(batch, hidden_dim)]
+        forward_by_layer = [state.gather(1, expanded_indices).squeeze(1) for state in layer_state]
+
+        if self._encoder.is_bidirectional():
+            hidden_dim = hidden_dim // 2
+            forward = [state[:, :hidden_dim] for state in forward_by_layer]
+            backward = [layer_state[i][:, 0, hidden_dim:] for i in range(len(forward))]
+
+        else:
+            forward = forward_by_layer
+            backward = None
+
+        return self._decoder.init_hidden_states_by_layer(forward, backward)
+
+    def _compute_metric(self, predictions, labels):
+        if self._bleu:
+            self._bleu(predictions, labels)
 

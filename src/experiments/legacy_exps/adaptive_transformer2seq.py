@@ -20,13 +20,13 @@ import config
 
 import data_adapter
 import utils.opt_parser
-from models.adaptive_seq2seq import AdaptiveSeq2Seq
+from models.ada_s2s.adaptive_seq2seq import AdaptiveSeq2Seq
 from models.transformer.multi_head_attention import SingleTokenMHAttentionWrapper, GeneralMultiHeadAttention
 from utils.nn import AllenNLPAttentionWrapper
 from models.transformer.encoder import TransformerEncoder
-from models.adaptive_rnn_cell import ACTRNNCell
-from models.universal_hidden_state_wrapper import UniversalHiddenStateWrapper, RNNType
-from models.stacked_rnn_cell import StackedLSTMCell, StackedGRUCell
+from models.ada_s2s.adaptive_rnn_cell import ACTRNNCell
+from models.modules.universal_hidden_state_wrapper import UniversalHiddenStateWrapper, RNNType
+from models.modules.stacked_rnn_cell import StackedLSTMCell, StackedGRUCell
 from allennlp.common.util import START_SYMBOL, END_SYMBOL
 
 def main():

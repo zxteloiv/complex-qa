@@ -1,8 +1,6 @@
-from typing import Union, Optional, List, Tuple, Dict
+from typing import Union, Optional, Dict
 import torch
 import torch.nn
-import numpy as np
-from functools import reduce
 
 from allennlp.data.vocabulary import Vocabulary
 from allennlp.modules import TokenEmbedder
@@ -10,11 +8,11 @@ from allennlp.nn.util import masked_softmax
 from allennlp.nn import util as allen_util
 from utils.nn import AllenNLPAttentionWrapper, filter_cat, filter_sum
 from models.transformer.multi_head_attention import SingleTokenMHAttentionWrapper
-from models.base_seq2seq import BaseSeq2Seq
+from models.base_s2s.base_seq2seq import BaseSeq2Seq
 from training.tree_acc_metric import TreeAccuracy
 
-from models.stacked_encoder import StackedEncoder
-from models.stacked_rnn_cell import StackedRNNCell
+from models.modules.stacked_encoder import StackedEncoder
+from models.modules.stacked_rnn_cell import StackedRNNCell
 
 class UncSeq2Seq(BaseSeq2Seq):
     def __init__(self,

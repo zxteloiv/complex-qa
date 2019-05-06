@@ -1,7 +1,7 @@
-from typing import List, Mapping, Dict, Optional, Tuple, Union, Callable, Sequence
+from typing import List, Optional, Callable
 import torch.nn
 
-from models.independent_rnn import IndRNNCell
+from models.modules.independent_rnn import IndRNNCell
 from utils.nn import filter_cat
 
 class RNNType:

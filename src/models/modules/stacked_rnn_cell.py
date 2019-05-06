@@ -1,7 +1,7 @@
-from typing import List, Mapping, Dict, Optional, Tuple, Union, Callable, Sequence
+from typing import List, Optional
 import torch
 import torch.nn
-from models.universal_hidden_state_wrapper import UniversalHiddenStateWrapper, RNNType
+from models.modules.universal_hidden_state_wrapper import UniversalHiddenStateWrapper, RNNType
 from utils.nn import filter_cat
 
 class StackedRNNCell(torch.nn.Module):
