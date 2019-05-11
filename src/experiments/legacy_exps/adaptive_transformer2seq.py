@@ -19,7 +19,7 @@ from allennlp.modules.attention import BilinearAttention, DotProductAttention
 import config
 
 import data_adapter
-import utils.opt_parser
+import training.exp_runner.opt_parser
 from models.ada_s2s.adaptive_seq2seq import AdaptiveSeq2Seq
 from models.transformer.multi_head_attention import SingleTokenMHAttentionWrapper, GeneralMultiHeadAttention
 from utils.nn import AllenNLPAttentionWrapper
@@ -30,7 +30,7 @@ from models.modules.stacked_rnn_cell import StackedLSTMCell, StackedGRUCell
 from allennlp.common.util import START_SYMBOL, END_SYMBOL
 
 def main():
-    parser = utils.opt_parser.get_trainer_opt_parser()
+    parser = training.exp_runner.opt_parser.get_trainer_opt_parser()
     parser.add_argument('models', nargs='*', help='pretrained models for the same setting')
     parser.add_argument('--test', action="store_true", help='use testing mode')
     parser.add_argument('--emb-dim', type=int, help='basic embedding dimension')

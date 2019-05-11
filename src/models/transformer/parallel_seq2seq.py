@@ -78,13 +78,14 @@ class ParallelSeq2Seq(allennlp.models.Model):
                                                            label_smoothing=self._label_smoothing)
         else: # testing
             predictions, logits = self._forward_prediction(state, source_mask)
-            loss = -1
+            loss = None
 
         output = {
             "predictions": predictions,
             "logits": logits,
-            "loss": loss,
         }
+        if loss is not None:
+            output['loss'] = loss
 
         return output
 
@@ -143,7 +144,7 @@ class ParallelSeq2Seq(allennlp.models.Model):
         target_embedding = self._tgt_embedding(target)
         target_hidden = self._decoder(target_embedding, target_mask, state, source_mask)
         logits = self._output_projection_layer(target_hidden)
-        predictions = torch.argmax(logits, dim=-1)
+        predictions = torch.argmax(logits, dim=-1).detach_()
 
         return predictions, logits
 

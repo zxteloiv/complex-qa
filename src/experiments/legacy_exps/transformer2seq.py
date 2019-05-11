@@ -1,5 +1,3 @@
-from typing import Dict, Mapping, Iterator, List
-
 import os.path
 import datetime
 import torch
@@ -21,12 +19,12 @@ from allennlp.modules.token_embedders import Embedding
 import config
 
 import data_adapter
-import utils.opt_parser
+import training.exp_runner.opt_parser
 from models.transformer.encoder import TransformerEncoder, UTEncoder
 
 
 def main():
-    parser = utils.opt_parser.get_trainer_opt_parser()
+    parser = training.exp_runner.opt_parser.get_trainer_opt_parser()
     parser.add_argument('models', nargs='*', help='pretrained models for the same setting')
     parser.add_argument('--test', action="store_true", help='use testing mode')
     parser.add_argument('--num-layer', type=int, help='maximum number of stacked layers')

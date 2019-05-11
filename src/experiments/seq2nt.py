@@ -20,8 +20,15 @@ from models.transformer.decoder import TransformerDecoder
 from allennlp.common.util import START_SYMBOL, END_SYMBOL
 
 def main():
-    parser = training.exp_runner.opt_parser.get_common_opt_parser()
+    parser = training.exp_runner.opt_parser.get_trainer_opt_parser()
     parser.add_argument('models', nargs='*', help='pretrained models for the same setting')
+    parser.add_argument('--test', action="store_true", help='use testing mode')
+    parser.add_argument('--hparamset', help="available hyper-parameters")
+    parser.add_argument('--from-hparamset-dump', help='read hyperparameters from the dump file, to reproduce')
+    parser.add_argument('--list-hparamset', action='store_true')
+    parser.add_argument('--snapshot-dir', help="snapshot dir if continues")
+    parser.add_argument('--dataset', default="spider", choices=config.DATASETS.keys())
+    parser.add_argument('--data-reader', default="spider", choices=data_adapter.DATA_READERS.keys())
 
     args = parser.parse_args()
 
@@ -128,7 +135,7 @@ def run_model(args, conf):
         predictor = allennlp.predictors.Seq2SeqPredictor(model, reader)
 
         for instance in testing_set:
-            print('SRC: ', ' '.join(str(tok) for tok in instance.fields['source_tokens'].tokens))
+            print('SRC: ', instance.fields['source_tokens'].tokens)
             print('GOLD:', ' '.join(str(x) for x in instance.fields['target_tokens'].tokens[1:-1]))
             del instance.fields['target_tokens']
             output = predictor.predict_instance(instance)

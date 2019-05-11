@@ -1,5 +1,3 @@
-from typing import Dict, Mapping, Iterator, List
-
 import os.path
 import datetime
 import torch
@@ -16,16 +14,16 @@ import allennlp.modules
 import allennlp.predictors
 from allennlp.modules.seq2seq_encoders import PytorchSeq2SeqWrapper
 from allennlp.modules.text_field_embedders import BasicTextFieldEmbedder
-from allennlp.modules.token_embedders import TokenEmbedder, Embedding
+from allennlp.modules.token_embedders import Embedding
 
 import config
 
 import data_adapter
-import utils.opt_parser
+import training.exp_runner.opt_parser
 
 
 def main():
-    parser = utils.opt_parser.get_trainer_opt_parser()
+    parser = training.exp_runner.opt_parser.get_trainer_opt_parser()
     parser.add_argument('models', nargs='*', help='pretrained models for the same setting')
     parser.add_argument('--enc-layers', type=int, default=1, help="encoder layer number defaulted to 1")
     parser.add_argument('--test', action="store_true", help='use testing mode')

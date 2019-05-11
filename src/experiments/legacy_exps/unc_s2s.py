@@ -23,7 +23,7 @@ from allennlp.modules.seq2seq_encoders.pytorch_seq2seq_wrapper import PytorchSeq
 import config
 
 import data_adapter
-import utils.opt_parser
+import training.exp_runner.opt_parser
 from models.ada_s2s.unc_seq2seq import UncSeq2Seq
 from models.transformer.multi_head_attention import SingleTokenMHAttentionWrapper, GeneralMultiHeadAttention
 from utils.nn import AllenNLPAttentionWrapper
@@ -35,7 +35,7 @@ from allennlp.nn.util import move_to_device
 from models.modules.stacked_encoder import StackedEncoder
 
 def main():
-    parser = utils.opt_parser.get_trainer_opt_parser()
+    parser = training.exp_runner.opt_parser.get_trainer_opt_parser()
     parser.add_argument('models', nargs='*', help='pretrained models for the same setting')
     parser.add_argument('--test', action="store_true", help='use testing mode')
     parser.add_argument('--test-on-val', action="store_true", help='use testing mode')

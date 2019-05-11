@@ -12,35 +12,35 @@ class HyperParamSet:
                         if hasattr(self, attr) and not attr.startswith('_'))
         return json.dumps(json_obj)
 
-def general_config():
-    conf = HyperParamSet()
+def general_hparams():
+    hparams = HyperParamSet()
 
-    conf.DEVICE = -1
+    hparams.DEVICE = -1
     ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
-    conf.ROOT = ROOT
-    conf.SNAPSHOT_PATH = os.path.join(ROOT, 'snapshots')
+    hparams.ROOT = ROOT
+    hparams.SNAPSHOT_PATH = os.path.join(ROOT, 'snapshots')
 
-    conf.LOG_REPORT_INTERVAL = (1, 'iteration')
-    conf.TRAINING_LIMIT = 500  # in num of epochs
-    conf.SAVE_INTERVAL = (100, 'iteration')
+    hparams.LOG_REPORT_INTERVAL = (1, 'iteration')
+    hparams.TRAINING_LIMIT = 500  # in num of epochs
+    hparams.SAVE_INTERVAL = (100, 'iteration')
 
-    conf.ADAM_LR = 1e-3
-    conf.ADAM_BETAS = (.9, .98)
-    conf.ADAM_EPS = 1e-9
+    hparams.ADAM_LR = 1e-3
+    hparams.ADAM_BETAS = (.9, .98)
+    hparams.ADAM_EPS = 1e-9
 
-    conf.GRAD_CLIPPING = 5
+    hparams.GRAD_CLIPPING = 5
 
-    conf.SGD_LR = 1e-2
-    conf.DATA_PATH = os.path.join(ROOT, 'data')
+    hparams.SGD_LR = 1e-2
+    hparams.DATA_PATH = os.path.join(ROOT, 'data')
 
-    return conf
+    return hparams
 
 # ======================
 # dataset config
 
 from utils.dataset_path import DatasetPath
 
-DATA_PATH = general_config().DATA_PATH
+DATA_PATH = general_hparams().DATA_PATH
 DATASETS = dict()
 DATASETS["atis"] = DatasetPath(
     train_path=os.path.join(DATA_PATH, 'atis', 'train.json'),
@@ -83,198 +83,229 @@ DATASETS['django'] = DatasetPath(
     dev_path="",
     test_path=os.path.join(DATA_PATH, 'django', 'test.json'),
 )
+DATASETS['spider'] = DatasetPath(
+    train_path=os.path.join(DATA_PATH, 'spider', 'train_spider.json'),
+    dev_path=os.path.join(DATA_PATH, 'spider', 'dev.json'),
+    test_path=os.path.join(DATA_PATH, 'spider', 'dev.json'),
+)
+DATASETS['dialogue'] = DatasetPath(
+    train_path=os.path.join(DATA_PATH, 'dialogue_data', 'dialogue_train_data'),
+    dev_path=os.path.join(DATA_PATH, 'dialogue_data', 'dialogue_valid_data'),
+    test_path=os.path.join(DATA_PATH, 'dialogue_data', 'dialogue_test_data'),
+)
 
 # ======================
 # model config
 
-def s2s_geoquery_conf():
-    conf = general_config()
-    conf.emb_sz = 50
-    conf.batch_sz = 32
-    conf.max_decoding_len = 50
-    return conf
+def s2s_geoquery_hparams():
+    hparams = general_hparams()
+    hparams.emb_sz = 50
+    hparams.batch_sz = 32
+    hparams.max_decoding_len = 50
+    return hparams
 
-def s2s_atis_conf():
-    conf = general_config()
-    conf.emb_sz = 200
-    conf.batch_sz = 32
-    conf.max_decoding_len = 60
-    return conf
+def s2s_atis_hparams():
+    hparams = general_hparams()
+    hparams.emb_sz = 200
+    hparams.batch_sz = 32
+    hparams.max_decoding_len = 60
+    return hparams
 
 def t2s_geoquery_conf():
-    conf = general_config()
-    conf.emb_sz = 256
-    conf.batch_sz = 32
-    conf.max_decoding_len = 50
-    return conf
+    hparams = general_hparams()
+    hparams.emb_sz = 256
+    hparams.batch_sz = 32
+    hparams.max_decoding_len = 50
+    return hparams
 
-def t2s_atis_conf():
-    conf = general_config()
-    conf.emb_sz = 256
-    conf.batch_sz = 32
-    conf.max_decoding_len = 50
-    conf.num_heads = 8
-    conf.max_num_layers = 1
-    conf.act = False
-    conf.residual_dropout = .1
-    conf.attention_dropout = .1
-    conf.feedforward_dropout = .1
-    conf.vanilla_wiring = False
-    return conf
+def t2s_atis_hparams():
+    hparams = general_hparams()
+    hparams.emb_sz = 256
+    hparams.batch_sz = 32
+    hparams.max_decoding_len = 50
+    hparams.num_heads = 8
+    hparams.max_num_layers = 1
+    hparams.act = False
+    hparams.residual_dropout = .1
+    hparams.attention_dropout = .1
+    hparams.feedforward_dropout = .1
+    hparams.vanilla_wiring = False
+    return hparams
 
-def base_s2s_atis_conf():
-    conf = general_config()
-    conf.emb_sz = 256
-    conf.batch_sz = 20
-    conf.max_decoding_len = 60
-    conf.num_heads = 8
-    conf.num_enc_layers = 2
-    conf.encoder = 'lstm'
-    conf.decoder = 'lstm'
-    conf.residual_dropout = .1
-    conf.attention_dropout = .1
-    conf.feedforward_dropout = .1
-    conf.intermediate_dropout = .5
-    conf.vanilla_wiring = False
-    conf.enc_attn = "dot_product"
-    conf.dec_hist_attn = "dot_product"
-    conf.dec_cell_height = 2
-    conf.concat_attn_to_dec_input = True
-    return conf
+def base_s2s_atis_hparams():
+    hparams = general_hparams()
+    hparams.emb_sz = 256
+    hparams.batch_sz = 20
+    hparams.max_decoding_len = 60
+    hparams.num_heads = 8
+    hparams.num_enc_layers = 2
+    hparams.encoder = 'lstm'
+    hparams.decoder = 'lstm'
+    hparams.residual_dropout = .1
+    hparams.attention_dropout = .1
+    hparams.feedforward_dropout = .1
+    hparams.intermediate_dropout = .5
+    hparams.vanilla_wiring = False
+    hparams.enc_attn = "dot_product"
+    hparams.dec_hist_attn = "dot_product"
+    hparams.dec_cell_height = 2
+    hparams.concat_attn_to_dec_input = True
+    return hparams
 
-def unc_s2s_geoquery_conf():
-    conf = general_config()
-    conf.emb_sz = 256
-    conf.batch_sz = 20
-    conf.max_decoding_len = 60
-    conf.num_heads = 2
-    conf.num_enc_layers = 2
-    conf.encoder = 'bilstm'
-    conf.residual_dropout = .1
-    conf.attention_dropout = .1
-    conf.feedforward_dropout = .1
-    conf.intermediate_dropout = .5
-    conf.vanilla_wiring = True
-    conf.decoder = 'n_lstm'
-    conf.enc_attn = "bilinear"
-    conf.dec_hist_attn = "dot_product"
-    conf.dec_cell_height = 2
-    conf.concat_attn_to_dec_input = True
-    conf.model_mode = 0,   # 0: train s2s; 1: train RL unc; 2: joint
-    conf.scheduled_sampling = .2
-    conf.pondering_limit = 3
-    conf.uncertainty_sample_num = 5
-    conf.uncertainty_loss_weight = 1.
-    conf.reward_discount = .5
-    return conf
+def unc_s2s_geoquery_hparams():
+    hparams = general_hparams()
+    hparams.emb_sz = 256
+    hparams.batch_sz = 20
+    hparams.max_decoding_len = 60
+    hparams.num_heads = 2
+    hparams.num_enc_layers = 2
+    hparams.encoder = 'bilstm'
+    hparams.residual_dropout = .1
+    hparams.attention_dropout = .1
+    hparams.feedforward_dropout = .1
+    hparams.intermediate_dropout = .5
+    hparams.vanilla_wiring = True
+    hparams.decoder = 'n_lstm'
+    hparams.enc_attn = "bilinear"
+    hparams.dec_hist_attn = "dot_product"
+    hparams.dec_cell_height = 2
+    hparams.concat_attn_to_dec_input = True
+    hparams.model_mode = 0,   # 0: train s2s; 1: train RL unc; 2: joint
+    hparams.scheduled_sampling = .2
+    hparams.pondering_limit = 3
+    hparams.uncertainty_sample_num = 5
+    hparams.uncertainty_loss_weight = 1.
+    hparams.reward_discount = .5
+    return hparams
 
-def unc_s2s_atis_conf():
-    conf = general_config()
-    conf.emb_sz = 256
-    conf.batch_sz = 20
-    conf.max_decoding_len = 60
-    conf.num_heads = 2
-    conf.num_enc_layers = 2
-    conf.encoder = 'lstm'
-    conf.residual_dropout = .1
-    conf.attention_dropout = .1
-    conf.feedforward_dropout = .1
-    conf.intermediate_dropout = .5
-    conf.vanilla_wiring = True
-    conf.decoder = 'n_lstm'
-    conf.enc_attn = "bilinear"
-    conf.dec_hist_attn = "dot_product"
-    conf.dec_cell_height = 2
-    conf.concat_attn_to_dec_input = True
-    conf.model_mode = 0,   # 0: train s2s; 1: train RL unc; 2: joint
-    conf.scheduled_sampling = .2
-    conf.pondering_limit = 3
-    conf.uncertainty_sample_num = 5
-    conf.uncertainty_loss_weight = 1.
-    conf.reward_discount = .5
-    return conf
+def unc_s2s_atis_hparams():
+    hparams = general_hparams()
+    hparams.emb_sz = 256
+    hparams.batch_sz = 20
+    hparams.max_decoding_len = 60
+    hparams.num_heads = 2
+    hparams.num_enc_layers = 2
+    hparams.encoder = 'lstm'
+    hparams.residual_dropout = .1
+    hparams.attention_dropout = .1
+    hparams.feedforward_dropout = .1
+    hparams.intermediate_dropout = .5
+    hparams.vanilla_wiring = True
+    hparams.decoder = 'n_lstm'
+    hparams.enc_attn = "bilinear"
+    hparams.dec_hist_attn = "dot_product"
+    hparams.dec_cell_height = 2
+    hparams.concat_attn_to_dec_input = True
+    hparams.model_mode = 0,   # 0: train s2s; 1: train RL unc; 2: joint
+    hparams.scheduled_sampling = .2
+    hparams.pondering_limit = 3
+    hparams.uncertainty_sample_num = 5
+    hparams.uncertainty_loss_weight = 1.
+    hparams.reward_discount = .5
+    return hparams
 
-def ada_t2s_atis_conf():
-    conf = general_config()
-    conf.emb_sz = 256
-    conf.batch_sz = 20
-    conf.max_decoding_len = 60
-    conf.num_heads = 8
-    conf.num_enc_layers = 2
-    conf.encoder = 'lstm'
-    conf.decoder = 'lstm'
-    conf.act_max_layer = 3
-    conf.act = False
-    conf.act_dropout = .3
-    conf.act_epsilon = .1
-    conf.residual_dropout = .1
-    conf.attention_dropout = .1
-    conf.feedforward_dropout = .1
-    conf.embedding_dropout = .5
-    conf.decoder_dropout = .5
-    conf.prediction_dropout = .4
-    conf.vanilla_wiring = False
-    conf.act_loss_weight = -0.1
-    conf.dwa = "dot_product"
-    conf.enc_attn = "dot_product"
-    conf.dec_hist_attn = "dot_product"
-    conf.act_mode = 'mean_field'
-    conf.dec_cell_height = 2
-    return conf
+def ada_t2s_atis_hparams():
+    hparams = general_hparams()
+    hparams.emb_sz = 256
+    hparams.batch_sz = 20
+    hparams.max_decoding_len = 60
+    hparams.num_heads = 8
+    hparams.num_enc_layers = 2
+    hparams.encoder = 'lstm'
+    hparams.decoder = 'lstm'
+    hparams.act_max_layer = 3
+    hparams.act = False
+    hparams.act_dropout = .3
+    hparams.act_epsilon = .1
+    hparams.residual_dropout = .1
+    hparams.attention_dropout = .1
+    hparams.feedforward_dropout = .1
+    hparams.embedding_dropout = .5
+    hparams.decoder_dropout = .5
+    hparams.prediction_dropout = .4
+    hparams.vanilla_wiring = False
+    hparams.act_loss_weight = -0.1
+    hparams.dwa = "dot_product"
+    hparams.enc_attn = "dot_product"
+    hparams.dec_hist_attn = "dot_product"
+    hparams.act_mode = 'mean_field'
+    hparams.dec_cell_height = 2
+    return hparams
 
-def transformer_weibo_conf():
-    conf = general_config()
-    conf.emb_sz = 256
-    conf.batch_sz = 128
-    conf.max_decoding_len = 15
-    conf.num_heads = 8
-    conf.num_layers = 6
-    conf.feedforward_dropout = 0.1
-    return conf
+def transformer_dialogue_hparams():
+    hparams = general_hparams()
+    hparams.emb_sz = 256
+    hparams.batch_sz = 128
+    hparams.max_decoding_len = 20
+    hparams.num_heads = 8
+    hparams.num_layers = 3
+    hparams.feedforward_dropout = 0.1
+    hparams.ADAM_LR = 1e-4
+    return hparams
 
-def transformer_geoquery_conf():
-    conf = general_config()
-    conf.emb_sz = 256
-    conf.batch_sz = 32
-    conf.max_decoding_len = 60
-    conf.num_heads = 8
-    conf.num_layers = 6
-    conf.feedforward_dropout = 0.1
-    return conf
+def transformer_weibo_hparams():
+    hparams = general_hparams()
+    hparams.emb_sz = 256
+    hparams.batch_sz = 128
+    hparams.max_decoding_len = 15
+    hparams.num_heads = 8
+    hparams.num_layers = 6
+    hparams.feedforward_dropout = 0.1
+    return hparams
 
-def transformer_atis_conf():
-    conf = general_config()
-    conf.emb_sz = 256
-    conf.batch_sz = 32
-    conf.max_decoding_len = 70
-    conf.num_heads = 8
-    conf.num_layers = 2
-    conf.feedforward_dropout = 0.1
-    return conf
+def transformer_spider_hparams():
+    hparams = general_hparams()
+    hparams.emb_sz = 256
+    hparams.batch_sz = 64
+    hparams.max_decoding_len = 60
+    hparams.num_heads = 8
+    hparams.num_layers = 2
+    hparams.feedforward_dropout = 0.1
+    return hparams
 
-def ut_geoquery_conf():
-    conf = general_config()
-    conf.emb_sz = 256
-    conf.batch_sz = 100
-    conf.max_decoding_len = 60
-    conf.num_heads = 8
-    conf.max_num_layers = 1
-    conf.act = True
-    return conf
+def transformer_geoquery_hparams():
+    hparams = general_hparams()
+    hparams.emb_sz = 256
+    hparams.batch_sz = 32
+    hparams.max_decoding_len = 60
+    hparams.num_heads = 8
+    hparams.num_layers = 6
+    hparams.feedforward_dropout = 0.1
+    return hparams
 
-def ut_atis_conf():
-    conf = general_config()
-    conf.emb_sz = 256
-    conf.batch_sz = 100
-    conf.max_decoding_len = 70
-    conf.num_heads = 8
-    conf.max_num_layers = 1
-    conf.act = True
-    conf.residual_dropout = .05
-    conf.attention_dropout = .001
-    conf.feedforward_dropout = .05
-    conf.vanilla_wiring = False
-    return conf
+def transformer_atis_hparams():
+    hparams = general_hparams()
+    hparams.emb_sz = 256
+    hparams.batch_sz = 32
+    hparams.max_decoding_len = 70
+    hparams.num_heads = 8
+    hparams.num_layers = 2
+    hparams.feedforward_dropout = 0.1
+    return hparams
 
-SETTINGS = [x for x in dir() if x.endswith('_conf')]
+def ut_geoquery_hparams():
+    hparams = general_hparams()
+    hparams.emb_sz = 256
+    hparams.batch_sz = 100
+    hparams.max_decoding_len = 60
+    hparams.num_heads = 8
+    hparams.max_num_layers = 1
+    hparams.act = True
+    return hparams
+
+def ut_atis_hparams():
+    hparams = general_hparams()
+    hparams.emb_sz = 256
+    hparams.batch_sz = 100
+    hparams.max_decoding_len = 70
+    hparams.num_heads = 8
+    hparams.max_num_layers = 1
+    hparams.act = True
+    hparams.residual_dropout = .05
+    hparams.attention_dropout = .001
+    hparams.feedforward_dropout = .05
+    hparams.vanilla_wiring = False
+    return hparams
+
+SETTINGS = [x for x in dir() if x.endswith('_hparams')]
 

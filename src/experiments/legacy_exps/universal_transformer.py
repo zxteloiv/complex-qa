@@ -1,7 +1,7 @@
 import os.path
 import datetime
 import config
-import utils.opt_parser
+import training.exp_runner.opt_parser
 import data_adapter
 import torch
 import allennlp
@@ -20,7 +20,7 @@ from models.transformer.decoder import UTDecoder
 from allennlp.common.util import START_SYMBOL, END_SYMBOL
 
 def main():
-    parser = utils.opt_parser.get_trainer_opt_parser()
+    parser = training.exp_runner.opt_parser.get_trainer_opt_parser()
     parser.add_argument('models', nargs='*', help='pretrained models for the same setting')
     parser.add_argument('--test', action="store_true", help='use testing mode')
     parser.add_argument('--no-act', action="store_true", help='Do not use ACT for layer computation')
