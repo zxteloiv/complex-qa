@@ -1,3 +1,4 @@
+from typing import Callable, Optional
 import logging
 import torch
 import pickle
@@ -16,6 +17,7 @@ logger = logging.getLogger(__name__)
 class ExperimentRunner:
     def __init__(self,
                  exp_name="default_savedir",
+                 get_model_func: Optional[Callable] = None,
                  reader=None,
                  dataset_path=None,
                  vocab=None):
@@ -28,13 +30,16 @@ class ExperimentRunner:
         self.train_set = None
         self.dev_set = None
         self.test_set = None
+        self.args = self.parser.parse_args()
+        self.hparams = config.SETTINGS[self.args.hparamset]() if self.args.hparamset else None
+        self.fn_get_model = get_model_func
 
     def run(self):
-        args = self.parser.parse_args()
+        args, hparams = self.args, self.hparams
 
         if args.list_hparamset:
             import json
-            print(json.dumps(config.SETTINGS, indent=4))
+            print(json.dumps(list(config.SETTINGS.keys()), indent=4))
             return
 
         # logging args
@@ -44,11 +49,6 @@ class ExperimentRunner:
             logger.setLevel(logging.DEBUG)
         else:
             logger.setLevel(logging.INFO)
-
-        if args.from_hparamset_dump:
-            hparams = pickle.load(open(args.from_hparamset_dump))
-        else:
-            hparams = getattr(config, args.hparamset)()
 
         if args.device >= 0:
             hparams.DEVICE = args.device
@@ -65,7 +65,10 @@ class ExperimentRunner:
             self.train(args, hparams, model)
 
     def get_model(self, hparams, vocab):
-        raise NotImplemented
+        if self.fn_get_model is not None:
+            return self.fn_get_model(hparams, vocab)
+        else:
+            raise NotImplemented
 
     def init_components(self, args, hparams):
         if self.dataset_path is None:

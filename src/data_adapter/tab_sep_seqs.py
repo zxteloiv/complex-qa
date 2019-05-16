@@ -65,6 +65,34 @@ class TabSepSharedVocabReader(allennlp.data.DatasetReader):
 
         return instance
 
+class TabSepCharReader(allennlp.data.DatasetReader):
+    def __init__(self, lazy=False, max_sent_length=30):
+        super(TabSepCharReader, self).__init__(lazy)
+        self.instance_keys = ("source_tokens", "target_tokens")
+        self.max_sent_length = max_sent_length
+
+    def _read(self, file_path: str) -> Iterable[Instance]:
+        for line in open(file_path):
+            parts = line.rstrip().split('\t')
+            if len(parts) != 2:
+                logging.warning('Skip invalid line: %s' % str(parts))
+                continue
+            src, tgt = parts
+            src = list(filter(lambda x: x not in ("", ' ', '\t'), list(src)))
+            tgt = list(filter(lambda x: x not in ("", ' ', '\t'), list(tgt)))
+            instance = self.text_to_instance(src, tgt)
+            yield instance
+
+    def text_to_instance(self, source: List[str], target: List[str]) -> Instance:
+
+        x = TextField(list(map(Token, source[:self.max_sent_length])),
+                      {'tokens': SingleIdTokenIndexer()})
+        y = TextField(list(map(Token, [START_SYMBOL] + target[:(self.max_sent_length - 1)] + [END_SYMBOL])),
+                      {'tokens': SingleIdTokenIndexer()})
+        instance = Instance(dict(zip(self.instance_keys, (x, y))))
+
+        return instance
+
 class TabSepJiebaCutReader(TabSepDatasetReader):
     def __init__(self, lazy=False):
         super(TabSepJiebaCutReader, self).__init__(lazy)

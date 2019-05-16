@@ -53,13 +53,6 @@ class StackedRNNCell(torch.nn.Module):
                   for i, layer_hidden in enumerate(layered_list) ]
         return merged
 
-    def init_hidden_states(self, forward_out, backward_out: Optional):
-        init_hidden = []
-        for i in range(len(self.layer_rnns)):
-            h, _ = self.layer_rnns[i].init_hidden_states(forward_out, backward_out)
-            init_hidden.append(h)
-        return init_hidden, self.get_output_state(init_hidden)
-
     def init_hidden_states_by_layer(self, layer_forward: List, layer_backward: Optional[List]):
         layer_hidden = []
         for i, rnn in enumerate(self.layer_rnns):

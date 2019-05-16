@@ -5,8 +5,5 @@ from allennlp.models import Model
 from allennlp.data import Vocabulary
 
 def run(name: str, get_model_func: Callable[[HyperParamSet, Vocabulary], Model]):
-    class MyExperiment(ExperimentRunner):
-        def get_model(self, hparams, vocab):
-            return get_model_func(hparams, vocab)
-    runner = MyExperiment(name)
+    runner = ExperimentRunner(name, get_model_func=get_model_func)
     runner.run()
