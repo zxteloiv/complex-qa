@@ -55,12 +55,14 @@ class ExperimentRunner:
 
         self.init_components(args, hparams)
         model = self.get_model(hparams, self.vocab)
+        if args.models:
+            model.load_state_dict(torch.load(args.models[0]))
 
         if hparams.DEVICE >= 0:
             model = model.cuda(hparams.DEVICE)
 
         if args.test:
-            self.eval(args, hparams, model)
+            self.test(args, hparams, model)
         else:
             self.train(args, hparams, model)
 
@@ -118,7 +120,7 @@ class ExperimentRunner:
             with torch.cuda.device(hparams.DEVICE):
                 trainer.train()
 
-    def eval(self, args, hparams, model):
+    def test(self, args, hparams, model):
         testing_set = self.reader.read(self.dataset_path.test_path)
         model.eval()
 

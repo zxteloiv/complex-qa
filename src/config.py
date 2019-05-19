@@ -24,7 +24,7 @@ def common_settings():
     hparams.TRAINING_LIMIT = 500  # in num of epochs
     hparams.SAVE_INTERVAL = (100, 'iteration')
     hparams.batch_sz = 128
-    hparams.min_word = 3
+    hparams.vocab_min_freq = 3
 
     hparams.ADAM_LR = 1e-3
     hparams.ADAM_BETAS = (.9, .98)
@@ -218,11 +218,12 @@ def transformer_dialogue_hparams():
 def transformer_atis_hparams():
     hparams = common_settings()
     hparams.emb_sz = 256
-    hparams.batch_sz = 32
+    hparams.batch_sz = 20
     hparams.max_decoding_len = 70
     hparams.num_heads = 8
-    hparams.num_layers = 2
+    hparams.num_layers = 1
     hparams.feedforward_dropout = 0.1
+    hparams.vocab_min_freq = 1
     return hparams
 
 SETTINGS = dict((k, v) for k, v in globals().items() if k.endswith('_hparams'))

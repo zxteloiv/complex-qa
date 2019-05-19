@@ -1,4 +1,3 @@
-import os.path
 import datetime
 import torch
 import torch.nn
