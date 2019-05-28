@@ -7,7 +7,6 @@ import allennlp.models
 from allennlp.data.vocabulary import Vocabulary
 from allennlp.modules import TokenEmbedder
 from allennlp.nn import util
-
 from allennlp.training.metrics import BLEU
 
 class ParallelSeq2Seq(allennlp.models.Model):
@@ -24,7 +23,8 @@ class ParallelSeq2Seq(allennlp.models.Model):
                  use_bleu: bool = True,
                  label_smoothing: Optional[float] = None,
                  output_projection_layer = None,
-                 output_is_logic = True,
+                 output_is_logit = True,
+                 beam_size: int = 1,
                  ):
         super(ParallelSeq2Seq, self).__init__(vocab)
         self._encoder = encoder
@@ -38,19 +38,21 @@ class ParallelSeq2Seq(allennlp.models.Model):
 
         self._target_namespace = target_namespace
         self._label_smoothing = label_smoothing
+        self._vocab_size = vocab.get_vocab_size(target_namespace)
 
         if output_projection_layer is None:
-            self._output_projection_layer = torch.nn.Linear(decoder.hidden_dim,
-                                                            vocab.get_vocab_size(target_namespace))
+            self._output_projection_layer = torch.nn.Linear(decoder.hidden_dim, self._vocab_size)
         else:
             self._output_projection_layer = output_projection_layer
-        self._output_is_logic = output_is_logic
+        self._output_is_logit = output_is_logit
 
         if use_bleu:
             pad_index = self.vocab.get_token_index(self.vocab._padding_token, self._target_namespace)
             self._bleu = BLEU(exclude_indices={pad_index, self._eos_id, self._start_id})
         else:
             self._bleu = None
+
+        self._beam_size = beam_size
 
     def forward(self,
                 source_tokens: Dict[str, torch.LongTensor],
@@ -67,7 +69,7 @@ class ParallelSeq2Seq(allennlp.models.Model):
             target, target_mask = target_tokens['tokens'], util.get_text_field_mask(target_tokens)
 
             predictions, logits = self._forward_training(state, target[:, :-1], source_mask, target_mask[:, :-1])
-            if self._output_is_logic:
+            if self._output_is_logit:
                 loss = util.sequence_cross_entropy_with_logits(logits,
                                                                target[:, 1:].contiguous(),
                                                                target_mask[:, 1:].float(),
@@ -160,10 +162,16 @@ class ParallelSeq2Seq(allennlp.models.Model):
 
         return predictions, logits
 
-    def _forward_prediction(self,
-                            state: torch.Tensor,
-                            source_mask: Optional[torch.LongTensor],
-                            ) -> Tuple[torch.Tensor, torch.Tensor]:
+    def _forward_prediction(self, state, source_mask):
+        if self._beam_size > 1:
+            return self._forward_beam_search(state, source_mask)
+        else:
+            return self._forward_greedy_search(state, source_mask)
+
+    def _forward_greedy_search(self,
+                               state: torch.Tensor,
+                               source_mask: Optional[torch.LongTensor],
+                               ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Run decoder step by step for testing or validation, with no gold tokens available.
         """
@@ -202,6 +210,70 @@ class ParallelSeq2Seq(allennlp.models.Model):
         logits = torch.stack(logits_by_step, dim=1)
 
         return predictions, logits
+
+    def _forward_beam_search(self,
+                             state: torch.Tensor,
+                             source_mask: Optional[torch.LongTensor]
+                             ) -> Tuple[torch.Tensor, torch.Tensor]:
+        batch_sz, beam_sz, vocab_sz = state.size()[0], self._beam_size, self._vocab_size
+
+        # batch_start: (batch, 1)
+        # inputs_embedding: (batch, 1, embedding_dim)
+        # step_hidden:      (batch, 1, hidden_dim)
+        # step_logit:       (batch, 1, vocab)
+        batch_start = source_mask.new_ones((batch_sz, 1), dtype=torch.long) * self._start_id
+        inputs_embedding = self._tgt_embedding(batch_start)
+        step_hidden = self._decoder(inputs_embedding, None, state, source_mask)
+        step_logit = self._output_projection_layer(step_hidden).squeeze(1)
+
+        # topk_value, topk_indices: (batch, beam)
+        # last_preds: (batch, beam_sz), start tokens
+        topk_value, topk_indices = step_logit.log_softmax(-1).topk(beam_sz, dim=-1)
+        last_preds = topk_indices
+        acc_log_probs = topk_value
+
+        # source_mask: (batch, max_input_length) -> (batch * beam, max_input_length)
+        # states: (batch, max_input_length, hidden_dim) -> (batch * beam, max_input_length, hidden_dim)
+        source_mask = source_mask.expand(batch_sz * beam_sz, -1)
+        state = state.expand(batch_sz * beam_sz, -1, -1)
+
+        # [(batch, beam)]
+        fixed_preds = [batch_start.expand(batch_sz, beam_sz)]
+        #acc_log_probs = state.new_zeros((batch_sz, beam_sz))
+
+        for timestep in range(self._max_decoding_step):
+            # step_inputs: (batch * beam, seq_len = (timestep + 1)), i.e., at least 1 token at step 0
+            step_inputs = torch.stack(fixed_preds + [last_preds], dim=-1).reshape(batch_sz * beam_sz, -1)
+
+            # inputs_embedding: (batch * beam, seq_len, embedding_dim)
+            # step_hidden:      (batch * beam, hidden_dim)
+            # step_logit:       (batch * beam, vocab)
+            inputs_embedding = self._tgt_embedding(step_inputs)
+            step_hidden = self._decoder(inputs_embedding, None, state, source_mask)[:, -1, :]
+            step_logit: torch.Tensor = self._output_projection_layer(step_hidden)
+
+            # transition: (batch, beam, vocab_size)
+            transition = step_logit.log_softmax(dim=-1).reshape(batch_sz, beam_sz, vocab_sz)
+            decision_scores = transition + acc_log_probs.unsqueeze(-1)
+            decision_scores = decision_scores.reshape(batch_sz, beam_sz * vocab_sz)
+
+            # topk_value: (batch, beam)
+            # topk_indices: (batch, beam)
+            topk_value, topk_indices = decision_scores.topk(beam_sz)
+
+            beam_id = topk_indices // vocab_sz
+            word_id = topk_indices % vocab_sz
+
+            fixed_preds.append(last_preds.gather(index=beam_id, dim=1))
+            last_preds = word_id
+            acc_log_probs = topk_value
+
+        # predictions: (batch, seq_len)
+        # logits: (batch, seq_len, vocab_size)
+        predictions = torch.stack((fixed_preds + [last_preds])[1:], dim=-1).detach_()
+        log_prob = acc_log_probs
+
+        return predictions, log_prob
 
     def get_metrics(self, reset: bool = False) -> Dict[str, float]:
         all_metrics: Dict[str, float] = {}

@@ -23,6 +23,7 @@ class ExperimentRunner:
                  vocab=None):
         self.parser = get_common_opt_parser()
         self.parser.add_argument('models', nargs='*', help='pretrained models for the same setting')
+        self.parser.add_argument('--vocab-dump', help="the file path to save and load the vocab obj")
         self.name = exp_name
         self.reader = reader
         self.dataset_path = dataset_path
@@ -79,10 +80,17 @@ class ExperimentRunner:
         if self.reader is None:
             self.reader = data_adapter.DATA_READERS[args.data_reader]()
 
+        if self.args.vocab_dump and os.path.exists(self.args.vocab_dump):
+            self.vocab = allennlp.data.Vocabulary.from_files(self.args.vocab_dump)
+
         if self.vocab is None:
             if self.train_set is None:
                 self.train_set = self.reader.read(self.dataset_path.train_path)
             self.vocab = allennlp.data.Vocabulary.from_instances(self.train_set, min_count={"tokens": 3})
+            if self.args.vocab_dump:
+                os.makedirs(self.args.vocab_dump)
+                self.vocab.save_to_files(self.args.vocab_dump)
+
             logger.info(str(self.vocab))
 
     def train(self, args, hparams, model):
@@ -102,6 +110,10 @@ class ExperimentRunner:
         ))
         if not os.path.exists(savepath):
             os.makedirs(savepath, mode=0o755)
+        vocab_path = os.path.join(savepath, 'vocab')
+        if not os.path.exists(vocab_path):
+            os.makedirs(vocab_path, mode=0o755)
+            self.vocab.save_to_files(vocab_path)
 
         trainer = allennlp.training.Trainer(
             model=model,
