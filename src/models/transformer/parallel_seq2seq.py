@@ -25,6 +25,7 @@ class ParallelSeq2Seq(allennlp.models.Model):
                  output_projection_layer = None,
                  output_is_logit = True,
                  beam_size: int = 1,
+                 diversity_factor: float = 0.,
                  ):
         super(ParallelSeq2Seq, self).__init__(vocab)
         self._encoder = encoder
@@ -53,6 +54,7 @@ class ParallelSeq2Seq(allennlp.models.Model):
             self._bleu = None
 
         self._beam_size = beam_size
+        self._diversity_factor = diversity_factor
 
     def forward(self,
                 source_tokens: Dict[str, torch.LongTensor],
@@ -230,7 +232,9 @@ class ParallelSeq2Seq(allennlp.models.Model):
         # last_preds: (batch, beam_sz), start tokens
         topk_value, topk_indices = step_logit.log_softmax(-1).topk(beam_sz, dim=-1)
         last_preds = topk_indices
-        acc_log_probs = topk_value
+
+        diversity_value = topk_value.new_ones((batch_sz, beam_sz)).cumsum(dim=1)
+        acc_log_probs = topk_value - self._diversity_factor * diversity_value
 
         # source_mask: (batch, max_input_length) -> (batch * beam, max_input_length)
         # states: (batch, max_input_length, hidden_dim) -> (batch * beam, max_input_length, hidden_dim)
@@ -266,7 +270,7 @@ class ParallelSeq2Seq(allennlp.models.Model):
 
             fixed_preds.append(last_preds.gather(index=beam_id, dim=1))
             last_preds = word_id
-            acc_log_probs = topk_value
+            acc_log_probs = topk_value - self._diversity_factor * diversity_value
 
         # predictions: (batch, seq_len)
         # logits: (batch, seq_len, vocab_size)
