@@ -22,6 +22,34 @@ def weibo_trans_tied():
     hparams.max_decoding_len = 30
     hparams.ADAM_LR = 1e-4
     hparams.TRAINING_LIMIT = 20
+    hparams.beam_size = 6
+    hparams.diversity_factor = 1.0
+    hparams.acc_factor = 1.0
+    return hparams
+
+@config.register_hparams
+def weibo_trans_tied_greedy():
+    hparams = weibo_trans_tied()
+    hparams.beam_size = 1
+    return hparams
+
+@config.register_hparams
+def weibo_trans_tied_no_diverse():
+    hparams = weibo_trans_tied()
+    hparams.diversity_factor = 0.
+    return hparams
+
+@config.register_hparams
+def weibo_trans_tied_no_acc():
+    hparams = weibo_trans_tied_no_diverse()
+    hparams.acc_factor = 0.
+    return hparams
+
+@config.register_hparams
+def weibo_trans_tied_diverse_no_acc():
+    hparams = weibo_trans_tied()
+    hparams.acc_factor = 0.
+    hparams.diversity_factor = .9
     return hparams
 
 def get_model(hparams, vocab: allennlp.data.Vocabulary):
@@ -49,7 +77,9 @@ def get_model(hparams, vocab: allennlp.data.Vocabulary):
                             max_decoding_step=hparams.max_decoding_len,
                             output_projection_layer=projection_layer,
                             output_is_logit=True,
-                            beam_size=1,
+                            beam_size=hparams.beam_size,
+                            diversity_factor=hparams.diversity_factor,
+                            accumulation_factor=hparams.acc_factor,
                             )
     return model
 

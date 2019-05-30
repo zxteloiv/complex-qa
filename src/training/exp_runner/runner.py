@@ -143,6 +143,11 @@ class ExperimentRunner:
             print('GOLD:', ' '.join(str(x) for x in instance.fields['target_tokens'].tokens[1:-1]))
             del instance.fields['target_tokens']
             output = predictor.predict_instance(instance)
-            print('PRED:', ' '.join(output['predicted_tokens']))
+            sent = output['predicted_tokens']
+            if len(sent) == 1:
+                print('PRED:', ' '.join(output['predicted_tokens'][0]))
+            else:
+                for i, beam in enumerate(sent):
+                    print('BEAM%d:' % i, ' '.join(beam))
 
 

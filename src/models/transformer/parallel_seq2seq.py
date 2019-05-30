@@ -26,6 +26,7 @@ class ParallelSeq2Seq(allennlp.models.Model):
                  output_is_logit = True,
                  beam_size: int = 1,
                  diversity_factor: float = 0.,
+                 accumulation_factor: float = 1.,
                  ):
         super(ParallelSeq2Seq, self).__init__(vocab)
         self._encoder = encoder
@@ -55,6 +56,7 @@ class ParallelSeq2Seq(allennlp.models.Model):
 
         self._beam_size = beam_size
         self._diversity_factor = diversity_factor
+        self._acc_factor = accumulation_factor
 
     def forward(self,
                 source_tokens: Dict[str, torch.LongTensor],
@@ -113,16 +115,21 @@ class ParallelSeq2Seq(allennlp.models.Model):
             predictions = predictions.detach().cpu().numpy()
         all_predicted_tokens = []
 
-        for token_ids in predictions:
-            if token_ids.ndim > 1:
-                token_ids = token_ids[0]
+        if predictions.ndim == 2:
+            predictions = numpy.expand_dims(predictions, 1)
 
-            token_ids = list(token_ids)
-            if self._eos_id in token_ids:
-                token_ids = token_ids[:token_ids.index(self._eos_id)]
-            tokens = [self.vocab.get_token_from_index(token_id, namespace=self._target_namespace)
-                      for token_id in token_ids]
-            all_predicted_tokens.append(tokens)
+        for beams in predictions:
+            all_beams_tokens = []
+            for token_ids in beams:
+                token_ids = list(token_ids)
+                if self._start_id in token_ids:
+                    token_ids = token_ids[(token_ids.index(self._start_id) + 1):]   # skip the start_id
+                if self._eos_id in token_ids:
+                    token_ids = token_ids[:token_ids.index(self._eos_id)]
+                tokens = [self.vocab.get_token_from_index(token_id, namespace=self._target_namespace)
+                          for token_id in token_ids]
+                all_beams_tokens.append(tokens)
+            all_predicted_tokens.append(all_beams_tokens)
         output_dict['predicted_tokens'] = all_predicted_tokens
         return output_dict
 
@@ -229,12 +236,13 @@ class ParallelSeq2Seq(allennlp.models.Model):
         step_logit = self._output_projection_layer(step_hidden).squeeze(1)
 
         # topk_value, topk_indices: (batch, beam)
-        # last_preds: (batch, beam_sz), start tokens
+        # last_preds: (batch, beam), start tokens
         topk_value, topk_indices = step_logit.log_softmax(-1).topk(beam_sz, dim=-1)
-        last_preds = topk_indices
 
-        diversity_value = topk_value.new_ones((batch_sz, beam_sz)).cumsum(dim=1)
-        acc_log_probs = topk_value - self._diversity_factor * diversity_value
+        # diversity_value: (batch, 1, beam)
+        # acc_log_probs: (batch, beam)
+        diversity_value = topk_value.new_ones((batch_sz, beam_sz)).cumsum(dim=1).unsqueeze(1)
+        acc_log_probs = topk_value
 
         # source_mask: (batch, max_input_length) -> (batch * beam, max_input_length)
         # states: (batch, max_input_length, hidden_dim) -> (batch * beam, max_input_length, hidden_dim)
@@ -242,42 +250,71 @@ class ParallelSeq2Seq(allennlp.models.Model):
         state = state.expand(batch_sz * beam_sz, -1, -1)
 
         # [(batch, beam)]
-        fixed_preds = [batch_start.expand(batch_sz, beam_sz)]
-        #acc_log_probs = state.new_zeros((batch_sz, beam_sz))
+        prev_preds = [batch_start.expand(-1, beam_sz), topk_indices]
+        # [(batch, beam)]
+        backtrace: List[torch.Tensor] = [torch.zeros_like(topk_indices)]
 
         for timestep in range(self._max_decoding_step):
             # step_inputs: (batch * beam, seq_len = (timestep + 1)), i.e., at least 1 token at step 0
-            step_inputs = torch.stack(fixed_preds + [last_preds], dim=-1).reshape(batch_sz * beam_sz, -1)
+            step_inputs = self._backtrace_predictions(prev_preds, backtrace).reshape(batch_sz * beam_sz, -1)
 
             # inputs_embedding: (batch * beam, seq_len, embedding_dim)
             # step_hidden:      (batch * beam, hidden_dim)
             # step_logit:       (batch * beam, vocab)
+            # step_log_probs:   (batch * beam, vocab)
             inputs_embedding = self._tgt_embedding(step_inputs)
             step_hidden = self._decoder(inputs_embedding, None, state, source_mask)[:, -1, :]
             step_logit: torch.Tensor = self._output_projection_layer(step_hidden)
 
-            # transition: (batch, beam, vocab_size)
-            transition = step_logit.log_softmax(dim=-1).reshape(batch_sz, beam_sz, vocab_sz)
-            decision_scores = transition + acc_log_probs.unsqueeze(-1)
-            decision_scores = decision_scores.reshape(batch_sz, beam_sz * vocab_sz)
+            # transition_log_probs: (batch, beam, vocab_size)
+            # topk_trans_val, topk_trans_idx: (batch, beam, beam)
+            transition_log_probs = step_logit.log_softmax(-1).reshape(batch_sz, beam_sz, vocab_sz)
+            topk_trans_val, topk_trans_idx = transition_log_probs.topk(beam_sz, dim=-1)
+
+            # decision_scores: (batch, beam * beam)
+            decision_scores = self._acc_factor * acc_log_probs.unsqueeze(-1)
+            decision_scores = decision_scores + topk_trans_val - self._diversity_factor * diversity_value
+            decision_scores = decision_scores.reshape(batch_sz, beam_sz * beam_sz)
 
             # topk_value: (batch, beam)
             # topk_indices: (batch, beam)
             topk_value, topk_indices = decision_scores.topk(beam_sz)
 
-            beam_id = topk_indices // vocab_sz
-            word_id = topk_indices % vocab_sz
+            # beam_id: (batch, beam)
+            # id_to_word_id: (batch, beam)
+            beam_id = topk_indices // beam_sz
+            # id_to_word_id = topk_indices % vocab_sz
 
-            fixed_preds.append(last_preds.gather(index=beam_id, dim=1))
-            last_preds = word_id
-            acc_log_probs = topk_value - self._diversity_factor * diversity_value
+            backtrace.append(beam_id)
+            prev_preds.append(topk_trans_idx.reshape(batch_sz, beam_sz * beam_sz).gather(dim=-1, index=topk_indices))
+            acc_log_probs = topk_value
 
         # predictions: (batch, seq_len)
         # logits: (batch, seq_len, vocab_size)
-        predictions = torch.stack((fixed_preds + [last_preds])[1:], dim=-1).detach_()
-        log_prob = acc_log_probs
+        predictions = self._backtrace_predictions(prev_preds, backtrace)
+        return predictions, acc_log_probs
 
-        return predictions, log_prob
+    def _backtrace_predictions(self,
+                               preds: List[torch.Tensor],
+                               backtrace: List[torch.Tensor]) -> torch.Tensor:
+        """
+        :param preds: [(batch, beam)]
+        :param backtrace: [(batch, beam)] with the less length than predictions by 1
+        :return:
+        """
+        assert len(backtrace) == len(preds) - 1
+        new_preds = [preds[-1]]
+
+        last_trace = None
+        for pred, trace in zip(reversed(preds[:-1]), reversed(backtrace)):
+            # pred, trace: (batch, beam)
+            if last_trace is not None:
+                trace = trace.gather(index=last_trace, dim=-1)
+
+            new_preds.append(pred.gather(index=trace, dim=-1))
+            last_trace = trace
+
+        return torch.stack(list(reversed(new_preds)), dim=-1)
 
     def get_metrics(self, reset: bool = False) -> Dict[str, float]:
         all_metrics: Dict[str, float] = {}
