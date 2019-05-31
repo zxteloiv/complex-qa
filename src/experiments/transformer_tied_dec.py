@@ -28,6 +28,13 @@ def weibo_trans_tied():
     return hparams
 
 @config.register_hparams
+def weibo_trans_tied_large():
+    hparams = weibo_trans_tied()
+    hparams.emb_sz = 1024
+    hparams.batch_sz = 50
+    return hparams
+
+@config.register_hparams
 def weibo_trans_tied_greedy():
     hparams = weibo_trans_tied()
     hparams.beam_size = 1

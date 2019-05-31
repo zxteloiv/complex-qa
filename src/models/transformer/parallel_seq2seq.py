@@ -88,7 +88,7 @@ class ParallelSeq2Seq(allennlp.models.Model):
 
         elif target_tokens is not None: # validation, requires model in eval mode
             target, target_mask = target_tokens['tokens'], util.get_text_field_mask(target_tokens)
-            predictions, logits = self._forward_prediction(state, source_mask)
+            predictions, logits = self._forward_greedy_search(state, source_mask)
             max_len = min(logits.size()[1], target.size()[1] - 1)
             loss = util.sequence_cross_entropy_with_logits(logits[:, :max_len, :].contiguous(),
                                                            target[:, 1:(max_len + 1)].contiguous(),
