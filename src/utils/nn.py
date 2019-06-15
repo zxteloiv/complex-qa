@@ -147,3 +147,10 @@ def filter_sum(iterable):
         else:
             res = res + item
     return res
+
+def roll(t: torch.Tensor, shift: int, axis: int = 0):
+    length = t.size()[axis]
+    assert length > 1, "The data size must be greater than 1, otherwise rolling is "
+    shift = shift % length
+    chunks = torch.split(t, [length - shift, shift], dim=axis)
+    return torch.cat(list(reversed(chunks)), dim=axis)

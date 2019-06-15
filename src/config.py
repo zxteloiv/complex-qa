@@ -49,6 +49,11 @@ DATASETS["atis"] = DatasetPath(
     dev_path=os.path.join(DATA_PATH, 'atis', 'dev.json'),
     test_path=os.path.join(DATA_PATH, 'atis', 'test.json'),
 )
+DATASETS["weibo_keywords"] = DatasetPath(
+    train_path=os.path.join(DATA_PATH, 'weibo_keywords', 'train_data'),
+    dev_path=os.path.join(DATA_PATH, 'weibo_keywords', 'valid_data'),
+    test_path=os.path.join(DATA_PATH, 'weibo_keywords', 'test_data'),
+)
 DATASETS["weibo"] = DatasetPath(
     train_path=os.path.join(DATA_PATH, 'weibo', 'train_data'),
     dev_path=os.path.join(DATA_PATH, 'weibo', 'valid_data'),
