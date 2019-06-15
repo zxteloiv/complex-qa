@@ -35,6 +35,32 @@ def weibo_trans_tied_large():
     return hparams
 
 @config.register_hparams
+def weibo_trans_tied_large_greedy():
+    hparams = weibo_trans_tied_large()
+    hparams.beam_size = 1
+    return hparams
+
+@config.register_hparams
+def weibo_trans_tied_large_no_diverse():
+    hparams = weibo_trans_tied_large()
+    hparams.diversity_factor = 0.
+    return hparams
+
+@config.register_hparams
+def weibo_trans_tied_large_no_acc():
+    hparams = weibo_trans_tied_large()
+    hparams.acc_factor = 0.
+    hparams.diversity_factor = 0.
+    return hparams
+
+@config.register_hparams
+def weibo_trans_tied_large_diverse_no_acc():
+    hparams = weibo_trans_tied_large()
+    hparams.acc_factor = 0.
+    hparams.diversity_factor = .9
+    return hparams
+
+@config.register_hparams
 def weibo_trans_tied_greedy():
     hparams = weibo_trans_tied()
     hparams.beam_size = 1

@@ -12,7 +12,7 @@ from models.modules.mixture_softmax import MoSProjection
 import training.exp_runner as exp_runner
 
 @config.register_hparams
-def weibo_trans_for_alibaba():
+def weibo_trans_mos():
     hparams = config.common_settings()
     hparams.emb_sz = 300
     hparams.batch_sz = 128
@@ -23,6 +23,42 @@ def weibo_trans_for_alibaba():
     hparams.ADAM_LR = 1e-4
     hparams.TRAINING_LIMIT = 20
     hparams.mixture_num = 15
+    hparams.beam_size = 1
+    hparams.diversity_factor = 0.
+    hparams.acc_factor = 1.
+    return hparams
+
+@config.register_hparams
+def weibo_trans_mos3():
+    hparams = weibo_trans_mos()
+    hparams.num_layers = 2
+    return hparams
+
+@config.register_hparams
+def weibo_trans_mos3_bs6():
+    hparams = weibo_trans_mos3()
+    hparams.beam_size = 6
+    hparams.diversity_factor = 0.
+    hparams.acc_factor = 1.
+    return hparams
+
+@config.register_hparams
+def weibo_trans_mos3_bs6_div1():
+    hparams = weibo_trans_mos3_bs6()
+    hparams.diversity_factor = 1.
+    return hparams
+
+@config.register_hparams
+def weibo_trans_mos3_bs6_acc0():
+    hparams = weibo_trans_mos3_bs6()
+    hparams.acc_factor = 0.
+    return hparams
+
+@config.register_hparams
+def weibo_trans_mos3_bs6_acc0_div09():
+    hparams = weibo_trans_mos3_bs6()
+    hparams.acc_factor = 0.
+    hparams.diversity_factor = .9
     return hparams
 
 def get_model(hparams, vocab: allennlp.data.Vocabulary):
@@ -49,13 +85,15 @@ def get_model(hparams, vocab: allennlp.data.Vocabulary):
                             max_decoding_step=hparams.max_decoding_len,
                             output_projection_layer=projection_layer,
                             output_is_logit=False,
-                            beam_size=1,
+                            beam_size=hparams.beam_size,
+                            diversity_factor=hparams.diversity_factor,
+                            accumulation_factor=hparams.acc_factor,
                             )
     return model
 
 if __name__ == '__main__':
     try:
-        exp_runner.run('transfomer_mos', get_model)
+        exp_runner.run('transfomer_mos3', get_model)
 
     except KeyboardInterrupt:
         pass
