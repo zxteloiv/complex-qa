@@ -95,10 +95,12 @@ class ExperimentRunner:
 
     def train(self, args, hparams, model):
         try:
+            if self.train_set is None:
+                self.train_set = self.reader.read(self.dataset_path.train_path)
             validation_set = self.reader.read(self.dataset_path.dev_path)
         except:
             validation_set = None
-        iterator = BucketIterator(sorting_keys=[("source_tokens", "num_tokens")], batch_size=hparams.batch_sz)
+        iterator = BucketIterator(sorting_keys=[("source_tokens", "num_tokens")], batch_size=hparams.batch_sz,)
         iterator.index_with(self.vocab)
         optim = torch.optim.Adam(model.parameters(), hparams.ADAM_LR, hparams.ADAM_BETAS)
 
