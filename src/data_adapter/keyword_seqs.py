@@ -62,7 +62,7 @@ class CharExtractedKeywordReader(CharKeywordReader):
         for line in open(file_path):
             parts = line.rstrip().split('\t')
             if len(parts) != 3:
-                logging.warning('Skip invalid line: %s' % str(parts))
+                logging.debug('Skip invalid line: %s' % str(parts))
                 continue
 
             src, tgt, keywords = parts

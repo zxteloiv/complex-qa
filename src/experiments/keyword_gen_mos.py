@@ -40,6 +40,24 @@ def weibo_keyword_beam_search():
     return hparams
 
 @config.register_hparams
+def weibo_keyword_a01n():
+    hparams = weibo_keyword_mos()
+    hparams.alpha = -.1
+    return hparams
+
+@config.register_hparams
+def weibo_keyword_a1n():
+    hparams = weibo_keyword_mos()
+    hparams.alpha = -1.
+    return hparams
+
+@config.register_hparams
+def weibo_keyword_a10n():
+    hparams = weibo_keyword_mos()
+    hparams.alpha = -10.
+    return hparams
+
+@config.register_hparams
 def weibo_keyword_a01():
     hparams = weibo_keyword_mos()
     hparams.alpha = .1
