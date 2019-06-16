@@ -151,12 +151,12 @@ class KeywordConstrainedTransformer(ParallelSeq2Seq):
         # keyword_max_logprob: (batch, keyword)
         keyword_max_logprob, _ = (keyword_logprob + expand_target_mask).max(dim=-1)
 
-        # dismiss the masked keywords when choosing the min value,
-        # and then choose at least one keyword (assumed length 2)
-        # negative_min_keyword_max_logprob: (batch, keyword)
-        negative_min_keyword_max_logprob, _ = (-keyword_max_logprob * keyword_mask.float()).topk(2, dim=-1)
+        # again, only at least one keyword (assumed length 2) is required
+        # max_keyword_max_logprob: (batch, keyword)
+        log_keyword_mask = (keyword_mask.float() + 1e-45).log_()
+        max_keyword_max_logprob, _ = (keyword_max_logprob + log_keyword_mask).topk(2, dim=-1)
 
-        loss_keyword = negative_min_keyword_max_logprob.sum(1).mean()
+        loss_keyword = -max_keyword_max_logprob.sum(1).mean()
 
         # ============== final loss ================
 
