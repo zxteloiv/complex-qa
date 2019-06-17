@@ -12,7 +12,7 @@ import allennlp.predictors
 from allennlp.data.iterators import BucketIterator
 
 from .opt_parser import get_common_opt_parser
-logger = logging.getLogger(__name__)
+logger = logging.getLogger()
 
 class ExperimentRunner:
     def __init__(self,

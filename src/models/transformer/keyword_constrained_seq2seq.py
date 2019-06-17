@@ -1,6 +1,9 @@
 from typing import Dict, List, Tuple, Mapping, Optional
 
 import numpy
+import logging
+logger = logging.getLogger(__name__)
+
 import random
 import torch
 import torch.nn
@@ -110,6 +113,9 @@ class KeywordConstrainedTransformer(ParallelSeq2Seq):
         target = target[:, 1:(max_len + 1)].contiguous()
         target_mask = target_mask[:, 1:(max_len + 1)].float().contiguous()
 
+        # num_non_empty_sequences: (1,)
+        num_non_empty_sequences = ((target_mask.sum(1) > 0).float().sum() + 1e-20)
+
         # log_prob: (batch, length, vocab)
         log_probs = torch.log_softmax(logits, -1)
 
@@ -120,15 +126,31 @@ class KeywordConstrainedTransformer(ParallelSeq2Seq):
         neg_target = torch.cat((target[-shift_range:], target[:-shift_range]))
         neg_target_mask = torch.cat((target_mask[-shift_range:], target_mask[:-shift_range]))
 
-        # pos_log_prob: (batch, length)
-        # neg_log_prob: (batch, length)
-        pos_log_prob = log_probs.gather(dim=-1, index=target.unsqueeze(-1)) * target_mask.unsqueeze(-1)
-        neg_log_prob = log_probs.gather(dim=-1, index=neg_target.unsqueeze(-1)) * neg_target_mask.unsqueeze(-1)
+        # pos_log_prob: (batch, length, 1) -> (batch, length)
+        # neg_log_prob: (batch, length, 1) -> (batch, length)
+        pos_log_prob = log_probs.gather(dim=-1, index=target.unsqueeze(-1)).unsqueeze(-1)
+        neg_log_prob = log_probs.gather(dim=-1, index=neg_target.unsqueeze(-1)).unsqueeze(-1)
 
         if self._alpha < 0:
-            loss_lm_margin = -pos_log_prob.sum(1).mean(0)
+            # negative alpha indicates traditional NLL loss
+            # sum the loss of all tokens of each sentence, and rescales the loss for each sentence,
+            # sum and divide it by the sentence amount.
+            # per_batch_loss: (batch, )
+            # num_non_empty_sequences: (1,)
+            # loss_lm_margin: (1,)
+            per_batch_loss = - (pos_log_prob * target_mask.float()).sum(1) / (target_mask.sum(1).float() + 1e-20)
+            loss_lm_margin = per_batch_loss.sum() / num_non_empty_sequences
         else:
-            loss_lm_margin = torch.relu(neg_log_prob.sum(1) - pos_log_prob.sum(1) + self._margin).mean()
+            # use the margin loss as the regularization
+            # neg_batch_loss: (batch,)
+            # pos_batch_loss: (batch,)
+            # batch_margin_loss: (batch,)
+            neg_batch_loss = (neg_log_prob * neg_target_mask.float()).sum(1) / (neg_target_mask.sum(1).float() + 1e-20)
+            pos_batch_loss = (pos_log_prob * target_mask.float()).sum(1) / (target_mask.sum(1).float() + 1e-20)
+            batch_magin_loss = torch.relu(neg_batch_loss - pos_batch_loss + self._margin)
+
+            # loss_lm_margin: (1,)
+            loss_lm_margin = batch_magin_loss.sum() / num_non_empty_sequences
 
         # ==================== loss 2: keyword MLE ====================
         # keyword: (batch, keyword)
@@ -143,12 +165,12 @@ class KeywordConstrainedTransformer(ParallelSeq2Seq):
         expand_logprob = log_probs.reshape(batch_size, 1, max_len, -1).expand(-1, keyword_sz, -1, -1)
 
         # keyword_logprob: (batch, keyword, length, 1) -> (batch, keyword, length)
-        # expand_target_mask: (batch, keyword, length)
         keyword_logprob = expand_logprob.gather(dim=-1, index=expand_keyword).squeeze(-1)
-        expand_target_mask = (target_mask.unsqueeze(1) + 1e-45).log().expand(-1, keyword_sz, -1)
 
         # when choosing the max value, the masked positions are almost negative infinities, which will get lost
+        # expand_target_mask: (batch, keyword, length)
         # keyword_max_logprob: (batch, keyword)
+        expand_target_mask = (target_mask.unsqueeze(1) + 1e-45).log_().expand_(-1, keyword_sz, -1)
         keyword_max_logprob, _ = (keyword_logprob + expand_target_mask).max(dim=-1)
 
         # again, only at least one keyword (assumed length 2) is required
@@ -162,6 +184,8 @@ class KeywordConstrainedTransformer(ParallelSeq2Seq):
 
         lm_ratio = abs(self._alpha) / (abs(self._alpha) + 1)
         loss = lm_ratio * loss_lm_margin + (1 - lm_ratio) * loss_keyword
+        logger.debug('ratio: %.2f, lm_loss: %.4f, keyword_loss: %.4f'
+                     % (lm_ratio, loss_lm_margin.cpu(), loss_keyword.cpu()))
 
         return loss
 
