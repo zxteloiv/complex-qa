@@ -126,7 +126,7 @@ class KeywordConstrainedTransformer(ParallelSeq2Seq):
         neg_log_prob = log_probs.gather(dim=-1, index=neg_target.unsqueeze(-1)) * neg_target_mask.unsqueeze(-1)
 
         if self._alpha < 0:
-            loss_lm_margin = pos_log_prob.sum(1).mean(0)
+            loss_lm_margin = -pos_log_prob.sum(1).mean(0)
         else:
             loss_lm_margin = torch.relu(neg_log_prob.sum(1) - pos_log_prob.sum(1) + self._margin).mean()
 
@@ -135,7 +135,7 @@ class KeywordConstrainedTransformer(ParallelSeq2Seq):
         # keyword_mask: (batch, keyword)
         keyword_sz = keyword.size()[1]
         if keyword_sz <= 0: # no keyword, then no more keyword loss
-            return self._alpha * loss_lm_margin
+            return loss_lm_margin
 
         # expand_keyword: (batch, keyword, length, 1)
         # expand_logprob: (batch, keyword, length, vocab)
@@ -160,7 +160,8 @@ class KeywordConstrainedTransformer(ParallelSeq2Seq):
 
         # ============== final loss ================
 
-        loss = self._alpha * loss_lm_margin + loss_keyword
+        lm_ratio = abs(self._alpha) / (abs(self._alpha) + 1)
+        loss = lm_ratio * loss_lm_margin + (1 - lm_ratio) * loss_keyword
 
         return loss
 
