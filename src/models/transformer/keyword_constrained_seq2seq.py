@@ -128,8 +128,8 @@ class KeywordConstrainedTransformer(ParallelSeq2Seq):
 
         # pos_log_prob: (batch, length, 1) -> (batch, length)
         # neg_log_prob: (batch, length, 1) -> (batch, length)
-        pos_log_prob = log_probs.gather(dim=-1, index=target.unsqueeze(-1)).unsqueeze(-1)
-        neg_log_prob = log_probs.gather(dim=-1, index=neg_target.unsqueeze(-1)).unsqueeze(-1)
+        pos_log_prob = log_probs.gather(dim=-1, index=target.unsqueeze(-1)).squeeze(-1)
+        neg_log_prob = log_probs.gather(dim=-1, index=neg_target.unsqueeze(-1)).squeeze(-1)
 
         if self._alpha < 0:
             # negative alpha indicates traditional NLL loss
