@@ -6,6 +6,7 @@ import allennlp.data.dataset_readers
 from allennlp.data import Instance, Token
 from allennlp.data.fields import TextField
 from allennlp.data.token_indexers import SingleIdTokenIndexer
+from allennlp.common.util import START_SYMBOL, END_SYMBOL
 
 class CharKeywordReader(allennlp.data.DatasetReader):
     def __init__(self, max_sent_length=30, topic_model_dir="~/.complex_qa/topic_model"):
@@ -36,6 +37,7 @@ class CharKeywordReader(allennlp.data.DatasetReader):
         src_fld = TextField(list(map(Token, src)), {'tokens': SingleIdTokenIndexer()})
 
         tgt = filter_split_str(tgt)[:self.max_sent_length]
+        tgt = [START_SYMBOL] + tgt + [END_SYMBOL]
         tgt_fld = TextField(list(map(Token, tgt)), {'tokens': SingleIdTokenIndexer()})
 
         keywords = filter_split_str("".join(keywords))

@@ -58,6 +58,12 @@ def weibo_keyword_a10n():
     return hparams
 
 @config.register_hparams
+def weibo_keyword_a100n():
+    hparams = weibo_keyword_mos()
+    hparams.alpha = -100.
+    return hparams
+
+@config.register_hparams
 def weibo_keyword_a01():
     hparams = weibo_keyword_mos()
     hparams.alpha = .1

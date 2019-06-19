@@ -170,7 +170,7 @@ class KeywordConstrainedTransformer(ParallelSeq2Seq):
         # when choosing the max value, the masked positions are almost negative infinities, which will get lost
         # expand_target_mask: (batch, keyword, length)
         # keyword_max_logprob: (batch, keyword)
-        expand_target_mask = (target_mask.unsqueeze(1) + 1e-45).log_().expand_(-1, keyword_sz, -1)
+        expand_target_mask = (target_mask.unsqueeze(1) + 1e-45).log_().expand(-1, keyword_sz, -1)
         keyword_max_logprob, _ = (keyword_logprob + expand_target_mask).max(dim=-1)
 
         # again, only at least one keyword (assumed length 2) is required
@@ -185,7 +185,7 @@ class KeywordConstrainedTransformer(ParallelSeq2Seq):
         lm_ratio = abs(self._alpha) / (abs(self._alpha) + 1)
         loss = lm_ratio * loss_lm_margin + (1 - lm_ratio) * loss_keyword
         logger.debug('ratio: %.2f, lm_loss: %.4f, keyword_loss: %.4f'
-                     % (lm_ratio, loss_lm_margin.cpu(), loss_keyword.cpu()))
+                     % (lm_ratio, loss_lm_margin.cpu().item(), loss_keyword.cpu().item()))
 
         return loss
 
