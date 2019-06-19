@@ -112,6 +112,18 @@ def weibo_keyword_m2():
     return hparams
 
 @config.register_hparams
+def weibo_keyword_a10_m01():
+    hparams = weibo_keyword_a10()
+    hparams.margin = .1
+    return hparams
+
+@config.register_hparams
+def weibo_keyword_a10_m2():
+    hparams = weibo_keyword_a10()
+    hparams.margin = .1
+    return hparams
+
+@config.register_hparams
 def weibo_keyword_m10():
     hparams = weibo_keyword_mos()
     hparams.margin = 10
