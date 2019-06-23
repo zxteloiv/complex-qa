@@ -8,6 +8,7 @@ from datetime import datetime
 
 import data_adapter
 import allennlp.data
+import allennlp.training
 import allennlp.predictors
 from allennlp.data.iterators import BucketIterator
 
