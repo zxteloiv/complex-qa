@@ -11,7 +11,7 @@ def get_common_opt_parser() -> argparse.ArgumentParser:
     parser.add_argument("--debug", action="store_true", help="print the debugging log")
     parser.add_argument('--memo', type=str, default="", help="used to remember some runtime configurations")
     parser.add_argument('--test', action="store_true", help='use testing mode')
-    parser.add_argument('--hparamset', help="available hyper-parameters")
+    parser.add_argument('--hparamset', '-p', help="choose one of the available hyper-parameters")
     parser.add_argument('--from-hparamset-dump', help='read hyperparameters from the dump file, to reproduce')
     parser.add_argument('--list-hparamset', action='store_true')
     parser.add_argument('--snapshot-dir', help="snapshot dir if continues")

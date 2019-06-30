@@ -1,5 +1,5 @@
 from typing import Callable
-from config import HyperParamSet
+from .hparamset import HyperParamSet
 from .runner import ExperimentRunner
 from allennlp.models import Model
 from allennlp.data import Vocabulary
