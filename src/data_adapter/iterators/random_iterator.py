@@ -1,9 +1,11 @@
 from __future__ import division
+from typing import List, Mapping
 
 import numpy
+import torch
 
 from ..iterator import Iterator
-from chainer.iterators.order_samplers import ShuffleOrderSampler
+from ..translator import Translator
 
 
 class RandomIterator(Iterator):
@@ -20,9 +22,6 @@ class RandomIterator(Iterator):
     order of examples has an important meaning and the updater depends on the
     original order, this option should be set to ``False``.
 
-    This iterator saves ``-1`` instead of ``None`` in snapshots since some
-    serializers do not support ``None``.
-
     Args:
         dataset: Dataset to iterate.
         batch_size (int): Number of examples within each batch.
@@ -32,36 +31,16 @@ class RandomIterator(Iterator):
             beginning of each epoch. Otherwise, examples are extracted in the
             order of indexes. If ``None`` and no ``order_sampler`` is given,
             the behavior is the same as the case with ``shuffle=True``.
-        order_sampler (callable): A callable that generates the order
-            of the indices to sample in the next epoch when a epoch finishes.
-            This function should take two arguements: the current order
-            and the current position of the iterator.
-            This should return the next order. The size of the order
-            should remain constant.
-            This option cannot be used when ``shuffle`` is not ``None``.
-
     """
 
-    def __init__(self, dataset, batch_size,
-                 repeat=True, shuffle=None, order_sampler=None):
+    def __init__(self, dataset, batch_size, translator,
+                 repeat=True, shuffle=True):
         self.dataset = dataset
         self.batch_size = batch_size
+        self.translator: Translator = translator
         self._repeat = repeat
         self._shuffle = shuffle
-
-        if self._shuffle is not None:
-            if order_sampler is not None:
-                raise ValueError('`shuffle` is not `None` and a custom '
-                                 '`order_sampler` is set. Please set '
-                                 '`shuffle` to `None` to use the custom '
-                                 'order sampler.')
-            else:
-                if self._shuffle:
-                    order_sampler = ShuffleOrderSampler()
-        else:
-            if order_sampler is None:
-                order_sampler = ShuffleOrderSampler()
-        self.order_sampler = order_sampler
+        self._order = None
 
         self.reset()
 
@@ -84,11 +63,9 @@ class RandomIterator(Iterator):
             if self._repeat:
                 rest = i_end - N
                 if self._order is not None:
-                    new_order = self.order_sampler(self._order, i)
-                    if len(self._order) != len(new_order):
-                        raise ValueError('The size of order does not match '
-                                         'the size of the previous order.')
+                    new_order = numpy.random.permutation(numpy.arange(len(self.dataset)))
                     self._order = new_order
+
                 if rest > 0:
                     if self._order is None:
                         batch.extend(self.dataset[:rest])
@@ -105,9 +82,14 @@ class RandomIterator(Iterator):
             self.is_new_epoch = False
             self.current_position = i_end
 
-        return batch
+        return self.batch_to_tensors(batch)
 
     next = __next__
+
+    def batch_to_tensors(self, batch: List) -> Mapping[str, torch.Tensor]:
+        tensor_list = [self.translator.to_tensor(example) for example in batch]
+        tensor = self.translator.batch_tensor(tensor_list)
+        return tensor
 
     @property
     def epoch_detail(self):
@@ -126,11 +108,9 @@ class RandomIterator(Iterator):
 
         # use -1 instead of None internally.
         self._previous_epoch_detail = -1.
-        if self.order_sampler:
-            self._order = self.order_sampler(
-                numpy.arange(len(self.dataset)), 0)
-        else:
-            self._order = None
+
+        if self._shuffle:
+            self._order = numpy.random.permutation(numpy.arange(len(self.dataset)))
 
     @property
     def _epoch_size(self):
@@ -142,3 +122,4 @@ class RandomIterator(Iterator):
     @property
     def repeat(self):
         return self._repeat
+

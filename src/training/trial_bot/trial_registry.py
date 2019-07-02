@@ -2,7 +2,7 @@ from typing import Callable, Tuple
 
 from data_adapter.dataset import Dataset
 from data_adapter.translator import Translator
-from .hparamset import HyperParamSet
+from training.exp_runner.hparamset import HyperParamSet
 
 class Registry:
     """
@@ -14,7 +14,7 @@ class Registry:
     _hparamsets = {}
 
     @staticmethod
-    def add_dataset(name=None):
+    def dataset(name=None):
         def decorator(dataset_fn: Callable[[], Tuple[Dataset, Dataset, Dataset]]):
             nonlocal name
             if name is None:
@@ -28,7 +28,7 @@ class Registry:
         return Registry._datasets[name]()
 
     @staticmethod
-    def add_translator(name=None):
+    def translator(name=None):
         def decorator(translator_fn: Callable[[], Translator]):
             nonlocal name
             if name is None:
@@ -42,7 +42,7 @@ class Registry:
         return Registry._translators[name]()
 
     @staticmethod
-    def add_hparamset(name):
+    def hparamset(name=None):
         def decorator(hparamset_fn: Callable[[], HyperParamSet]):
             nonlocal name
             if name is None:

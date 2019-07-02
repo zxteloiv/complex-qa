@@ -36,7 +36,11 @@ def common_settings():
 
 from utils.dataset_path import DatasetPath
 
-DATA_PATH = common_settings().DATA_PATH
+_common = common_settings()
+ROOT = _common.ROOT
+DATA_PATH = _common.DATA_PATH
+SNAPSHOT_PATH = _common.SNAPSHOT_PATH
+
 DATASETS = dict()
 DATASETS["atis"] = DatasetPath(
     train_path=os.path.join(DATA_PATH, 'atis', 'train.json'),

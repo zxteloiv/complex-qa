@@ -22,6 +22,8 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 #
+from typing import Mapping
+import torch
 
 class Iterator(object):
 
@@ -61,7 +63,7 @@ class Iterator(object):
         """Returns self."""
         return self
 
-    def __next__(self):
+    def __next__(self) -> Mapping[str, torch.Tensor]:
         """Returns the next batch.
 
         This is a part of the iterator protocol of Python. It may raise the
@@ -104,15 +106,4 @@ class Iterator(object):
         """
         return None
 
-    def serialize(self, serializer):
-        """Serializes the internal state of the iterator.
 
-        This is a method to support serializer protocol of Chainer.
-
-        .. note::
-           It should only serialize the internal state that changes over the
-           iteration. It should not serializes what is set manually by
-           users such as the batch size.
-
-        """
-        pass

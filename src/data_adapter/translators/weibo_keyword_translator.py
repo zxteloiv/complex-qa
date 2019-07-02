@@ -6,6 +6,9 @@ import logging
 import torch
 from torch.nn.utils.rnn import pad_sequence
 
+from training.trial_bot.trial_registry import Registry
+
+@Registry.translator()
 class CharBasedWeiboKeywordsTranslator(Translator):
     def __init__(self, max_len: int = 30):
         super(CharBasedWeiboKeywordsTranslator, self).__init__()
@@ -56,8 +59,12 @@ class CharBasedWeiboKeywordsTranslator(Translator):
                 tensor_list_by_keys[k].append(tensor)
 
         batched_tensor = dict(
-            pad_sequence(tlist, batch_first=True, padding_value=DEFAULT_PADDING_TOKEN)
-            for k, tlist in tensor_list_by_keys
+            (
+                k,
+                pad_sequence(tlist, batch_first=True,
+                             padding_value=self.vocab.get_token_index(DEFAULT_PADDING_TOKEN, self.shared_namespace))
+            )
+            for k, tlist in tensor_list_by_keys.items()
         )
 
         return batched_tensor
