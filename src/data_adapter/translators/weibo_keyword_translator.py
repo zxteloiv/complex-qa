@@ -1,6 +1,6 @@
 from typing import List, Generator, Tuple, Mapping
 from ..translator import Translator
-from ..ns_vocabulary import START_SYMBOL, END_SYMBOL, DEFAULT_PADDING_TOKEN
+from ..ns_vocabulary import START_SYMBOL, END_SYMBOL, PADDING_TOKEN
 
 import logging
 import torch
@@ -62,7 +62,7 @@ class CharBasedWeiboKeywordsTranslator(Translator):
             (
                 k,
                 pad_sequence(tlist, batch_first=True,
-                             padding_value=self.vocab.get_token_index(DEFAULT_PADDING_TOKEN, self.shared_namespace))
+                             padding_value=self.vocab.get_token_index(PADDING_TOKEN, self.shared_namespace))
             )
             for k, tlist in tensor_list_by_keys.items()
         )

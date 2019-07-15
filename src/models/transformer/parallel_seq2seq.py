@@ -4,14 +4,14 @@ import numpy
 import torch
 import torch.nn
 import allennlp.models
-from allennlp.data.vocabulary import Vocabulary
+from data_adapter.ns_vocabulary import NSVocabulary, PADDING_TOKEN
 from allennlp.modules import TokenEmbedder
 from allennlp.nn import util
 from allennlp.training.metrics import BLEU
 
 class ParallelSeq2Seq(allennlp.models.Model):
     def __init__(self,
-                 vocab: Vocabulary,
+                 vocab: NSVocabulary,
                  encoder: torch.nn.Module,
                  decoder: torch.nn.Module,
                  source_embedding: TokenEmbedder,

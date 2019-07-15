@@ -210,6 +210,7 @@ class TrialBot:
             self.state.epoch += 1
             engine.fire_event(Events.EPOCH_STARTED, bot=self)
             while True:
+                self.state.iteration += 1
                 engine.fire_event(Events.ITERATION_STARTED, bot=self)
                 self.state.output = updater()
                 engine.fire_event(Events.ITERATION_COMPLETED, bot=self)
@@ -224,6 +225,7 @@ class TrialBot:
         engine.register_events(*Events)
         # events with greater priorities will get processed earlier.
         engine.add_event_handler(Events.EPOCH_STARTED, ext_mod.ext_write_info, 100, msg="Epoch started")
+        engine.add_event_handler(Events.EPOCH_STARTED, ext_mod.ext_write_info, 105, msg=("====" * 20))
         engine.add_event_handler(Events.EPOCH_STARTED, ext_mod.current_epoch_logger, 99)
         engine.add_event_handler(Events.STARTED, ext_mod.ext_write_info, 100, msg="TrailBot started")
         engine.add_event_handler(Events.STARTED, ext_mod.time_logger, 99)

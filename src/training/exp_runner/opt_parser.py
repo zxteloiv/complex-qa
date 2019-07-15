@@ -2,6 +2,7 @@ import argparse
 import config
 import data_adapter
 
+
 def get_common_opt_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
 
@@ -23,3 +24,4 @@ def get_common_opt_parser() -> argparse.ArgumentParser:
 def get_test_opt_parser() -> argparse.ArgumentParser:
     parser = get_common_opt_parser()
     return parser
+
