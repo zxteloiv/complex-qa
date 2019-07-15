@@ -24,28 +24,28 @@ class DecoderLayer(torch.nn.Module):
                  use_positional_embedding: bool = True,
                  use_src_keyword_attention: bool = True,
                  use_shared_keyword_attention: bool = False,
-                 use_cross_entropy: bool = False
                  ):
         super(DecoderLayer, self).__init__()
+
+        hidden_dim = hidden_dim or input_dim
+        self.hidden_dim = hidden_dim
+        attention_dim = attention_dim or (hidden_dim // num_heads)
+        value_dim = value_dim or (hidden_dim // num_heads)
+        feedforward_hidden_dim = feedforward_hidden_dim or hidden_dim
 
         # output dim is assumed to be equal to input_dim, which is divisible by num_heads
         self._mask_attn = MaskedMultiHeadSelfAttention(
             num_heads, input_dim, attention_dim * num_heads, value_dim * num_heads, attention_dropout
         )
 
-        hidden_dim = hidden_dim or input_dim
-        attention_dim = attention_dim or (hidden_dim // num_heads)
-        value_dim = value_dim or (hidden_dim // num_heads)
-        feedforward_hidden_dim = feedforward_hidden_dim or hidden_dim
-
         self._mask_attn_norm = torch.nn.LayerNorm(hidden_dim)
         self._src_attn = MultiHeadAttention(
-            num_heads, hidden_dim, hidden_dim, attention_dim, value_dim,
+            num_heads, hidden_dim, hidden_dim, attention_dim * num_heads, value_dim * num_heads,
             attention_dropout=attention_dropout
         )
 
         self._key_attn = (use_shared_keyword_attention and self._src_attn) or MultiHeadAttention(
-            num_heads, hidden_dim, hidden_dim, attention_dim, value_dim,
+            num_heads, hidden_dim, hidden_dim, attention_dim * num_heads, value_dim * num_heads,
             attention_dropout=attention_dropout
         )
 
@@ -61,7 +61,6 @@ class DecoderLayer(torch.nn.Module):
         self._dropout = torch.nn.Dropout(residual_dropout)
         self._use_pos_emb = use_positional_embedding
         self._use_src_keyword_attn = use_src_keyword_attention
-        self._use_cross_ent = use_cross_entropy
 
     def forward(self, src, src_mask, src_kwd, src_kwd_mask, inp, inp_mask):
         """
@@ -106,6 +105,10 @@ class Decoder(torch.nn.Module):
             inp = l(src, src_mask, src_kwd, src_kwd_mask, inp, inp_mask)
         return inp
 
+    @property
+    def hidden_dim(self):
+        return self._layers[-1].hidden_dim
+
 class KeywordConditionedTransformer(torch.nn.Module):
     def __init__(self,
                  vocab: NSVocabulary,
@@ -121,10 +124,12 @@ class KeywordConditionedTransformer(torch.nn.Module):
                  use_bleu: bool = True,
                  label_smoothing: Optional[float] = None,
                  output_projection_layer = None,
-                 output_is_logit = True,
+                 output_is_logit = False,
                  beam_size: int = 1,
                  diversity_factor: float = 0.,
                  accumulation_factor: float = 1.,
+                 use_cross_entropy: bool = True,
+                 margin: float = 1.,
                  ):
         super(KeywordConditionedTransformer, self).__init__()
         self.vocab = vocab
@@ -144,6 +149,7 @@ class KeywordConditionedTransformer(torch.nn.Module):
 
         self._decoder_inp_mapping = torch.nn.Linear(decoder.hidden_dim * 2, decoder.hidden_dim)
 
+        self._use_cross_ent = use_cross_entropy
         if output_projection_layer is None:
             self._output_projection_layer = torch.nn.Linear(decoder.hidden_dim, self._vocab_size)
         else:
@@ -158,6 +164,9 @@ class KeywordConditionedTransformer(torch.nn.Module):
         self._beam_size = beam_size
         self._diversity_factor = diversity_factor
         self._acc_factor = accumulation_factor
+
+        self._margin = margin
+        self._output_is_logit = output_is_logit
 
     def forward(self,
                 source_tokens: torch.LongTensor,
@@ -185,7 +194,7 @@ class KeywordConditionedTransformer(torch.nn.Module):
         if target is not None and self.training:    # training mode
             pred, logits = self._forward_training(src_hidden, kwd_hidden, target[:, :-1], tgt_keyword[:, :-1],
                                                   source_mask, src_keyword_mask,
-                                                  target_mask, tgt_keyword_mask,)
+                                                  target_mask[:, :-1], tgt_keyword_mask,)
             self._compute_metric(pred, target[:, 1:])
             loss = self._get_training_loss(logits, target[:, 1:], target_mask[:, 1:])
         elif target is not None:    # evaluation mode
@@ -279,7 +288,10 @@ class KeywordConditionedTransformer(torch.nn.Module):
         num_non_empty_sequences = ((target_mask.sum(1) > 0).float().sum() + 1e-20)
 
         # log_prob: (batch, length, vocab)
-        log_probs = torch.log_softmax(logits, -1)
+        if self._output_is_logit:
+            log_probs = torch.log_softmax(logits, -1)
+        else:
+            log_probs = torch.log(logits + 1e-20)
 
         # ==================== loss 1: LM as the regularizer ==================
         # construct negative samples

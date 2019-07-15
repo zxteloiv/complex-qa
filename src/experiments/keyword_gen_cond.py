@@ -20,10 +20,10 @@ def weibo_keyword_gen():
     hparams.emb_sz = 300
     hparams.batch_sz = 50
     hparams.num_layers = 2
-    hparams.num_heads = 8
+    hparams.num_heads = 6
     hparams.max_decoding_len = 30
     hparams.ADAM_LR = 1e-5
-    hparams.TRAINING_LIMIT = 5
+    hparams.TRAINING_LIMIT = 20
     hparams.mixture_num = 15
     hparams.beam_size = 1
     hparams.connection_dropout = 0.2
@@ -34,9 +34,9 @@ def weibo_keyword_gen():
 
 @Registry.dataset('weibo_keywords_v2')
 def weibo_keyword():
-    train_data = TabSepFileDataset(os.path.join(config.DATA_PATH, 'weibo_keyword_v2', 'train_data'))
-    valid_data = TabSepFileDataset(os.path.join(config.DATA_PATH, 'weibo_keyword_v2', 'valid_data'))
-    test_data = TabSepFileDataset(os.path.join(config.DATA_PATH, 'weibo_keyword_v2', 'test_data'))
+    train_data = TabSepFileDataset(os.path.join(config.DATA_PATH, 'weibo_keywords_v2', 'train_data'))
+    valid_data = TabSepFileDataset(os.path.join(config.DATA_PATH, 'weibo_keywords_v2', 'valid_data'))
+    test_data = TabSepFileDataset(os.path.join(config.DATA_PATH, 'weibo_keywords_v2', 'test_data'))
     return train_data, valid_data, test_data
 
 @Registry.translator('weibo_trans')
@@ -69,8 +69,8 @@ class WeiboKeywordCharTranslator(Translator):
         src, kwds, conds, tgt = example
         src = self.filter_split_str(src)[:self.max_len]
         tgt = [START_SYMBOL] + self.filter_split_str(tgt)[:self.max_len] + [END_SYMBOL]
-        kwds = self.filter_split_str("".join(kwds.split(','))) + [END_SYMBOL]
-        conds = self.filter_split_str("".join(conds.split(','))) + [END_SYMBOL]
+        kwds = self.filter_split_str("".join(kwds.split(' '))) + [END_SYMBOL]
+        conds = self.filter_split_str("".join(conds.split(' '))) + [END_SYMBOL]
 
         def tokens_to_id_vector(token_list: List[str]) -> torch.Tensor:
             ids = [self.vocab.get_token_index(tok, self.shared_namespace) for tok in token_list]
@@ -136,7 +136,7 @@ def get_model(hparams, vocab: NSVocabulary):
                      ),
     ])
     embedding = Embedding(num_embeddings=vocab.get_vocab_size(), embedding_dim=hparams.emb_sz)
-    projection_layer = MoSProjection(hparams.mixture_num, decoder.hidden_dim, vocab.get_vocab_size())
+    projection_layer = MoSProjection(hparams.mixture_num, hparams.emb_sz, vocab.get_vocab_size())
 
     model = KeywordConditionedTransformer(vocab=vocab,
                                           source_encoder=src_enc,
