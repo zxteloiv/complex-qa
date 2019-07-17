@@ -1,6 +1,6 @@
 *.swp
 .vscode
-data
+./data
 *.pyc
 *.tmp
 *temp

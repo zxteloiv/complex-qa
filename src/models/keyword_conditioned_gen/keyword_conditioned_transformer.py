@@ -1,14 +1,14 @@
-from typing import List, Optional, Mapping, Tuple, Dict
+from typing import List, Optional, Tuple, Dict
 import torch.nn
 import random
 import numpy
 
 from allennlp.modules import TokenEmbedder
 from allennlp.training.metrics import BLEU
-from utils.nn import add_positional_features
+from utils.nn import add_positional_features, prepare_input
 
-from data_adapter.ns_vocabulary import NSVocabulary, PADDING_TOKEN
-from .multi_head_attention import MaskedMultiHeadSelfAttention, MultiHeadAttention
+from training.trial_bot.data.ns_vocabulary import NSVocabulary, PADDING_TOKEN
+from models.transformer.multi_head_attention import MaskedMultiHeadSelfAttention, MultiHeadAttention
 
 class DecoderLayer(torch.nn.Module):
     def __init__(self,
@@ -183,12 +183,12 @@ class KeywordConditionedTransformer(torch.nn.Module):
         :param tgt_keyword_tokens: (batch, target_key_len) orderded
         :return:
         """
-        source, source_mask = self._prepare_input(source_tokens)
-        src_keyword, src_keyword_mask = self._prepare_input(src_keyword_tokens)
+        source, source_mask = prepare_input(source_tokens)
+        src_keyword, src_keyword_mask = prepare_input(src_keyword_tokens)
         src_hidden, kwd_hidden = self._encode(source, source_mask, src_keyword, src_keyword_mask)
 
-        target, target_mask = self._prepare_input(target_tokens)
-        tgt_keyword, tgt_keyword_mask = self._prepare_input(tgt_keyword_tokens)
+        target, target_mask = prepare_input(target_tokens)
+        tgt_keyword, tgt_keyword_mask = prepare_input(tgt_keyword_tokens)
 
         loss = None
         if target is not None and self.training:    # training mode
@@ -203,8 +203,8 @@ class KeywordConditionedTransformer(torch.nn.Module):
             self._compute_metric(pred, target[:, 1:])
             loss = self._get_training_loss(logits, target[:, 1:], target_mask[:, 1:])
         else:   # testing
-            self._forward_prediction(src_hidden, source_mask, kwd_hidden, src_keyword_mask,
-                                     tgt_keyword[:, :-1], tgt_keyword_mask[:, :-1])
+            pred, logits = self._forward_prediction(src_hidden, source_mask, kwd_hidden, src_keyword_mask,
+                                                    tgt_keyword[:, :-1], tgt_keyword_mask[:, :-1])
 
         output = {
             "predictions": pred,
@@ -220,18 +220,9 @@ class KeywordConditionedTransformer(torch.nn.Module):
 
     def get_metrics(self, reset: bool = False) -> Dict[str, float]:
         all_metrics: Dict[str, float] = {}
-        if self._bleu and not self.training:
+        if self._bleu:
             all_metrics.update(self._bleu.get_metric(reset=reset))
         return all_metrics
-
-    @staticmethod
-    def _prepare_input(tokens):
-        if tokens is not None:
-            # padding token is assigned 0 in NSVocab by default
-            token_ids, mask = tokens, (tokens != 0).long()
-        else:
-            token_ids, mask = None, None
-        return token_ids, mask
 
     def _encode(self, src, src_mask, kwd, kwd_mask):
         src_emb = self._src_embedding(src)
@@ -433,8 +424,8 @@ class KeywordConditionedTransformer(torch.nn.Module):
         predictions_by_step = [batch_start]
         # last_kwd_index: (batch,), at first, keyword indices are all starting from 0
         # keywords_by_step: [(batch,)]
-        last_cond_index = src_mask.new_zeros((batch_size,))
-        cond_indices_by_step = []
+        cond_cursor = src_mask.new_zeros((batch_size,))
+        cond_cursors_by_step = []
 
         for timestep in range(self._max_decoding_step):
             # step_inputs: (batch, timestep + 1), i.e., at least 1 token at step 0
@@ -444,9 +435,10 @@ class KeywordConditionedTransformer(torch.nn.Module):
             step_inputs = torch.stack(predictions_by_step, dim=1)
             inputs_embedding = self._tgt_embedding(step_inputs)
 
-            cond_idx = self._find_next_keyword(predictions_by_step[-1], last_cond_index, cond)
-            cond_indices_by_step.append(cond_idx)
-            step_cond_inp = torch.stack(cond_indices_by_step, dim=1)
+            cond_cursor = self._find_next_keyword(predictions_by_step[-1], cond_cursor, cond)
+            cond_cursors_by_step.append(cond_cursor)
+            step_cond_indices = torch.stack(cond_cursors_by_step, dim=1)
+            step_cond_inp = cond.gather(dim=-1, index=step_cond_indices)
             cond_embedding = self._tgt_embedding(step_cond_inp)
 
             decoder_inp = self._decoder_inp_mapping(torch.cat([inputs_embedding, cond_embedding], dim=-1))

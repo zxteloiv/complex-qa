@@ -8,9 +8,11 @@ class StackedRNNCell(torch.nn.Module):
     def __init__(self, RNNType, input_dim, hidden_dim, n_layers, intermediate_dropout: float = 0.):
         super(StackedRNNCell, self).__init__()
 
-        self.layer_rnns = torch.nn.ModuleList([
-            UniversalHiddenStateWrapper(RNNType(input_dim, hidden_dim)) for _ in range(n_layers)
-        ])
+        assert n_layers >= 1
+        self.layer_rnns = torch.nn.ModuleList(
+            [UniversalHiddenStateWrapper(RNNType(input_dim, hidden_dim))] +
+            [UniversalHiddenStateWrapper(RNNType(hidden_dim, hidden_dim)) for _ in range(n_layers - 1)]
+        )
 
         self.hidden_dim = hidden_dim
         self.input_dim = input_dim

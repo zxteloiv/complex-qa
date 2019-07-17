@@ -10,7 +10,7 @@ import torch.nn
 from allennlp.data.vocabulary import Vocabulary
 from allennlp.modules import TokenEmbedder
 from allennlp.nn import util
-from .parallel_seq2seq import ParallelSeq2Seq, sequence_cross_entropy_with_probs
+from models.transformer.parallel_seq2seq import ParallelSeq2Seq, sequence_cross_entropy_with_probs
 
 class KeywordConstrainedTransformer(ParallelSeq2Seq):
     def __init__(self,

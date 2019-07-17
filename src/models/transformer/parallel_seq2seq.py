@@ -1,10 +1,10 @@
-from typing import Dict, List, Tuple, Mapping, Optional
+from typing import Dict, List, Tuple, Optional
 
 import numpy
 import torch
 import torch.nn
 import allennlp.models
-from data_adapter.ns_vocabulary import NSVocabulary, PADDING_TOKEN
+from training.trial_bot.data.ns_vocabulary import NSVocabulary
 from allennlp.modules import TokenEmbedder
 from allennlp.nn import util
 from allennlp.training.metrics import BLEU

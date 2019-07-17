@@ -4,9 +4,12 @@ import config
 import torch
 from torch.nn.utils.rnn import pad_sequence
 from allennlp.modules import Embedding
+from allennlp.modules.attention import BilinearAttention
+from utils.nn import AllenNLPAttentionWrapper
 from training.trial_bot.data.ns_vocabulary import NSVocabulary
 from training.trial_bot.data.general_datasets.tabular_dataset import TabSepFileDataset
-from models.keyword_conditioned_gen.keyword_conditioned_transformer import KeywordConditionedTransformer, Decoder, DecoderLayer
+from models.keyword_conditioned_gen.keyword_seq2seq import Seq2KeywordSeq, StackedEncoder
+from models.modules.stacked_rnn_cell import StackedLSTMCell
 from models.transformer.encoder import TransformerEncoder
 from models.modules.mixture_softmax import MoSProjection
 from training.trial_bot.data.ns_vocabulary import START_SYMBOL, END_SYMBOL, PADDING_TOKEN
@@ -19,7 +22,8 @@ def weibo_keyword_gen():
     hparams = config.common_settings()
     hparams.emb_sz = 300
     hparams.batch_sz = 50
-    hparams.num_layers = 2
+    hparams.num_enc_layers = 2
+    hparams.num_dec_layers = 1
     hparams.num_heads = 6
     hparams.max_decoding_len = 30
     hparams.ADAM_LR = 1e-5
@@ -30,32 +34,14 @@ def weibo_keyword_gen():
     hparams.attention_dropout = 0.
     hparams.diversity_factor = 0.
     hparams.acc_factor = 1.
-    hparams.cross_entropy = True # use cross entropy or not
-    hparams.margin = 1.
     return hparams
 
-@Registry.hparamset()
-def weibo_keyword_gen_bighead_mloss():
-    hparams = weibo_keyword_gen()
-    hparams.emb_sz = 300
-    hparams.batch_sz = 50
-    hparams.num_heads = 10
-    hparams.cross_entropy = False # do not use cross entropy but margin loss
-    hparams.margin = 1.
-    return hparams
-
-@Registry.hparamset()
-def weibo_keyword_gen_sgd():
-    hparams = weibo_keyword_gen()
-    hparams.OPTIM = "SGD"
-    hparams.SGD_LR = 1e-4
-    return hparams
-
-@Registry.hparamset()
-def weibo_keyword_gen_bighead_m10():
-    hparams = weibo_keyword_gen_bighead_mloss()
-    hparams.margin = 10.
-    return hparams
+@Registry.dataset('small_keywords_v2')
+def weibo_keyword():
+    train_data = TabSepFileDataset(os.path.join(config.DATA_PATH, 'weibo', 'small_keywords_v2', 'train_data'))
+    valid_data = TabSepFileDataset(os.path.join(config.DATA_PATH, 'weibo', 'small_keywords_v2', 'valid_data'))
+    test_data = TabSepFileDataset(os.path.join(config.DATA_PATH, 'weibo', 'small_keywords_v2', 'test_data'))
+    return train_data, valid_data, test_data
 
 @Registry.dataset('weibo_keywords_v2')
 def weibo_keyword():
@@ -126,59 +112,50 @@ class WeiboKeywordCharTranslator(Translator):
         return batched_tensor
 
 def get_model(hparams, vocab: NSVocabulary):
-    kwd_enc = TransformerEncoder(input_dim=hparams.emb_sz,
-                                 num_layers=hparams.num_layers,
-                                 num_heads=hparams.num_heads,
-                                 feedforward_hidden_dim=hparams.emb_sz,
-                                 feedforward_dropout=hparams.connection_dropout,
-                                 attention_dropout=hparams.attention_dropout,
-                                 residual_dropout=hparams.connection_dropout,
-                                 )
+    src_enc = StackedEncoder(
+        [
+            TransformerEncoder(input_dim=hparams.emb_sz,
+                               num_layers=hparams.num_enc_layers,
+                               num_heads=hparams.num_heads,
+                               feedforward_hidden_dim=hparams.emb_sz,
+                               feedforward_dropout=hparams.connection_dropout,
+                               attention_dropout=hparams.attention_dropout,
+                               residual_dropout=hparams.connection_dropout,
+                               )
+        ], input_size=hparams.emb_sz, output_size=hparams.emb_sz,
+    )
 
-    src_enc = TransformerEncoder(input_dim=hparams.emb_sz,
-                                 num_layers=hparams.num_layers,
-                                 num_heads=hparams.num_heads,
-                                 feedforward_hidden_dim=hparams.emb_sz,
-                                 feedforward_dropout=hparams.connection_dropout,
-                                 attention_dropout=hparams.attention_dropout,
-                                 residual_dropout=hparams.connection_dropout,
-                                 )
+    enc_attn = AllenNLPAttentionWrapper(BilinearAttention(vector_dim=hparams.emb_sz, matrix_dim=hparams.emb_sz),
+                                        attn_dropout=hparams.attention_dropout)
+    dec_hist_attn = AllenNLPAttentionWrapper(BilinearAttention(vector_dim=hparams.emb_sz, matrix_dim=hparams.emb_sz),
+                                             attn_dropout=hparams.attention_dropout)
 
-    decoder = Decoder([
-        DecoderLayer(input_dim=hparams.emb_sz,
-                     num_heads=hparams.num_heads,
-                     feedforward_hidden_dim=hparams.emb_sz,
-                     feedforward_dropout=hparams.connection_dropout,
-                     residual_dropout=hparams.connection_dropout,
-                     attention_dropout=hparams.attention_dropout,
-                     ),
-        DecoderLayer(input_dim=hparams.emb_sz,
-                     num_heads=hparams.num_heads,
-                     feedforward_hidden_dim=hparams.emb_sz,
-                     feedforward_dropout=hparams.connection_dropout,
-                     residual_dropout=hparams.connection_dropout,
-                     attention_dropout=hparams.attention_dropout,
-                     ),
-    ])
+    decoder = StackedLSTMCell(input_dim=(hparams.emb_sz * 4),   # input + keyword + enc_attn + dec_hist_attn
+                              hidden_dim=hparams.emb_sz,
+                              n_layers=hparams.num_dec_layers,
+                              intermediate_dropout=hparams.connection_dropout,)
+
     embedding = Embedding(num_embeddings=vocab.get_vocab_size(), embedding_dim=hparams.emb_sz)
-    projection_layer = MoSProjection(hparams.mixture_num, hparams.emb_sz, vocab.get_vocab_size())
+    projection_layer = MoSProjection(hparams.mixture_num,
+                                     hparams.emb_sz * 3,    # input + enc_attn + dec_hist_attn
+                                     vocab.get_vocab_size())
 
-    model = KeywordConditionedTransformer(vocab=vocab,
-                                          source_encoder=src_enc,
-                                          source_keyword_encoder=kwd_enc,
-                                          decoder=decoder,
-                                          source_embedding=embedding,
-                                          target_embedding=embedding,
-                                          target_namespace="tokens",
-                                          start_symbol=START_SYMBOL,
-                                          eos_symbol=END_SYMBOL,
-                                          max_decoding_step=hparams.max_decoding_len,
-                                          output_projection_layer=projection_layer,
-                                          output_is_logit=False,
-                                          beam_size=hparams.beam_size,
-                                          use_cross_entropy=hparams.cross_entropy,
-                                          margin=hparams.margin,
-                                          )
+    model = Seq2KeywordSeq(vocab=vocab,
+                           encoder=src_enc,
+                           decoder=decoder,
+                           word_projection=projection_layer,
+                           source_embedding=embedding,
+                           target_embedding=embedding,
+                           target_namespace="tokens",
+                           start_symbol=START_SYMBOL,
+                           eos_symbol=END_SYMBOL,
+                           max_decoding_step=hparams.max_decoding_len,
+                           enc_attention=enc_attn,
+                           dec_hist_attn=dec_hist_attn,
+                           scheduled_sampling_ratio=.1,
+                           intermediate_dropout=hparams.connection_dropout,
+                           output_is_logit=False,
+                           )
 
     return model
 
@@ -186,11 +163,14 @@ def main():
     from training.trial_bot.trial_bot import TrialBot, Events
     import sys
     import json
-    args = sys.argv[1:] + ['--dataset', 'weibo_keywords_v2', '--translator', 'weibo_trans']
+    args = sys.argv[1:] + ['--translator', 'weibo_trans']
+    if '--dataset' not in sys.argv:
+        args += ['--dataset', 'weibo_keywords_v2']
+
     parser = TrialBot.get_default_parser()
     args = parser.parse_args(args)
 
-    bot = TrialBot(trial_name="keyword_gen_cond", get_model_func=get_model, args=args)
+    bot = TrialBot(trial_name="keyword_gen_s2s", get_model_func=get_model, args=args)
     @bot.attach_extension(Events.ITERATION_COMPLETED)
     def ext_metrics(bot: TrialBot):
         if bot.state.iteration % 40 == 0:

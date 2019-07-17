@@ -1,9 +1,8 @@
 import allennlp.data
 import allennlp.modules
 import config
-import data_adapter
 
-from models.transformer.keyword_constrained_seq2seq import KeywordConstrainedTransformer
+from models.keyword_conditioned_gen.keyword_constrained_transformer import KeywordConstrainedTransformer
 from models.transformer.encoder import TransformerEncoder
 from models.transformer.decoder import TransformerDecoder
 from allennlp.common.util import START_SYMBOL, END_SYMBOL

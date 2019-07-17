@@ -1,6 +1,6 @@
 from typing import List, Generator, Tuple, Mapping
-from ..translator import Translator
-from ..ns_vocabulary import START_SYMBOL, END_SYMBOL, PADDING_TOKEN
+from training.trial_bot.data.translator import Translator
+from training.trial_bot.data.ns_vocabulary import START_SYMBOL, END_SYMBOL, PADDING_TOKEN
 
 import logging
 import torch
