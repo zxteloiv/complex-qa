@@ -70,7 +70,7 @@ class UniversalHiddenStateWrapper(torch.nn.Module):
         else:
             raise NotImplementedError
 
-    def init_hidden_states(self, forward_out, backward_out):
+    def init_hidden_states(self, forward_out):
         initial_hidden = forward_out
         initial_context = torch.zeros_like(initial_hidden)
 
@@ -81,7 +81,14 @@ class UniversalHiddenStateWrapper(torch.nn.Module):
             return initial_hidden, initial_hidden
 
     def init_hidden_states_by_layer(self, layer_forward: List, layer_backward: Optional[List]):
-        return self.init_hidden_states(layer_forward[-1], None)
+        initial_hidden = layer_forward[-1]
+        initial_context = torch.zeros_like(initial_hidden)
+
+        # returns (hidden, output) or ((hidden, context), output)
+        if type(self._rnn_cell) == RNNType.LSTM:
+            return (initial_hidden, initial_context), initial_hidden
+        else:
+            return initial_hidden, initial_hidden
 
     @staticmethod
     def weighted_sum_single_var(var_list, weight):

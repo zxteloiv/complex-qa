@@ -21,13 +21,53 @@ import logging
 def weibo_keyword_gen():
     hparams = config.common_settings()
     hparams.emb_sz = 300
-    hparams.batch_sz = 50
+    hparams.batch_sz = 100
     hparams.num_enc_layers = 2
     hparams.num_dec_layers = 1
     hparams.num_heads = 6
     hparams.max_decoding_len = 30
     hparams.ADAM_LR = 1e-5
     hparams.TRAINING_LIMIT = 20
+    hparams.mixture_num = 15
+    hparams.beam_size = 1
+    hparams.connection_dropout = 0.2
+    hparams.attention_dropout = 0.
+    hparams.diversity_factor = 0.
+    hparams.acc_factor = 1.
+    hparams.MIN_VOCAB_FREQ = {"tokens": 500}
+    return hparams
+
+@Registry.hparamset()
+def weibo_keyword_gen_word():
+    hparams = config.common_settings()
+    hparams.emb_sz = 300
+    hparams.batch_sz = 5
+    hparams.num_enc_layers = 2
+    hparams.num_dec_layers = 1
+    hparams.num_heads = 6
+    hparams.max_decoding_len = 20
+    hparams.ADAM_LR = 1e-5
+    hparams.TRAINING_LIMIT = 20
+    hparams.mixture_num = 15
+    hparams.beam_size = 1
+    hparams.connection_dropout = 0.2
+    hparams.attention_dropout = 0.
+    hparams.diversity_factor = 0.
+    hparams.acc_factor = 1.
+    hparams.MIN_VOCAB_FREQ = {"tokens": 50}
+    return hparams
+
+@Registry.hparamset()
+def weibo_debug():
+    hparams = config.common_settings()
+    hparams.emb_sz = 300
+    hparams.batch_sz = 100
+    hparams.num_enc_layers = 2
+    hparams.num_dec_layers = 1
+    hparams.num_heads = 6
+    hparams.max_decoding_len = 30
+    hparams.ADAM_LR = 1e-5
+    hparams.TRAINING_LIMIT = 1
     hparams.mixture_num = 15
     hparams.beam_size = 1
     hparams.connection_dropout = 0.2
@@ -50,7 +90,7 @@ def weibo_keyword():
     test_data = TabSepFileDataset(os.path.join(config.DATA_PATH, 'weibo_keywords_v2', 'test_data'))
     return train_data, valid_data, test_data
 
-@Registry.translator('weibo_trans')
+@Registry.translator('weibo_trans_char')
 class WeiboKeywordCharTranslator(Translator):
     def __init__(self, max_len: int = 30):
         super(WeiboKeywordCharTranslator, self).__init__()
@@ -80,8 +120,8 @@ class WeiboKeywordCharTranslator(Translator):
         src, kwds, conds, tgt = example
         src = self.filter_split_str(src)[:self.max_len]
         tgt = [START_SYMBOL] + self.filter_split_str(tgt)[:self.max_len] + [END_SYMBOL]
-        kwds = self.filter_split_str("".join(kwds.split(' ')))[:self.max_len] + [END_SYMBOL]
-        conds = self.filter_split_str("".join(conds.split(' ')))[:self.max_len] + [END_SYMBOL]
+        kwds = self.filter_split_str(kwds)[:self.max_len] + [END_SYMBOL]
+        conds = self.filter_split_str(conds)[:self.max_len] + [END_SYMBOL]
 
         def tokens_to_id_vector(token_list: List[str]) -> torch.Tensor:
             ids = [self.vocab.get_token_index(tok, self.shared_namespace) for tok in token_list]
@@ -110,6 +150,15 @@ class WeiboKeywordCharTranslator(Translator):
         )
 
         return batched_tensor
+
+@Registry.translator('weibo_trans_word')
+class WeiboKeywordWordTranslator(WeiboKeywordCharTranslator):
+    def __init__(self, max_len: int = 20):
+        super(WeiboKeywordWordTranslator, self).__init__(max_len)
+
+    @staticmethod
+    def filter_split_str(sent: str) -> List[str]:
+        return list(filter(lambda x: x not in ("", ' ', '\t'), sent.split(' ')))
 
 def get_model(hparams, vocab: NSVocabulary):
     src_enc = StackedEncoder(
@@ -155,6 +204,7 @@ def get_model(hparams, vocab: NSVocabulary):
                            scheduled_sampling_ratio=.1,
                            intermediate_dropout=hparams.connection_dropout,
                            output_is_logit=False,
+                           hidden_states_strategy="avg_lowest"
                            )
 
     return model
@@ -163,9 +213,11 @@ def main():
     from training.trial_bot.trial_bot import TrialBot, Events
     import sys
     import json
-    args = sys.argv[1:] + ['--translator', 'weibo_trans']
+    args = sys.argv[1:]
     if '--dataset' not in sys.argv:
         args += ['--dataset', 'weibo_keywords_v2']
+    if '--translator' not in sys.argv:
+        args += ['--translator', 'weibo_trans_char']
 
     parser = TrialBot.get_default_parser()
     args = parser.parse_args(args)

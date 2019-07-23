@@ -56,12 +56,27 @@ class StackedRNNCell(torch.nn.Module):
         return merged
 
     def init_hidden_states_by_layer(self, layer_forward: List, layer_backward: Optional[List]):
+        """
+        deprecated api only for old s2s functions
+        :param layer_forward:
+        :param layer_backward:
+        :return:
+        """
         layer_hidden = []
         for i, rnn in enumerate(self.layer_rnns):
-            h, _ = rnn.init_hidden_states(layer_forward[i], None if layer_backward is None else layer_backward[i])
+            h, _ = rnn.init_hidden_states(layer_forward[i])
             layer_hidden.append(h)
 
         return layer_hidden, self.get_output_state(layer_hidden)
+
+    def init_hidden_states(self, layer_hidden: List[torch.Tensor]):
+        assert len(layer_hidden) == self.get_layer_num()
+        hiddens = []
+        for rnn, init_hidden in zip(self.layer_rnns, layer_hidden):
+            h, _ = rnn.init_hidden_states(init_hidden)
+            hiddens.append(h)
+        return hiddens, self.get_output_state(hiddens)
+
 
 class StackedLSTMCell(StackedRNNCell):
     def __init__(self, input_dim, hidden_dim, n_layers, intermediate_dropout = 0.):
