@@ -72,11 +72,14 @@ class TrialBot:
     def get_default_parser():
         parser = get_trial_bot_common_opt_parser()
         parser.add_argument('models', nargs='*', help='pretrained models for the same setting')
+        parser.add_argument('--dry-run', action="store_true")
+        parser.add_argument('--skip', type=int, help='skip NUM examples for the first iteration, intended for debug use.')
         parser.add_argument('--vocab-dump', help="the file path to save and load the vocab obj")
         return parser
 
     def _default_train_fn(self, iterator: Iterator, model: torch.nn.Module, optimizer):
         device = self.args.device
+        dry_run = self.args.dry_run
 
         def update():
             model.train()
@@ -88,9 +91,10 @@ class TrialBot:
                 batch = move_to_device(batch, device)
 
             output = model(**batch)
-            loss = output['loss']
-            loss.backward()
-            optimizer.step()
+            if not dry_run:
+                loss = output['loss']
+                loss.backward()
+                optimizer.step()
             return output
 
         return update
@@ -145,6 +149,14 @@ class TrialBot:
             model = model.cuda(args.device)
         self.model = model
 
+        savepath = args.snapshot_dir if args.snapshot_dir else (os.path.join(
+            hparams.SNAPSHOT_PATH,
+            args.dataset,
+            self.name,
+            datetime.now().strftime('%Y%m%d-%H%M%S') + ('-' + args.memo if args.memo else '')
+        ))
+        self.savepath = savepath
+
     def run(self):
         if self.args.test:
             self._test()
@@ -155,6 +167,7 @@ class TrialBot:
                     dataset: Dataset,
                     translator: Translator):
         args, logger = self.args, self.logger
+        hparams = self.hparams
 
         if args.vocab_dump and os.path.exists(args.vocab_dump):
             logger.info(f"read vocab from file {args.vocab_dump}")
@@ -175,7 +188,9 @@ class TrialBot:
 
                     counter[namespace][w] += 1
 
-            vocab = NSVocabulary(counter, min_count={"tokens": 3})
+            vocab = NSVocabulary(counter, min_count=({"tokens": 3}
+                                                     if not hasattr(hparams, 'MIN_VOCAB_FREQ')
+                                                     else hparams.MIN_VOCAB_FREQ))
 
         if args.vocab_dump:
             os.makedirs(args.vocab_dump, exist_ok=True)
@@ -188,22 +203,21 @@ class TrialBot:
         args, hparams, model = self.args, self.hparams, self.model
         logger = self.logger
 
-        iterator = RandomIterator(self.train_set, hparams.batch_sz, self.translator)
+        repeat_iter = not args.debug
+        shuffle_iter = not args.debug
+        iterator = RandomIterator(self.train_set, hparams.batch_sz, self.translator,
+                                  shuffle=shuffle_iter, repeat=repeat_iter)
+        if args.debug and args.skip:
+            iterator.reset(args.skip)
+
         if hasattr(hparams, "OPTIM") and hparams.OPTIM == "SGD":
             logger.info(f"Using SGD optimzer with lr={hparams.SGD_LR}")
             optim = torch.optim.SGD(model.parameters(), hparams.SGD_LR)
         else:
             logger.info(f"Using Adam optimzer with lr={hparams.ADAM_LR} and beta={str(hparams.ADAM_BETAS)}")
             optim = torch.optim.Adam(model.parameters(), hparams.ADAM_LR, hparams.ADAM_BETAS)
-            torch.optim.lr_scheduler.StepLR(optim)
 
-        savepath = args.snapshot_dir if args.snapshot_dir else (os.path.join(
-            hparams.SNAPSHOT_PATH,
-            args.dataset,
-            self.name,
-            datetime.now().strftime('%Y%m%d-%H%M%S') + ('-' + args.memo if args.memo else '')
-        ))
-        self.savepath = savepath
+        savepath = self.savepath
         if not os.path.exists(savepath):
             os.makedirs(savepath, mode=0o755)
         vocab_path = os.path.join(savepath, 'vocab')

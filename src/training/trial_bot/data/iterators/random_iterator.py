@@ -101,8 +101,8 @@ class RandomIterator(Iterator):
             return None
         return self._previous_epoch_detail
 
-    def reset(self):
-        self.current_position = 0
+    def reset(self, skip=0):
+        self.current_position = skip
         self.epoch = 0
         self.is_new_epoch = False
 
