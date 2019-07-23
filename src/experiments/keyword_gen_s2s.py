@@ -6,15 +6,14 @@ from torch.nn.utils.rnn import pad_sequence
 from allennlp.modules import Embedding
 from allennlp.modules.attention import BilinearAttention
 from utils.nn import AllenNLPAttentionWrapper
-from training.trial_bot.data.ns_vocabulary import NSVocabulary
-from training.trial_bot.data.general_datasets.tabular_dataset import TabSepFileDataset
 from models.keyword_conditioned_gen.keyword_seq2seq import Seq2KeywordSeq, StackedEncoder
 from models.modules.stacked_rnn_cell import StackedLSTMCell
 from models.transformer.encoder import TransformerEncoder
 from models.modules.mixture_softmax import MoSProjection
-from training.trial_bot.data.ns_vocabulary import START_SYMBOL, END_SYMBOL, PADDING_TOKEN
-from training.trial_bot.trial_registry import Registry
-from training.trial_bot.data.translator import Translator
+
+from trialbot.data import Translator, NSVocabulary, START_SYMBOL, END_SYMBOL, PADDING_TOKEN, TabSepFileDataset
+from trialbot.training import Registry, TrialBot, Events
+
 import logging
 
 @Registry.hparamset()
@@ -210,7 +209,6 @@ def get_model(hparams, vocab: NSVocabulary):
     return model
 
 def main():
-    from training.trial_bot.trial_bot import TrialBot, Events
     import sys
     import json
     args = sys.argv[1:]
