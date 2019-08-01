@@ -4,7 +4,7 @@ import numpy
 import torch
 import torch.nn
 import allennlp.models
-from training.trial_bot.data.ns_vocabulary import NSVocabulary
+from trialbot.data.ns_vocabulary import NSVocabulary
 from allennlp.modules import TokenEmbedder
 from allennlp.nn import util
 from allennlp.training.metrics import BLEU

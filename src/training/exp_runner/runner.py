@@ -16,6 +16,11 @@ from .opt_parser import get_common_opt_parser
 logger = logging.getLogger()
 
 class ExperimentRunner:
+    """
+    Deprecated trainer, code reserved for old experiments only.
+    Refer to TrialBot for future use.
+    https://github.com/zxteloiv/TrialBot/
+    """
     def __init__(self,
                  exp_name="default_savedir",
                  get_model_func: Optional[Callable] = None,

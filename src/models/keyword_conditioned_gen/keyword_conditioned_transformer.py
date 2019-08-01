@@ -7,7 +7,7 @@ from allennlp.modules import TokenEmbedder
 from allennlp.training.metrics import BLEU
 from utils.nn import add_positional_features, prepare_input
 
-from training.trial_bot.data.ns_vocabulary import NSVocabulary, PADDING_TOKEN
+from trialbot.data.ns_vocabulary import NSVocabulary, PADDING_TOKEN
 from models.transformer.multi_head_attention import MaskedMultiHeadSelfAttention, MultiHeadAttention
 
 class DecoderLayer(torch.nn.Module):

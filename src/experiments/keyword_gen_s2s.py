@@ -40,14 +40,34 @@ def weibo_keyword_gen():
 def weibo_keyword_gen_word():
     hparams = config.common_settings()
     hparams.emb_sz = 300
-    hparams.batch_sz = 5
+    hparams.batch_sz = 50
     hparams.num_enc_layers = 2
     hparams.num_dec_layers = 1
     hparams.num_heads = 6
     hparams.max_decoding_len = 20
     hparams.ADAM_LR = 1e-5
     hparams.TRAINING_LIMIT = 20
-    hparams.mixture_num = 15
+    hparams.mixture_num = 1
+    hparams.beam_size = 1
+    hparams.connection_dropout = 0.2
+    hparams.attention_dropout = 0.
+    hparams.diversity_factor = 0.
+    hparams.acc_factor = 1.
+    hparams.MIN_VOCAB_FREQ = {"tokens": 50}
+    return hparams
+
+@Registry.hparamset()
+def weibo_keyword_gen_word2():
+    hparams = config.common_settings()
+    hparams.emb_sz = 300
+    hparams.batch_sz = 50
+    hparams.num_enc_layers = 2
+    hparams.num_dec_layers = 1
+    hparams.num_heads = 6
+    hparams.max_decoding_len = 20
+    hparams.ADAM_LR = 1e-4
+    hparams.TRAINING_LIMIT = 20
+    hparams.mixture_num = 1
     hparams.beam_size = 1
     hparams.connection_dropout = 0.2
     hparams.attention_dropout = 0.
