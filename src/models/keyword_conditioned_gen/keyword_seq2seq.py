@@ -7,7 +7,7 @@ from training.trial_bot import NSVocabulary, PADDING_TOKEN
 from allennlp.modules import TokenEmbedder
 from models.transformer.multi_head_attention import SingleTokenMHAttentionWrapper
 from models.modules.stacked_rnn_cell import StackedRNNCell
-from utils.nn import AllenNLPAttentionWrapper, filter_cat, prepare_input
+from utils.nn import AllenNLPAttentionWrapper, filter_cat, prepare_input_mask
 from allennlp.training.metrics import BLEU
 from models.modules.stacked_encoder import StackedEncoder
 
@@ -76,11 +76,11 @@ class Seq2KeywordSeq(torch.nn.Module):
         # source: (batch, source_length), containing the input word IDs
         # target: (batch, target_length), containing the output IDs
 
-        source, source_mask = prepare_input(source_tokens)
-        src_keyword, src_keyword_mask = prepare_input(src_keyword_tokens)
+        source, source_mask = prepare_input_mask(source_tokens)
+        src_keyword, src_keyword_mask = prepare_input_mask(src_keyword_tokens)
         src_hidden, layered_hidden = self._encode(source, source_mask)
-        target, target_mask = prepare_input(target_tokens)
-        tgt_keyword, tgt_keyword_mask = prepare_input(tgt_keyword_tokens)
+        target, target_mask = prepare_input_mask(target_tokens)
+        tgt_keyword, tgt_keyword_mask = prepare_input_mask(tgt_keyword_tokens)
 
         init_hidden, _ = self._init_hidden_states(layered_hidden, source_mask)
 

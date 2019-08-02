@@ -155,7 +155,7 @@ def roll(t: torch.Tensor, shift: int, axis: int = 0):
     chunks = torch.split(t, [length - shift, shift], dim=axis)
     return torch.cat(list(reversed(chunks)), dim=axis)
 
-def prepare_input(tokens, padding_val: int = 0):
+def prepare_input_mask(tokens, padding_val: int = 0):
     if tokens is not None:
         # padding token is assigned 0 in NSVocab by default
         token_ids, mask = tokens, (tokens != padding_val).long()

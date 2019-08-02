@@ -4,14 +4,14 @@ import config
 import torch
 from torch.nn.utils.rnn import pad_sequence
 from allennlp.modules import Embedding
-from training.trial_bot.data.ns_vocabulary import NSVocabulary
-from training.trial_bot.data.general_datasets.tabular_dataset import TabSepFileDataset
+from trialbot.data.ns_vocabulary import NSVocabulary
+from trialbot.data.datasets.tabular_dataset import TabSepFileDataset
 from models.keyword_conditioned_gen.keyword_conditioned_transformer import KeywordConditionedTransformer, Decoder, DecoderLayer
 from models.transformer.encoder import TransformerEncoder
 from models.modules.mixture_softmax import MoSProjection
-from training.trial_bot.data.ns_vocabulary import START_SYMBOL, END_SYMBOL, PADDING_TOKEN
-from training.trial_bot.trial_registry import Registry
-from training.trial_bot.data.translator import Translator
+from trialbot.data.ns_vocabulary import START_SYMBOL, END_SYMBOL, PADDING_TOKEN
+from trialbot.training import Registry
+from trialbot.data.translator import Translator
 import logging
 
 @Registry.hparamset()

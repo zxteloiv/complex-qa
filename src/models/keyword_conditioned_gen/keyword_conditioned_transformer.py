@@ -5,7 +5,7 @@ import numpy
 
 from allennlp.modules import TokenEmbedder
 from allennlp.training.metrics import BLEU
-from utils.nn import add_positional_features, prepare_input
+from utils.nn import add_positional_features, prepare_input_mask
 
 from trialbot.data.ns_vocabulary import NSVocabulary, PADDING_TOKEN
 from models.transformer.multi_head_attention import MaskedMultiHeadSelfAttention, MultiHeadAttention
@@ -183,12 +183,12 @@ class KeywordConditionedTransformer(torch.nn.Module):
         :param tgt_keyword_tokens: (batch, target_key_len) orderded
         :return:
         """
-        source, source_mask = prepare_input(source_tokens)
-        src_keyword, src_keyword_mask = prepare_input(src_keyword_tokens)
+        source, source_mask = prepare_input_mask(source_tokens)
+        src_keyword, src_keyword_mask = prepare_input_mask(src_keyword_tokens)
         src_hidden, kwd_hidden = self._encode(source, source_mask, src_keyword, src_keyword_mask)
 
-        target, target_mask = prepare_input(target_tokens)
-        tgt_keyword, tgt_keyword_mask = prepare_input(tgt_keyword_tokens)
+        target, target_mask = prepare_input_mask(target_tokens)
+        tgt_keyword, tgt_keyword_mask = prepare_input_mask(tgt_keyword_tokens)
 
         loss = None
         if target is not None and self.training:    # training mode
