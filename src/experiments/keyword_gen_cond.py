@@ -183,7 +183,7 @@ def get_model(hparams, vocab: NSVocabulary):
     return model
 
 def main():
-    from training.trial_bot.trial_bot import TrialBot, Events
+    from trialbot.training import TrialBot, Events
     import sys
     import json
     args = sys.argv[1:] + ['--dataset', 'weibo_keywords_v2', '--translator', 'weibo_trans']
