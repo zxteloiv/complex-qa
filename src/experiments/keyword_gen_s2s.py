@@ -13,6 +13,7 @@ from models.modules.mixture_softmax import MoSProjection
 
 from trialbot.data import Translator, NSVocabulary, START_SYMBOL, END_SYMBOL, PADDING_TOKEN, TabSepFileDataset
 from trialbot.training import Registry, TrialBot, Events
+from trialbot.training.extensions import every_epoch_model_saver
 
 import logging
 
@@ -34,6 +35,26 @@ def weibo_keyword_gen():
     hparams.diversity_factor = 0.
     hparams.acc_factor = 1.
     hparams.MIN_VOCAB_FREQ = {"tokens": 500}
+    return hparams
+
+@Registry.hparamset()
+def weibo_keyword_small():
+    hparams = config.common_settings()
+    hparams.emb_sz = 100
+    hparams.batch_sz = 100
+    hparams.num_enc_layers = 2
+    hparams.num_dec_layers = 1
+    hparams.num_heads = 6
+    hparams.max_decoding_len = 30
+    hparams.ADAM_LR = 1e-3
+    hparams.TRAINING_LIMIT = 20
+    hparams.mixture_num = 1
+    hparams.beam_size = 1
+    hparams.connection_dropout = 0.2
+    hparams.attention_dropout = 0.
+    hparams.diversity_factor = 0.
+    hparams.acc_factor = 1.
+    hparams.MIN_VOCAB_FREQ = {"tokens": 1}
     return hparams
 
 @Registry.hparamset()
@@ -241,6 +262,7 @@ def main():
     args = parser.parse_args(args)
 
     bot = TrialBot(trial_name="keyword_gen_s2s", get_model_func=get_model, args=args)
+    bot._engine.add_event_handler(Events.EPOCH_COMPLETED, every_epoch_model_saver, 100)
     @bot.attach_extension(Events.ITERATION_COMPLETED)
     def ext_metrics(bot: TrialBot):
         if bot.state.iteration % 40 == 0:

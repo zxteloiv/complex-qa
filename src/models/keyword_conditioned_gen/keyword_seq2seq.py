@@ -3,7 +3,7 @@ import numpy as np
 import re
 import torch
 import torch.nn
-from training.trial_bot import NSVocabulary, PADDING_TOKEN
+from trialbot.data import NSVocabulary, PADDING_TOKEN, DEFAULT_OOV_TOKEN
 from allennlp.modules import TokenEmbedder
 from models.transformer.multi_head_attention import SingleTokenMHAttentionWrapper
 from models.modules.stacked_rnn_cell import StackedRNNCell
@@ -58,7 +58,8 @@ class Seq2KeywordSeq(torch.nn.Module):
 
         if use_bleu:
             pad_index = self.vocab.get_token_index(PADDING_TOKEN, target_namespace)
-            self._bleu = BLEU(exclude_indices={pad_index, self._eos_id, self._start_id})
+            oov_index = self.vocab.get_token_index(DEFAULT_OOV_TOKEN, target_namespace)
+            self._bleu = BLEU(exclude_indices={pad_index, self._eos_id, self._start_id, oov_index})
         else:
             self._bleu = None
 
