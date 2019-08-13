@@ -105,6 +105,7 @@ class InsertionDecoder(torch.nn.Module):
         self._dec_blocks = torch.nn.ModuleList([ _DecoderBlock() for _ in range(num_layers) ])
         self.input_dim = input_dim
         self.hidden_dim = hidden_dim
+        self.output_dim = hidden_dim * 2
         self._use_positional_embedding = use_positional_embedding
 
     def forward(self,
@@ -112,7 +113,7 @@ class InsertionDecoder(torch.nn.Module):
                 tgt_mask: Optional[torch.LongTensor],
                 src_hidden: torch.Tensor,
                 src_mask: Optional[torch.LongTensor]
-                ) -> torch.Tensor:
+                ) -> Tuple[torch.Tensor, Optional[torch.LongTensor]]:
         """
         Transformer deocder stacked blocks.
 
@@ -135,5 +136,7 @@ class InsertionDecoder(torch.nn.Module):
         right = inp[:, 1:, :]
         output = torch.cat([left, right], dim=-1)
 
-        return output
+        output_mask = None if tgt_mask is None else ((tgt_mask[:, :-1] + tgt_mask[:, 1:]) < 2).long()
+
+        return output, output_mask
 
