@@ -104,7 +104,7 @@ class KwdUniformOrder(TrainingOrder):
                 # Slot-level loss requires every empty slot to predict the <EoSpan> token.
                 # Thus extend slots and tokens for these empty locations.
                 # Weights will be computed automatically from the slots.
-                empty_slots = sorted(set(range(len(set(selected_loc)) + 1)) - set(slots))
+                empty_slots = sorted(set(range(len(selected_loc) + 1)) - set(slots))
                 slots.extend(empty_slots)
                 empty_toks = tgt.new_tensor([self.eos_id] * len(empty_slots))
                 target_toks = torch.cat([target_toks, empty_toks], dim=-1)
@@ -193,7 +193,7 @@ if __name__ == '__main__':
             weights = order.get_weights_for_slots(slots)
             self.assertEqual(weights, [1, 1/2., 1/2., 1/3., 1/3., 1/3., 1/4., 1/4., 1/4., 1/4.])
 
-        def test_random_select(self):
+        def test_select(self):
             order = KwdUniformOrder(eos_id=1)
 
             tgt = torch.tensor([3, 4, 5, 6, 7]).long()
@@ -211,13 +211,43 @@ if __name__ == '__main__':
             self.assertEqual(selected, list(range(5)))
             self.assertEqual(complement, [])
 
+        def test_random_select(self):
+            order = KwdUniformOrder(eos_id=1)
+            for i in range(10000):
+                tgt_len = random.randint(5, 30)
+                tgt = torch.randint(0, 1000, (tgt_len,))
+                tkwd_len = random.randint(1, min(tgt_len, 5))
+                all_locs = list(range(tgt_len))
+                random.shuffle(all_locs)
+                tkwd_locs = all_locs[:tkwd_len]
+                tkwd_locs.sort()
+                tkwd = tgt.gather(dim=0, index=torch.tensor(tkwd_locs))
+
+                k = random.randint(0, tgt_len - tkwd_len) # 0 <= k <= #tgt - #tkwd, random.randint is right-inclusive
+                selected, complement = order.get_sel_compl_locs(tgt, tkwd, k)
+
+                self.assertEqual(len(selected), tkwd_len + k)
+                self.assertEqual(len(selected) + len(complement), tgt_len)
+                # it is possible that a keyword occurs several times in the target, which could not found in selected
+                # for i in tkwd_locs:
+                #     self.assertIn(i, selected)
+                #     self.assertNotIn(i, complement)
+
+                for i in selected:
+                    self.assertNotIn(i, complement)
+
+                for i in complement:
+                    self.assertNotIn(i, selected)
+
+                self.assertCountEqual(selected, set(selected))
+                self.assertCountEqual(complement, set(complement))
+
         def test_single_example_processing(self):
             order = KwdUniformOrder(eos_id=-1, use_slot_loss=True)
 
             for i in range(1000):
                 tgt_len = 30
                 tgt = torch.randint(0, 1000, (tgt_len,))
-                import random
                 tkwd_len = random.randint(1, 7)
                 tkwd = torch.randint(0, 1000, (tkwd_len,))
                 dec_inp, target_slots, target_toks, target_weights = order._process_single_example(tgt, tkwd)

@@ -136,7 +136,7 @@ class InsertionDecoder(torch.nn.Module):
         right = inp[:, 1:, :]
         output = torch.cat([left, right], dim=-1)
 
-        output_mask = None if tgt_mask is None else ((tgt_mask[:, :-1] + tgt_mask[:, 1:]) < 2).long()
+        output_mask = None if tgt_mask is None else ((tgt_mask[:, :-1] + tgt_mask[:, 1:]) == 2).long()
 
         return output, output_mask
 

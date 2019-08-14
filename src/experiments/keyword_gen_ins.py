@@ -28,7 +28,7 @@ def weibo_keyword_ins():
     hparams.num_heads = 6
     hparams.max_decoding_len = 30
     hparams.ADAM_LR = 1e-5
-    hparams.TRAINING_LIMIT = 20
+    hparams.TRAINING_LIMIT = 100
     hparams.beam_size = 1
     hparams.connection_dropout = 0.2
     hparams.attention_dropout = 0.
@@ -40,6 +40,22 @@ def weibo_keyword_ins():
     hparams.joint_word_location = False
     hparams.vocab_logit_bias = True
     hparams.mixture_num = 10
+    hparams.span_end_penalty = .0
+    hparams.num_slot_transformer_layers = 0
+    return hparams
+
+@Registry.hparamset()
+def weibo_ins_large():
+    hparams = weibo_keyword_ins()
+    hparams.num_enc_layers = 4
+    hparams.num_dec_layers = 4
+    return hparams
+
+@Registry.hparamset()
+def weibo_ins_large_slot_trans():
+    hparams = weibo_ins_large()
+    hparams.batch_sz = 64
+    hparams.num_slot_transformer_layers = 1
     return hparams
 
 @Registry.dataset('small_keywords_v3')
@@ -146,6 +162,14 @@ def get_model(hparams, vocab: NSVocabulary):
                                   flatten_softmax=False)
         joint_proj = (slot_proj, word_proj)
 
+    slot_trans = TransformerEncoder(input_dim=decoder.output_dim,
+                                    num_layers=hparams.num_slot_trans_layers,
+                                    feedforward_hidden_dim=hparams.emb_sz,
+                                    feedforward_dropout=hparams.connection_dropout,
+                                    residual_dropout=hparams.connection_dropout,
+                                    attention_dropout=hparams.attention_dropout,
+                                    ) if hparams.num_slot_transformer_layers > 0 else None
+
     bias_mapper = None
     if hparams.vocab_logit_bias:
         bias_mapper = torch.nn.Linear(decoder.output_dim, vocab.get_vocab_size())
@@ -161,7 +185,10 @@ def get_model(hparams, vocab: NSVocabulary):
                                         target_namespace="tokens",
                                         start_symbol=START_SYMBOL,
                                         eos_symbol=END_SYMBOL,
+                                        span_ends_symbol=KwdUniformOrder.END_OF_SPAN_TOKEN,
                                         max_decoding_step=hparams.max_decoding_len,
+                                        span_end_penalty=hparams.span_end_penalty,
+                                        slot_transform=slot_trans,
                                         )
 
     return model
@@ -230,6 +257,35 @@ class InsTrainingUpdater(TrainingUpdater):
 
         return output
 
+class InsTestingUpdater(TestingUpdater):
+    def update_epoch(self):
+        model, iterator, device = self._models[0], self._iterators[0], self._device
+        model.eval()
+        batch = next(iterator)
+        keys = ("source_tokens", "target_tokens", "src_keyword_tokens", "tgt_keyword_tokens")
+        srcs, tgts, skwds, tkwds = list(map(batch.get, keys))
+        if iterator.is_new_epoch:
+            self.stop_epoch()
+
+        if device >= 0:
+            srcs = move_to_device(srcs, device)
+            tkwds = move_to_device(tkwds, device)
+            tgts = move_to_device(tgts, device)
+
+        output = model(srcs, tkwds, references=tgts)
+        return output
+
+    @classmethod
+    def from_bot(cls, bot: TrialBot) -> 'TestingUpdater':
+        self = bot
+        args, model = self.args, self.model
+        device = args.device
+
+        hparams, model = self.hparams, self.model
+        iterator = RandomIterator(self.test_set, hparams.batch_sz, self.translator, shuffle=False, repeat=False)
+        updater = cls(model, iterator, None, device)
+        return updater
+
 def main():
     import sys
     args = sys.argv[1:]
@@ -242,7 +298,12 @@ def main():
     args = parser.parse_args(args)
 
     bot = TrialBot(trial_name="ins_trans", get_model_func=get_model, args=args)
-    bot.updater = InsTrainingUpdater.from_bot(bot)
+    from trialbot.training.extensions import every_epoch_model_saver
+    bot._engine.add_event_handler(Events.EPOCH_COMPLETED, every_epoch_model_saver, 100)
+    if args.test:
+        bot.updater = InsTestingUpdater.from_bot(bot)
+    else:
+        bot.updater = InsTrainingUpdater.from_bot(bot)
     bot.run()
 
 if __name__ == '__main__':
