@@ -40,7 +40,7 @@ def weibo_keyword_ins():
     hparams.joint_word_location = False
     hparams.vocab_logit_bias = True
     hparams.mixture_num = 10
-    hparams.span_end_penalty = .0
+    hparams.span_end_penalty = .4
     hparams.num_slot_transformer_layers = 0
     return hparams
 
@@ -296,6 +296,12 @@ def main():
 
     parser = TrialBot.get_default_parser()
     args = parser.parse_args(args)
+    if args.debug:
+        logging.getLogger().setLevel(logging.DEBUG)
+    elif args.quiet:
+        logging.getLogger().setLevel(logging.WARNING)
+    else:
+        logging.getLogger().setLevel(logging.INFO)
 
     bot = TrialBot(trial_name="ins_trans", get_model_func=get_model, args=args)
     from trialbot.training.extensions import every_epoch_model_saver
