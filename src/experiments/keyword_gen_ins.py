@@ -163,7 +163,7 @@ def get_model(hparams, vocab: NSVocabulary):
         joint_proj = (slot_proj, word_proj)
 
     slot_trans = TransformerEncoder(input_dim=decoder.output_dim,
-                                    num_layers=hparams.num_slot_trans_layers,
+                                    num_layers=hparams.num_slot_transformer_layers,
                                     feedforward_hidden_dim=hparams.emb_sz,
                                     feedforward_dropout=hparams.connection_dropout,
                                     residual_dropout=hparams.connection_dropout,
