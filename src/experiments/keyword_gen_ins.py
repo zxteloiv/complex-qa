@@ -310,11 +310,11 @@ def main():
 
     bot = TrialBot(trial_name="ins_trans", get_model_func=get_model, args=args)
     from trialbot.training.extensions import every_epoch_model_saver, legacy_testing_output
-    bot.add_event_handler(Events.EPOCH_COMPLETED, every_epoch_model_saver, 100)
-    bot.add_event_handler(Events.ITERATION_COMPLETED, legacy_testing_output)
     if args.test:
+        bot.add_event_handler(Events.ITERATION_COMPLETED, legacy_testing_output, 100)
         bot.updater = InsTestingUpdater.from_bot(bot)
     else:
+        bot.add_event_handler(Events.EPOCH_COMPLETED, every_epoch_model_saver, 100)
         bot.updater = InsTrainingUpdater.from_bot(bot)
     bot.run()
 

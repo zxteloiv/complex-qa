@@ -13,7 +13,6 @@ from models.modules.mixture_softmax import MoSProjection
 
 from trialbot.data import Translator, NSVocabulary, START_SYMBOL, END_SYMBOL, PADDING_TOKEN, TabSepFileDataset
 from trialbot.training import Registry, TrialBot, Events
-from trialbot.training.extensions import every_epoch_model_saver
 
 import logging
 
@@ -262,7 +261,6 @@ def main():
     args = parser.parse_args(args)
 
     bot = TrialBot(trial_name="keyword_gen_s2s", get_model_func=get_model, args=args)
-    bot._engine.add_event_handler(Events.EPOCH_COMPLETED, every_epoch_model_saver, 100)
     @bot.attach_extension(Events.ITERATION_COMPLETED)
     def ext_metrics(bot: TrialBot):
         if bot.state.iteration % 40 == 0:
@@ -273,6 +271,12 @@ def main():
     def epoch_clean_metrics(bot: TrialBot):
         metrics = bot.model.get_metrics(reset=True)
         bot.logger.info("Epoch metrics: " + json.dumps(metrics))
+
+    from trialbot.training.extensions import every_epoch_model_saver, legacy_testing_output
+    if args.test:
+        bot.add_event_handler(Events.ITERATION_COMPLETED, legacy_testing_output, 100)
+    else:
+        bot.add_event_handler(Events.EPOCH_COMPLETED, every_epoch_model_saver, 100)
 
     bot.run()
 

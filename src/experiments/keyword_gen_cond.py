@@ -202,6 +202,12 @@ def main():
         metrics = bot.model.get_metrics(reset=True)
         bot.logger.info("Epoch metrics: " + json.dumps(metrics))
 
+    from trialbot.training.extensions import every_epoch_model_saver, legacy_testing_output
+    if args.test:
+        bot.add_event_handler(Events.ITERATION_COMPLETED, legacy_testing_output, 100)
+    else:
+        bot.add_event_handler(Events.EPOCH_COMPLETED, every_epoch_model_saver, 100)
+
     bot.run()
 
 if __name__ == '__main__':
