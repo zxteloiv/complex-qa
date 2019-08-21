@@ -154,6 +154,34 @@ class KwdUniformOrder(TrainingOrder):
         return selected_loc, complement_loc
 
 
+class KwdBSTOrder(KwdUniformOrder):
+
+    def __init__(self, eos_id, use_slot_loss=False, tao=1., reverse=False):
+        super(KwdBSTOrder, self).__init__(eos_id, use_slot_loss)
+        self._tao = tao
+        self._reverse = reverse
+
+    def get_weights_for_slots(self, slots: List[int]) -> List[float]:
+        import math
+        # assume the slots had been arranged that the same keys were put together.
+        counts = [(k, len(list(g)))for k, g in itertools.groupby(slots)]
+        def _get_weights_from_count(count: int) -> List[float]:
+            center = (count - 1.) / 2.
+            if self._reverse:
+                weights = [math.exp(abs(center - i) / self._tao) for i in range(count)]
+            else:
+                weights = [math.exp(- abs(center - i) / self._tao) for i in range(count)]
+
+            total = sum(weights)
+            return [w / total for w in weights]
+
+        output = []
+        for _, count in counts:
+            output.extend(_get_weights_from_count(count))
+
+        return output
+
+
 if __name__ == '__main__':
     import unittest
 

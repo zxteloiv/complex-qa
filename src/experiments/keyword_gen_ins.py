@@ -6,7 +6,7 @@ from collections import defaultdict
 from allennlp.modules import Embedding
 from models.transformer.encoder import TransformerEncoder
 from models.modules.mixture_softmax import MoSProjection
-from models.keyword_conditioned_gen.insertion_training_orders import KwdUniformOrder
+from models.keyword_conditioned_gen.insertion_training_orders import KwdUniformOrder, KwdBSTOrder
 from models.keyword_conditioned_gen.keyword_insertion_transformer import KeywordInsertionTransformer
 from models.transformer.insertion_decoder import InsertionDecoder
 
@@ -37,10 +37,12 @@ def weibo_keyword_ins():
     hparams.MIN_VOCAB_FREQ = {"tokens": 20}
     hparams.slot_loss = True
 
+    hparams.intraspan_weight = "uniform"
+
     hparams.joint_word_location = False
     hparams.vocab_logit_bias = True
     hparams.mixture_num = 10
-    hparams.span_end_penalty = .4
+    hparams.span_end_penalty = .6
     hparams.num_slot_transformer_layers = 0
     return hparams
 
@@ -56,6 +58,34 @@ def weibo_ins_large_slot_trans():
     hparams = weibo_ins_large()
     hparams.batch_sz = 64
     hparams.num_slot_transformer_layers = 1
+    return hparams
+
+@Registry.hparamset()
+def weibo_ins_large_seq_loss():
+    hparams = weibo_ins_large()
+    hparams.slot_loss = False
+    hparams.span_end_penalty = .0
+    return hparams
+
+@Registry.hparamset()
+def weibo_ins_large_slot_trans_seq_loss():
+    hparams = weibo_ins_large_slot_trans()
+    hparams.slot_loss = False
+    hparams.span_end_penalty = .0
+    return hparams
+
+@Registry.hparamset()
+def weibo_large_seq_loss_bst():
+    hparams = weibo_ins_large_seq_loss()
+    hparams.intraspan_weight = "bst"
+    hparams.bst_tao = 1.
+    return hparams
+
+@Registry.hparamset()
+def weibo_large_seq_loss_rbst():
+    hparams = weibo_ins_large_seq_loss()
+    hparams.intraspan_weight = "rbst"
+    hparams.bst_tao = 1.
     return hparams
 
 @Registry.dataset('small_keywords_v3')
@@ -200,30 +230,16 @@ class InsTrainingUpdater(TrainingUpdater):
 
     @classmethod
     def from_bot(cls, bot: TrialBot):
-        self = bot
-        args, hparams, model = self.args, self.hparams, self.model
-        logger = self.logger
-
-        if hasattr(hparams, "OPTIM") and hparams.OPTIM == "SGD":
-            logger.info(f"Using SGD optimzer with lr={hparams.SGD_LR}")
-            optim = torch.optim.SGD(model.parameters(), hparams.SGD_LR)
-        else:
-            logger.info(f"Using Adam optimzer with lr={hparams.ADAM_LR} and beta={str(hparams.ADAM_BETAS)}")
-            optim = torch.optim.Adam(model.parameters(), hparams.ADAM_LR, hparams.ADAM_BETAS)
-
-        device = args.device
-        dry_run = args.dry_run
-        repeat_iter = not args.debug
-        shuffle_iter = not args.debug
-        iterator = RandomIterator(self.train_set, self.hparams.batch_sz, self.translator,
-                                  shuffle=shuffle_iter, repeat=repeat_iter)
-        if args.debug and args.skip:
-            iterator.reset(args.skip)
-
-        updater = cls(model, iterator, optim, device, dry_run)
+        updater = super().from_bot(bot)
+        hparams = bot.hparams
 
         eosid = bot.vocab.get_token_index(KwdUniformOrder.END_OF_SPAN_TOKEN)
-        updater._order = KwdUniformOrder(eosid, hparams.slot_loss)
+        if hparams.intraspan_weight == "uniform":
+            updater._order = KwdUniformOrder(eosid, hparams.slot_loss)
+        elif hparams.intraspan_weight == "bst":
+            updater._order = KwdBSTOrder(eosid, hparams.slot_loss, tao=hparams.bst_tao)
+        elif hparams.intraspan_weight == "rbst":
+            updater._order = KwdBSTOrder(eosid, hparams.slot_loss, tao=hparams.bst_tao, reverse=True)
         return updater
 
     def update_epoch(self):
@@ -275,17 +291,6 @@ class InsTestingUpdater(TestingUpdater):
         output = model(srcs, tkwds, references=tgts)
         return output
 
-    @classmethod
-    def from_bot(cls, bot: TrialBot) -> 'TestingUpdater':
-        self = bot
-        args, model = self.args, self.model
-        device = args.device
-
-        hparams, model = self.hparams, self.model
-        iterator = RandomIterator(self.test_set, hparams.batch_sz, self.translator, shuffle=False, repeat=False)
-        updater = cls(model, iterator, None, device)
-        return updater
-
 def main():
     import sys
     args = sys.argv[1:]
@@ -304,8 +309,9 @@ def main():
         logging.getLogger().setLevel(logging.INFO)
 
     bot = TrialBot(trial_name="ins_trans", get_model_func=get_model, args=args)
-    from trialbot.training.extensions import every_epoch_model_saver
-    bot._engine.add_event_handler(Events.EPOCH_COMPLETED, every_epoch_model_saver, 100)
+    from trialbot.training.extensions import every_epoch_model_saver, legacy_testing_output
+    bot.add_event_handler(Events.EPOCH_COMPLETED, every_epoch_model_saver, 100)
+    bot.add_event_handler(Events.ITERATION_COMPLETED, legacy_testing_output)
     if args.test:
         bot.updater = InsTestingUpdater.from_bot(bot)
     else:
