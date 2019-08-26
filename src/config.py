@@ -52,6 +52,11 @@ DATASETS["weibo_keywords"] = DatasetPath(
     dev_path=os.path.join(DATA_PATH, 'weibo_keywords', 'valid_data'),
     test_path=os.path.join(DATA_PATH, 'weibo_keywords', 'test_data'),
 )
+DATASETS["weibo_keywords_v3_legacy"] = DatasetPath(
+    train_path=os.path.join(DATA_PATH, 'weibo_keywords_v3_legacy', 'train_data'),
+    dev_path=os.path.join(DATA_PATH, 'weibo_keywords_v3_legacy', 'valid_data'),
+    test_path=os.path.join(DATA_PATH, 'weibo_keywords_v3_legacy', 'test_data'),
+)
 DATASETS["weibo"] = DatasetPath(
     train_path=os.path.join(DATA_PATH, 'weibo', 'train_data'),
     dev_path=os.path.join(DATA_PATH, 'weibo', 'valid_data'),
