@@ -86,6 +86,12 @@ class KwdUniformOrder(TrainingOrder):
         # find the selected locations of targets, and consequently the not selected locations
         selected_loc, complement_loc = self.get_sel_compl_locs(tgt, tkwd, k)
 
+        dec_inp, target_slots, target_toks, target_weights = self._get_inp_tgt_from_locations(selected_loc, complement_loc)
+
+        return dec_inp, target_slots, target_toks, target_weights
+
+    def _get_inp_tgt_from_locations(self, tgt: torch.Tensor, selected_loc: List[int], complement_loc: List[int]):
+        tgt_len = tgt.size()[0]
         dec_inp = tgt.gather(dim=0, index=tgt.new_tensor(selected_loc))
         if len(complement_loc) > 0:
             # determine the corresponding slot for each remaining word
