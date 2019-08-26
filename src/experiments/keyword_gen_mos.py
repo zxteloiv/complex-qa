@@ -48,6 +48,7 @@ def weibo_keyword_a01n():
 def weibo_keyword_a1e15n():
     # almost no keywords information is considered
     hparams = weibo_keyword_mos()
+    hparams.TRAINING_LIMIT = 50
     hparams.alpha = -1e15
     return hparams
 
