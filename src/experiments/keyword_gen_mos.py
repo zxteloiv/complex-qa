@@ -48,8 +48,11 @@ def weibo_keyword_a01n():
 def weibo_keyword_a1e15n():
     # almost no keywords information is considered
     hparams = weibo_keyword_mos()
+    hparams.mixture_num = 10
+    hparams.batch_sz = 64
     hparams.TRAINING_LIMIT = 50
-    hparams.alpha = -1e15
+    hparams.ADAM_LR = 1e-4
+    hparams.alpha = -1e14
     return hparams
 
 @config.register_hparams

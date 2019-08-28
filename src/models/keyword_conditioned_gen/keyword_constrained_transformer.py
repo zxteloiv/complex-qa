@@ -117,7 +117,7 @@ class KeywordConstrainedTransformer(ParallelSeq2Seq):
         num_non_empty_sequences = ((target_mask.sum(1) > 0).float().sum() + 1e-20)
 
         # log_prob: (batch, length, vocab)
-        log_probs = torch.log_softmax(logits, -1)
+        log_probs = torch.log_softmax(logits, -1) if self._output_is_logit else torch.log(logits + 1e-20)
 
         # ==================== loss 1: LM as the regularizer ==================
         # construct negative samples
