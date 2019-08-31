@@ -130,7 +130,7 @@ class DecoupledInsertionTransformer(torch.nn.Module):
         #     loss = a1 * loss_slot_dec + (1 - a1) * loss_cont_dec
         loss = a1 * loss_slot_dec + (1 - a1) * loss_cont_dec
 
-        output = {"loss": loss}
+        output = {"loss": loss, "loss_slot_dec": loss_slot_dec.item(), "loss_cont_dec": loss_cont_dec}
 
         return output
 
@@ -143,10 +143,10 @@ class DecoupledInsertionTransformer(torch.nn.Module):
 
         # cont_inp_hid: (batch, target + 2, hidden)
         # cont_inp_mask: (batch, target + 2)
-        # word_prob: (batch, target + 2, vocab)
+        # word_logprob: (batch, target + 2, vocab)
         cont_inp_hid, cont_inp_mask = self._get_input_hidden_for_decoders(cont_dec_inp)
         cont_hid = self._content_decoder(cont_inp_hid, cont_inp_mask, src_hid, src_mask)
-        word_prob = self._word_predictor(cont_hid)
+        word_logprob = (self._word_predictor(cont_hid) + 1e-20).log()
 
         # target_locs: (batch, target_num)
         # target_mask: (batch, target_num)
@@ -160,11 +160,11 @@ class DecoupledInsertionTransformer(torch.nn.Module):
         # every targets is right shifted in one place.
         target_locs += 1
 
-        # word_prob_per_slot: (batch, target_num, vocab)
-        # target_word_probs: (batch, target_num, 1) -> (batch, target_num)
-        word_prob_per_slot = batched_index_select(word_prob, 1, target_locs)
-        target_word_probs = word_prob_per_slot.gather(dim=-1, index=target_words).squeeze()
-        word_loss = -(target_word_probs * target_mask.float() * target_weights + 1e-20).log()
+        # word_logprob_per_slot: (batch, target_num, vocab)
+        # target_word_logprobs: (batch, target_num, 1) -> (batch, target_num)
+        word_logprob_per_slot = batched_index_select(word_logprob, 1, target_locs)
+        target_word_logprobs = word_logprob_per_slot.gather(dim=-1, index=target_words).squeeze()
+        word_loss = -target_word_logprobs * target_mask.float() * target_weights
 
         # Since targets corresponding to a single <mask> are already weighted,
         # final loss can be obtained via global mean directly.

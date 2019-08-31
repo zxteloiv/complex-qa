@@ -34,7 +34,7 @@ def weibo_keyword_ins():
     hparams.attention_dropout = 0.
     hparams.diversity_factor = 0.
     hparams.acc_factor = 1.
-    hparams.MIN_VOCAB_FREQ = {"tokens": 1}
+    hparams.MIN_VOCAB_FREQ = {"tokens": 20}
 
     hparams.mixture_num = 10
     hparams.span_end_threshold = .5
@@ -274,7 +274,18 @@ def main():
         bot.add_event_handler(Events.ITERATION_COMPLETED, legacy_testing_output, 100)
         bot.updater = InsTestingUpdater.from_bot(bot)
     else:
+
+        def output_inspect(bot: TrialBot, keys):
+            iteration = bot.state.iteration
+            if iteration % 4 != 0:
+                return
+
+            output = bot.state.output
+            bot.logger.info(", ".join(f"{k}={v}" for k, v in zip(keys, map(output.get, keys))))
+
         bot.add_event_handler(Events.EPOCH_COMPLETED, every_epoch_model_saver, 100)
+        bot.add_event_handler(Events.ITERATION_COMPLETED, output_inspect, 100,
+                              keys=["loss_slot_dec", "loss_cont_dec"])
         bot.updater = InsTrainingUpdater.from_bot(bot)
     bot.run()
 
