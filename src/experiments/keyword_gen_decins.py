@@ -6,14 +6,15 @@ from collections import defaultdict
 from allennlp.modules import Embedding
 from models.transformer.encoder import TransformerEncoder
 from models.modules.mixture_softmax import MoSProjection
-from models.keyword_conditioned_gen.insertion_training_transformation import UniformInsTrans, BSTInsTrans
-from models.keyword_conditioned_gen.keyword_insertion_transformer import KeywordInsertionTransformer
+from models.keyword_conditioned_gen.insertion_training_transformation import DecoupledInsTrans
+from models.keyword_conditioned_gen.decoupled_insertion_transformer import DecoupledInsertionTransformer
 from models.transformer.insertion_decoder import InsertionDecoder
 
-from trialbot.data import Translator, NSVocabulary, START_SYMBOL, END_SYMBOL, PADDING_TOKEN, TabSepFileDataset
+from trialbot.data import Translator, NSVocabulary, TabSepFileDataset
 from trialbot.training import Registry, TrialBot, Events
 from trialbot.training.updater import TrainingUpdater, TestingUpdater
 from trialbot.utils.move_to_device import move_to_device
+from sentencepiece import SentencePieceProcessor
 
 import logging
 
@@ -22,8 +23,8 @@ def weibo_keyword_ins():
     hparams = config.common_settings()
     hparams.emb_sz = 300
     hparams.batch_sz = 100
-    hparams.num_enc_layers = 2
-    hparams.num_dec_layers = 1
+    hparams.num_enc_layers = 4
+    hparams.num_dec_layers = 4
     hparams.num_heads = 6
     hparams.max_decoding_len = 30
     hparams.ADAM_LR = 1e-5
@@ -33,58 +34,12 @@ def weibo_keyword_ins():
     hparams.attention_dropout = 0.
     hparams.diversity_factor = 0.
     hparams.acc_factor = 1.
-    hparams.MIN_VOCAB_FREQ = {"tokens": 20}
-    hparams.slot_loss = True
+    hparams.MIN_VOCAB_FREQ = {"tokens": 1}
 
-    hparams.intraspan_weight = "uniform"
-
-    hparams.joint_word_location = False
-    hparams.vocab_logit_bias = True
     hparams.mixture_num = 10
-    hparams.span_end_penalty = .6
+    hparams.span_end_threshold = .5
     hparams.num_slot_transformer_layers = 0
-    return hparams
-
-@Registry.hparamset()
-def weibo_ins_large():
-    hparams = weibo_keyword_ins()
-    hparams.num_enc_layers = 4
-    hparams.num_dec_layers = 4
-    return hparams
-
-@Registry.hparamset()
-def weibo_ins_large_slot_trans():
-    hparams = weibo_ins_large()
-    hparams.batch_sz = 64
-    hparams.num_slot_transformer_layers = 1
-    return hparams
-
-@Registry.hparamset()
-def weibo_ins_large_seq_loss():
-    hparams = weibo_ins_large()
-    hparams.slot_loss = False
-    hparams.span_end_penalty = .0
-    return hparams
-
-@Registry.hparamset()
-def weibo_ins_large_slot_trans_seq_loss():
-    hparams = weibo_ins_large_slot_trans()
-    hparams.slot_loss = False
-    hparams.span_end_penalty = .0
-    return hparams
-
-@Registry.hparamset()
-def weibo_large_seq_loss_bst():
-    hparams = weibo_ins_large_seq_loss()
-    hparams.intraspan_weight = "bst"
-    hparams.bst_tao = 1.
-    return hparams
-
-@Registry.hparamset()
-def weibo_large_seq_loss_rbst():
-    hparams = weibo_ins_large_seq_loss()
-    hparams.intraspan_weight = "rbst"
-    hparams.bst_tao = 1.
+    hparams.num_dual_model_layers = 4
     return hparams
 
 @Registry.dataset('small_keywords_v3')
@@ -101,16 +56,21 @@ def weibo_keyword():
     test_data = TabSepFileDataset(os.path.join(config.DATA_PATH, 'weibo_keywords_v3', 'test_data'))
     return train_data, valid_data, test_data
 
-@Registry.translator('kwd_ins_char')
-class KeywordCharInsTranslator(Translator):
+@Registry.translator('kwd_ins_spm')
+class KeywordSPMInsTranslator(Translator):
     def __init__(self, max_len: int = 30):
-        super(KeywordCharInsTranslator, self).__init__()
+        super().__init__()
         self.max_len = max_len
         self.shared_namespace = "tokens"
+        self.spm = SentencePieceProcessor()
+        self.spm.Load(os.path.expanduser("~/.complex_qa/sentencepiece_models/weibo5120.model"))
 
-    @staticmethod
-    def filter_split_str(sent: str) -> List[str]:
-        return list(filter(lambda x: x not in ("", ' ', '\t'), list(sent)))
+    def filter_split_str(self, sent: str) -> List[str]:
+        return self.spm.EncodeAsPieces(sent)
+
+    START_SYMBOL = '<s>'
+    END_SYMBOL = '</s>'
+    MASK_SYMBOL = '<mask>'
 
     def generate_namespace_tokens(self, example) -> Generator[Tuple[str, str], None, None]:
         if len(example) != 4:
@@ -119,9 +79,9 @@ class KeywordCharInsTranslator(Translator):
 
         src, _, tgt, _  = example
         src = self.filter_split_str(src)[:self.max_len]
-        tgt = [START_SYMBOL] + self.filter_split_str(tgt)[:self.max_len] + [END_SYMBOL]
+        tgt = [self.START_SYMBOL] + self.filter_split_str(tgt)[:self.max_len] + [self.END_SYMBOL]
 
-        yield self.shared_namespace, UniformInsTrans.END_OF_SPAN_TOKEN
+        yield self.shared_namespace, self.MASK_SYMBOL
 
         tokens = src + tgt
         for tok in tokens:
@@ -166,32 +126,16 @@ def get_model(hparams, vocab: NSVocabulary):
                                  attention_dropout=hparams.attention_dropout,
                                  )
 
-    decoder = InsertionDecoder(input_dim=hparams.emb_sz,
-                               num_layers=hparams.num_dec_layers,
-                               num_heads=hparams.num_heads,
-                               feedforward_hidden_dim=hparams.emb_sz,
-                               feedforward_dropout=hparams.connection_dropout,
-                               residual_dropout=hparams.connection_dropout,
-                               attention_dropout=hparams.attention_dropout,
-                               )
+    slot_decoder = InsertionDecoder(input_dim=hparams.emb_sz,
+                                    num_layers=hparams.num_dec_layers,
+                                    num_heads=hparams.num_heads,
+                                    feedforward_hidden_dim=hparams.emb_sz,
+                                    feedforward_dropout=hparams.connection_dropout,
+                                    residual_dropout=hparams.connection_dropout,
+                                    attention_dropout=hparams.attention_dropout,
+                                    )
 
-    if hparams.joint_word_location:
-        joint_proj = MoSProjection(mixture_num=hparams.mixture_num,
-                                   input_dim=decoder.output_dim,
-                                   output_dim=vocab.get_vocab_size(),
-                                   flatten_softmax=True)
-    else:
-        slot_proj = torch.nn.Sequential(
-            torch.nn.Linear(decoder.output_dim, 1),
-            torch.nn.Softmax(dim=-2),
-        )
-        word_proj = MoSProjection(mixture_num=hparams.mixture_num,
-                                  input_dim=decoder.output_dim,
-                                  output_dim=vocab.get_vocab_size(),
-                                  flatten_softmax=False)
-        joint_proj = (slot_proj, word_proj)
-
-    slot_trans = TransformerEncoder(input_dim=decoder.output_dim,
+    slot_trans = TransformerEncoder(input_dim=slot_decoder.output_dim,
                                     num_layers=hparams.num_slot_transformer_layers,
                                     feedforward_hidden_dim=hparams.emb_sz,
                                     feedforward_dropout=hparams.connection_dropout,
@@ -199,46 +143,67 @@ def get_model(hparams, vocab: NSVocabulary):
                                     attention_dropout=hparams.attention_dropout,
                                     ) if hparams.num_slot_transformer_layers > 0 else None
 
-    bias_mapper = None
-    if hparams.vocab_logit_bias:
-        bias_mapper = torch.nn.Linear(decoder.output_dim, vocab.get_vocab_size())
+    slot_predictor = torch.nn.Sequential(torch.nn.Linear(slot_decoder.output_dim, 1),
+                                         torch.nn.Sigmoid(),
+                                         )
 
-    model = KeywordInsertionTransformer(vocab=vocab,
-                                        encoder=encoder,
-                                        decoder=decoder,
-                                        src_embedding=embedding,
-                                        tgt_embedding=embedding,
-                                        joint_projection=joint_proj,
-                                        vocab_bias_mapper=bias_mapper,
-                                        use_bleu=True,
-                                        target_namespace="tokens",
-                                        start_symbol=START_SYMBOL,
-                                        eos_symbol=END_SYMBOL,
-                                        span_ends_symbol=UniformInsTrans.END_OF_SPAN_TOKEN,
-                                        max_decoding_step=hparams.max_decoding_len,
-                                        span_end_penalty=hparams.span_end_penalty,
-                                        slot_transform=slot_trans,
-                                        )
+    content_decoder = InsertionDecoder(input_dim=hparams.emb_sz,
+                                       num_layers=hparams.num_dec_layers,
+                                       num_heads=hparams.num_heads,
+                                       feedforward_hidden_dim=hparams.emb_sz,
+                                       feedforward_dropout=hparams.connection_dropout,
+                                       residual_dropout=hparams.connection_dropout,
+                                       attention_dropout=hparams.attention_dropout,
+
+                                       # reuse the InsertionDecoder architecture for inputs other than slots
+                                       concat_adjacent_repr_for_slots=False,
+                                       )
+
+    word_proj = MoSProjection(mixture_num=hparams.mixture_num,
+                              input_dim=content_decoder.hidden_dim,
+                              output_dim=vocab.get_vocab_size(),
+                              flatten_softmax=False)
+
+    dual_model = TransformerEncoder(input_dim=hparams.emb_sz,
+                                    num_layers=hparams.num_dual_model_layers,
+                                    feedforward_hidden_dim=hparams.emb_sz,
+                                    feedforward_dropout=hparams.connection_dropout,
+                                    residual_dropout=hparams.connection_dropout,
+                                    attention_dropout=hparams.attention_dropout,
+                                    ) if hparams.num_dual_model_layers > 0 else None
+
+    model = DecoupledInsertionTransformer(vocab=vocab,
+                                          encoder=encoder,
+                                          slot_decoder=slot_decoder,
+                                          slot_predictor=slot_predictor,
+                                          content_decoder=content_decoder,
+                                          word_predictor=word_proj,
+                                          src_embedding=embedding,
+                                          tgt_embedding=embedding,
+                                          use_bleu=True,
+                                          target_namespace="tokens",
+                                          start_symbol=KeywordSPMInsTranslator.START_SYMBOL,
+                                          eos_symbol=KeywordSPMInsTranslator.END_SYMBOL,
+                                          mask_symbol=KeywordSPMInsTranslator.MASK_SYMBOL,
+                                          max_decoding_step=hparams.max_decoding_len,
+                                          span_end_threshold=hparams.span_end_threshold,
+                                          slot_trans=slot_trans,
+                                          dual_model=dual_model,
+                                          )
 
     return model
 
 class InsTrainingUpdater(TrainingUpdater):
     def __init__(self, *args, **kwargs):
         super(InsTrainingUpdater, self).__init__(*args, **kwargs)
-        self._transform: Optional['UniformInsTrans'] = None
+        self._transform = None
 
     @classmethod
     def from_bot(cls, bot: TrialBot):
         updater = super().from_bot(bot)
-        hparams = bot.hparams
 
-        eosid = bot.vocab.get_token_index(UniformInsTrans.END_OF_SPAN_TOKEN)
-        if hparams.intraspan_weight == "uniform":
-            updater._order = UniformInsTrans(eosid, hparams.slot_loss)
-        elif hparams.intraspan_weight == "bst":
-            updater._order = BSTInsTrans(eosid, hparams.slot_loss, tao=hparams.bst_tao)
-        elif hparams.intraspan_weight == "rbst":
-            updater._order = BSTInsTrans(eosid, hparams.slot_loss, tao=hparams.bst_tao, reverse=True)
+        maskid = bot.vocab.get_token_index(KeywordSPMInsTranslator.MASK_SYMBOL)
+        updater._transform = DecoupledInsTrans(maskid)
         return updater
 
     def update_epoch(self):
@@ -253,17 +218,13 @@ class InsTrainingUpdater(TrainingUpdater):
         batch = next(iterator)
         keys = ("source_tokens", "target_tokens", "src_keyword_tokens", "tgt_keyword_tokens")
         srcs, tgts, skwds, tkwds = list(map(batch.get, keys))
-        dec_inp, locs, contents, weights = next(self._transform(tkwds, tgts))
+        training_targets = next(self._transform(tkwds, tgts))
 
         if device >= 0:
             srcs = move_to_device(srcs, device)
-            dec_inp = move_to_device(dec_inp, device)
-            locs = move_to_device(locs, device)
-            contents = move_to_device(contents, device)
-            weights = move_to_device(weights, device)
+            training_targets = move_to_device(training_targets, device)
 
-        targets = (locs, contents, weights)
-        output = model(srcs, dec_inp, targets)
+        output = model(srcs, training_targets=training_targets)
 
         if not self._dry_run:
             loss = output["loss"]
@@ -287,7 +248,7 @@ class InsTestingUpdater(TestingUpdater):
             tkwds = move_to_device(tkwds, device)
             tgts = move_to_device(tgts, device)
 
-        output = model(srcs, tkwds, references=tgts)
+        output = model(srcs, inference_input=tkwds, references=tgts)
         return output
 
 def main():
@@ -296,7 +257,7 @@ def main():
     if '--dataset' not in sys.argv:
         args += ['--dataset', 'weibo_keywords_v3']
     if '--translator' not in sys.argv:
-        args += ['--translator', 'kwd_ins_char']
+        args += ['--translator', 'kwd_ins_spm']
 
     parser = TrialBot.get_default_parser()
     args = parser.parse_args(args)
@@ -307,7 +268,7 @@ def main():
     else:
         logging.getLogger().setLevel(logging.INFO)
 
-    bot = TrialBot(trial_name="ins_trans", get_model_func=get_model, args=args)
+    bot = TrialBot(trial_name="decoupled_ins", get_model_func=get_model, args=args)
     from trialbot.training.extensions import every_epoch_model_saver, legacy_testing_output
     if args.test:
         bot.add_event_handler(Events.ITERATION_COMPLETED, legacy_testing_output, 100)

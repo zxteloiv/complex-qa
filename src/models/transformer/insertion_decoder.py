@@ -18,6 +18,7 @@ class InsertionDecoder(torch.nn.Module):
                  residual_dropout: float = 0.1,
                  attention_dropout: float = 0.1,
                  use_positional_embedding: bool = True,
+                 concat_adjacent_repr_for_slots: bool = True,
                  ):
         """
         Construct a decoder for insertion transformer,
@@ -40,6 +41,7 @@ class InsertionDecoder(torch.nn.Module):
         :param residual_dropout: float, dropout ratio between the residual connection every block components
         :param attention_dropout: float, dropout ratio for multihead attention
         :param use_positional_embedding: bool, whether use positional embedding before the first decoder block
+        :param concat_adjacent_repr_for_slots, output for slots between any two adjacent inputs or the input itself
         """
         super(InsertionDecoder, self).__init__()
 
@@ -107,6 +109,7 @@ class InsertionDecoder(torch.nn.Module):
         self.hidden_dim = hidden_dim
         self.output_dim = hidden_dim * 2
         self._use_positional_embedding = use_positional_embedding
+        self._concat_for_slot = concat_adjacent_repr_for_slots
 
     def forward(self,
                 tgt_hidden: torch.Tensor,
@@ -127,6 +130,9 @@ class InsertionDecoder(torch.nn.Module):
 
         for dec_block in self._dec_blocks:
             inp = dec_block(src_hidden, src_mask, inp, tgt_mask)
+
+        if not self._concat_for_slot:
+            return inp
 
         # inp is (batch, tgt_len, hidden)
         # every adjacent pair of hidden inputs are concatenated, forming a bigger but short representation for each slot
