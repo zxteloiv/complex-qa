@@ -34,6 +34,7 @@ class DecoupledInsertionTransformer(torch.nn.Module):
 
                  alpha1: float = .5,
                  alpha2: float = .5,
+                 topk: int = 6,
 
                  # optional modules
                  slot_trans: Optional[TransformerEncoder] = None,
@@ -68,9 +69,10 @@ class DecoupledInsertionTransformer(torch.nn.Module):
             pad_index = self.vocab.get_token_index(PADDING_TOKEN, target_namespace)
             self._bleu = BLEU(exclude_indices={pad_index, self._eos_id, self._start_id})
 
-        self._span_end_penalty = span_end_threshold
+        self._span_end_threshold = span_end_threshold
         self._alpha1 = max(min(alpha1, 1.), 0.)
         self._alpha2 = max(min(alpha2, 1.), 0.)
+        self._topk = topk
 
     def forward(self,
                 source_tokens: List[torch.LongTensor],
@@ -240,67 +242,86 @@ class DecoupledInsertionTransformer(torch.nn.Module):
     def _inference_step(self, src_hid: torch.Tensor, src_mask: torch.Tensor, dec_inp: List[torch.LongTensor]):
         # inp_hid: (batch, target + 2, hidden)
         # inp_mask: (batch, target + 2)
-        # dec_out: (batch, target + 1, hidden)
-        # dec_out_mask: (batch, target + 1)
+        # slot_dec_out: (batch, target + 1, hidden)
+        # slot_dec_out_mask: (batch, target + 1)
         inp_hid, inp_mask = self._get_input_hidden_for_decoders(dec_inp)
-        dec_out, dec_out_mask = self._decoder(inp_hid, inp_mask, src_hid, src_mask)
+        slot_dec_out, slot_dec_out_mask = self._slot_decoder(inp_hid, inp_mask, src_hid, src_mask)
 
-        # slot_probs: (batch, target + 1, 1)
-        # word_probs: (batch, target + 1, vocab)
-        slot_probs = self._slot_proj(dec_out) * dec_out_mask.unsqueeze(-1).float()
-        word_probs = self._word_proj(dec_out)
+        if self._slot_trans:
+            slot_dec_out = self._slot_trans(slot_dec_out, slot_dec_out_mask)
 
-        # joint_probs: (batch, target + 1, vocab)
-        joint_probs: torch.Tensor = slot_probs * word_probs
-        batch_size, slot_num, vocab_size = joint_probs.size()
+        # slot_probs: (batch, target + 1)
+        # best_val: (batch,)
+        # best_slot: (batch,) long
+        slot_probs = self._slot_predictor(slot_dec_out).squeeze() * slot_dec_out_mask.float()
+        best_val, best_slot  = torch.max(slot_probs, dim=-1)
+        logging.debug("=" * 20 + " slot prediction " + "=" * 20)
+        logging.debug("\n-----------------------\n".join(
+            f"select: prob={best_val[i].item()} slot={best_slot[i].item()}\n"
+            f"inputs={dec_inp[i].tolist()}\n"
+            f"probs={[f'{val:.4f}' for val in slot_probs[i].tolist()]}"
+            for i in range(best_val.size()[0])
+        ))
 
-        # Penalize the EndOfSpan token.
-        # TODO: use span_end_threshold instead
-        # joint_probs[:, :, self._span_end_id] -= self._span_end_penalty
+        # word_dec_inp: [(filtered_batch, target + 1)]
+        word_dec_inp = []
+        for i, (prob, slot, ith_inp) in enumerate(zip(best_val, best_slot, dec_inp)):
+            if prob >= self._span_end_threshold:
+                content = ith_inp.tolist()
+                content.insert(slot, self._mask_id)
+                word_dec_inp.append(ith_inp.new_tensor(content))
 
-        # topk_indices: (batch, target + 1),
-        # 2nd dim in descending order, reuse the slot_num as the choice number
-        _, topk_indices = joint_probs.flatten(start_dim=1).topk(slot_num, dim=-1)
+        # mask_pos: (batch,)
+        # mask positions for inputs without inserted masks are preserved at 0.
+        # after adding a <s> token at the beginning, 0 will be meaningful and all other positions increases.
+        mask_pos = (best_val > self._span_end_threshold).long() * (best_slot + 1)
 
-        topk_slots = topk_indices / vocab_size
-        topk_words = topk_indices % vocab_size
+        # word_probs: (batch, target + 1 + 2, vocab), with <mask>, <s> and </s>
+        cont_inp_hid, cont_inp_mask = self._get_input_hidden_for_decoders(word_dec_inp)
+        cont_hid = self._content_decoder(cont_inp_hid, cont_inp_mask, src_hid, src_mask)
+        word_probs = self._word_predictor(cont_hid)
+
+        # topk_words: (batch, target + 1, K),
+        _, topk_words = word_probs.topk(self._topk, dim=-1)
 
         next_inps = []
         logging.debug("=" * 40)
-        for i, (example, locs, words) in enumerate(zip(dec_inp, topk_slots, topk_words)):
+        for i, (example, pos, words) in enumerate(zip(dec_inp, mask_pos, topk_words)):
             # since in greedy mode, each iteration only predicts one word for each example of a batch
             # list.insert will be sufficient.
             inputs = example.tolist()
 
-            idx, word = None, None
-            llocs, lwords = locs.tolist(), words.tolist()
-            for idx, word in zip(llocs, lwords):
+            # consider each K candidate at the position of <mask>
+            choices = words[pos].tolist()
+            word = None
+            for candidate in choices:
                 # Selection Rules: how to choose the next position and word.
                 # 1. the special tokens must not be choose
-                if word in (self._start_id, self._eos_id, self._padding_id):
+                if candidate in (self._start_id, self._eos_id, self._padding_id, self._mask_id):
                     logging.debug('Rule 1 activated')
                     continue
 
                 # 2. the choice must not be the same words as either before and after the slot
                 inp_len = len(inputs)
-                if word in inputs[max(0, idx - self._stammering_window):(idx + self._stammering_window)]:
+                if candidate in inputs[max(0, pos - self._stammering_window - 1):(pos + self._stammering_window)]:
                     logging.debug('Rule 2 activated')
                     continue
 
                 # stop for the chosen one
+                word = candidate
                 break
 
             else:
                 logging.debug('Fallback Rule activated')
-                idx, word = llocs[0], lwords[0]
+                word = choices[0]
 
             # Modification Rules: how to build the input for the next iteration
             # if the selected word is EndOfSpan, that span is kept the same as before
-            logging.debug(f"selected: prob={joint_probs[i, idx, word].item()}, "
-                          f"word={word}, idx={idx}, original={inputs}")
+            logging.debug(f"selected: prob={word_probs[i, pos, word].item()}, "
+                          f"word={word}, idx={pos}, original={inputs}")
             logging.debug("-" * 40)
-            if word not in (self._span_end_id,):
-                inputs.insert(idx, word)
+            if pos > 0: # only for sentence with <mask>
+                inputs.insert(pos - 1, word)
             next_inps.append(example.new_tensor(inputs))
 
         return next_inps

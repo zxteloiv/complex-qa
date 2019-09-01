@@ -269,11 +269,29 @@ def main():
         logging.getLogger().setLevel(logging.INFO)
 
     bot = TrialBot(trial_name="decoupled_ins", get_model_func=get_model, args=args)
-    from trialbot.training.extensions import every_epoch_model_saver, legacy_testing_output
     if args.test:
-        bot.add_event_handler(Events.ITERATION_COMPLETED, legacy_testing_output, 100)
+        @bot.attach_extension(Events.ITERATION_COMPLETED)
+        def predicted_output(bot: TrialBot):
+            import json
+            model = bot.model
+            output = bot.state.output
+            if output is None:
+                return
+
+            output = model.decode(output)
+            def decode(output: List):
+                elem = output[0]
+                if isinstance(elem, str):
+                    return bot.translator.spm.DecodePieces(output)
+                elif isinstance(elem, list):
+                    return [decode(x) for x in output]
+
+            output["predicted_tokens"] = decode(output["predicted_tokens"])
+            print(json.dumps(output["predicted_tokens"]))
+
         bot.updater = InsTestingUpdater.from_bot(bot)
     else:
+        from trialbot.training.extensions import every_epoch_model_saver
 
         def output_inspect(bot: TrialBot, keys):
             iteration = bot.state.iteration
