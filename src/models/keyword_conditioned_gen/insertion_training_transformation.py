@@ -3,6 +3,7 @@ import torch
 import torch.nn
 import itertools
 import random
+import logging
 from collections import defaultdict
 
 _DECODER_INPUT = List[torch.LongTensor]
@@ -158,6 +159,8 @@ class DecoupledInsTrans(TrainingTransformation):
     END_OF_SPAN_TOKEN = "<eospan>"
     MASK_TOKEN = "<mask>"
 
+    logger = logging.getLogger(__name__)
+
     def __init__(self, mask_id):
         self.mask_id = mask_id
 
@@ -183,6 +186,13 @@ class DecoupledInsTrans(TrainingTransformation):
         # find the selected locations of targets, and consequently the not selected locations
         tkwd_loc, selected_loc, complement_loc = self.get_sel_compl_locs(tgt, tkwd, k)
 
+        self.logger.debug(f"========== processing a single example ===========\n"
+                          f"sentence={tgt.tolist()}\n"
+                          f"keywords={tkwd.tolist()}\n"
+                          f"kwd_loc={tkwd_loc}\n"
+                          f"selected={selected_loc}\n"
+                          f"complement_loc={complement_loc}")
+
         if len(complement_loc) > 0:
             # ----------
             # build target for slot decoder
@@ -191,7 +201,14 @@ class DecoupledInsTrans(TrainingTransformation):
             slot_dec_target = list(1 if i in complement_slots else 0 for i in range(slot_num))
 
             slot_counts = defaultdict(lambda: 0, ((k, len(list(g))) for k, g in itertools.groupby(complement_slots)))
-            slot_dec_target_weight = list(slot_counts[i] for i in range(slot_num))
+            slot_dec_target_weight = list(slot_counts[i] + 1 for i in range(slot_num))
+
+            self.logger.debug(f"---------- slot decoder data ------------\n"
+                              f"inputs={slot_dec_inp} length={len(slot_dec_inp)}\n"
+                              f"complement_slots={complement_slots}\n"
+                              f"targets={slot_dec_target}\n"
+                              # f"target_weights={slot_dec_target_weight}" weights are forbidden
+                              )
 
             # ----------
             # build target for content decoder

@@ -42,6 +42,12 @@ def weibo_keyword_ins():
     hparams.num_dual_model_layers = 4
     return hparams
 
+@Registry.hparamset()
+def training_debug():
+    hparams = weibo_keyword_ins()
+    hparams.TRAINING_LIMIT = 1
+    return hparams
+
 @Registry.dataset('small_keywords_v3')
 def weibo_keyword():
     train_data = TabSepFileDataset(os.path.join(config.DATA_PATH, 'weibo', 'small_keywords_v3', 'train_data'))
@@ -66,7 +72,7 @@ class KeywordSPMInsTranslator(Translator):
         self.spm.Load(os.path.expanduser("~/.complex_qa/sentencepiece_models/weibo5120.model"))
 
     def filter_split_str(self, sent: str) -> List[str]:
-        return self.spm.EncodeAsPieces(sent)
+        return self.spm.EncodeAsPieces(sent.replace(" ", ""))
 
     START_SYMBOL = '<s>'
     END_SYMBOL = '</s>'

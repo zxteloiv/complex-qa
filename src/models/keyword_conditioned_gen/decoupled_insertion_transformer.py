@@ -44,6 +44,8 @@ class DecoupledInsertionTransformer(torch.nn.Module):
 
         self.vocab = vocab
 
+        self.logger = logging.getLogger(__name__)
+
         self._encoder = encoder
         self._slot_decoder = slot_decoder
         self._slot_trans = slot_trans
@@ -192,22 +194,25 @@ class DecoupledInsertionTransformer(torch.nn.Module):
         # slot_probs: (batch, target + 1) <- (batch, target + 1, 1)
         slot_probs = self._slot_predictor(slot_dec_out).squeeze() * slot_dec_out_mask.float()
 
+        # Valid targets are 0s and 1s, padding value must be a different one and we thus use -1.
         # target: (batch, target + 1)
         # target_mask: (batch, target + 1)
         # target_weight: (batch, target + 1) float
-        target, target_mask = self.batchify_tensor_list(slot_dec_target)
-        target_weight = pad_sequence(slot_dec_target_weight, batch_first=True, padding_value=self._padding_id).float()
+        target, target_mask = self.batchify_tensor_list(slot_dec_target, -1)
+        # target_weight = pad_sequence(slot_dec_target_weight, batch_first=True, padding_value=self._padding_id).float()
 
         # compute MSE Loss with masks, which is not supported by torch.nn.functional.mse_loss.
         # loss is weighted within an example, and averaged within a batch
         # squared_error: (batch, target + 1)
-        squared_error = (slot_probs - target.float()) ** 2 * target_weight * target_mask.float()
-        loss = (squared_error.sum(1) / target_weight.sum(1)).mean()
+        squared_error = (slot_probs - target.float()) ** 2 * target_mask.float()
+        loss = (squared_error.sum(1) / target_mask.sum(1).float()).mean()
         return loss
 
-    def batchify_tensor_list(self, l: List[torch.Tensor]) -> Tuple[torch.Tensor, torch.LongTensor]:
-        batch = pad_sequence(l, batch_first=True, padding_value=self._padding_id)
-        return prepare_input_mask(batch)
+    def batchify_tensor_list(self, l: List[torch.Tensor], padding_val=None) -> Tuple[torch.Tensor, torch.LongTensor]:
+        if padding_val is None:
+            padding_val = self._padding_id
+        batch = pad_sequence(l, batch_first=True, padding_value=padding_val)
+        return prepare_input_mask(batch, padding_val)
 
     def _get_input_hidden_for_decoders(self, decoder_input: List[torch.LongTensor]):
         _sample = decoder_input[0]
@@ -270,6 +275,8 @@ class DecoupledInsertionTransformer(torch.nn.Module):
                 content = ith_inp.tolist()
                 content.insert(slot, self._mask_id)
                 word_dec_inp.append(ith_inp.new_tensor(content))
+            else:
+                word_dec_inp.append(ith_inp)
 
         # mask_pos: (batch,)
         # mask positions for inputs without inserted masks are preserved at 0.
