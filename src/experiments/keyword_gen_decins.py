@@ -28,7 +28,7 @@ def weibo_keyword_ins():
     hparams.num_heads = 6
     hparams.max_decoding_len = 30
     hparams.ADAM_LR = 1e-5
-    hparams.TRAINING_LIMIT = 100
+    hparams.TRAINING_LIMIT = 20
     hparams.beam_size = 1
     hparams.connection_dropout = 0.2
     hparams.attention_dropout = 0.
@@ -224,7 +224,7 @@ class InsTrainingUpdater(TrainingUpdater):
         batch = next(iterator)
         keys = ("source_tokens", "target_tokens", "src_keyword_tokens", "tgt_keyword_tokens")
         srcs, tgts, skwds, tkwds = list(map(batch.get, keys))
-        training_targets = next(self._transform(tkwds, tgts))
+        training_targets = next(self._transform(tkwds, tgts, skill=(iterator.epoch + 1) / 10.))
 
         if device >= 0:
             srcs = move_to_device(srcs, device)

@@ -164,11 +164,11 @@ class DecoupledInsTrans(TrainingTransformation):
     def __init__(self, mask_id):
         self.mask_id = mask_id
 
-    def example_gen(self, tkwds: List[torch.LongTensor], tgts: List[torch.LongTensor]):
+    def example_gen(self, tkwds: List[torch.LongTensor], tgts: List[torch.LongTensor], skill=1):
         batch_slot_data, batch_content_data, batch_dual_data = [], [], []
 
         for tkwd, tgt in zip(tkwds, tgts):
-            training_data = self._process_single_example(tgt, tkwd)
+            training_data = self._process_single_example(tgt, tkwd, skill)
             slot_dec_data, cont_dec_data, dual_data = training_data
             batch_slot_data.append(slot_dec_data)
             batch_content_data.append(cont_dec_data)
@@ -176,17 +176,22 @@ class DecoupledInsTrans(TrainingTransformation):
 
         yield batch_slot_data, batch_content_data, batch_dual_data
 
-    def _process_single_example(self, tgt, tkwd):
+    def _process_single_example(self, tgt, tkwd, skill):
         # 1. sample a K for auxiliary words, from zero to all
         tgt_len = tgt.size()[0]
         tkwd_len = tkwd.size()[0]
-        k = random.randint(0, tgt_len - tkwd_len + 1)
+        # skill is clipped to [0, 1].
+        # as long as the skill increases, the number of missing words also grows.
+        skill = max(0, min(skill, 1))
+        selected_ratio = 1 - skill
+        k = random.randint(int((tgt_len - tkwd_len) * selected_ratio), (tgt_len - tkwd_len))
 
         # 2. based on given keywords, and the sampled k,
         # find the selected locations of targets, and consequently the not selected locations
         tkwd_loc, selected_loc, complement_loc = self.get_sel_compl_locs(tgt, tkwd, k)
 
         self.logger.debug(f"========== processing a single example ===========\n"
+                          f"skill={skill} k={k} tgt_len={tgt_len} tkwd_len={tkwd_len}\n"
                           f"sentence={tgt.tolist()}\n"
                           f"keywords={tkwd.tolist()}\n"
                           f"kwd_loc={tkwd_loc}\n"
