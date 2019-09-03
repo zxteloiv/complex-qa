@@ -262,8 +262,9 @@ class DecoupledInsertionTransformer(torch.nn.Module):
         best_val, best_slot  = torch.max(slot_probs, dim=-1)
         logging.debug("=" * 20 + " slot prediction " + "=" * 20)
         logging.debug("\n-----------------------\n".join(
-            f"select: prob={best_val[i].item()} slot={best_slot[i].item()}\n"
+            f"batch={i} select: prob={best_val[i].item()} slot={best_slot[i].item()}\n"
             f"inputs={dec_inp[i].tolist()}\n"
+            f"tokens={[self.vocab.get_token_from_index(t, namespace=self._target_namespace) for t in dec_inp[i].tolist()]}\n"
             f"probs={[f'{val:.4f}' for val in slot_probs[i].tolist()]}"
             for i in range(best_val.size()[0])
         ))
@@ -284,15 +285,14 @@ class DecoupledInsertionTransformer(torch.nn.Module):
         mask_pos = (best_val > self._span_end_threshold).long() * (best_slot + 1)
 
         # word_probs: (batch, target + 1 + 2, vocab), with <mask>, <s> and </s>
+        # topk_words: (batch, target + 1 + 2, K),
         cont_inp_hid, cont_inp_mask = self._get_input_hidden_for_decoders(word_dec_inp)
         cont_hid = self._content_decoder(cont_inp_hid, cont_inp_mask, src_hid, src_mask)
         word_probs = self._word_predictor(cont_hid)
-
-        # topk_words: (batch, target + 1, K),
         _, topk_words = word_probs.topk(self._topk, dim=-1)
 
         next_inps = []
-        logging.debug("=" * 40)
+        logging.debug("=" * 20 + " word prediction " + "=" * 20)
         for i, (example, pos, words) in enumerate(zip(dec_inp, mask_pos, topk_words)):
             # since in greedy mode, each iteration only predicts one word for each example of a batch
             # list.insert will be sufficient.
@@ -305,13 +305,16 @@ class DecoupledInsertionTransformer(torch.nn.Module):
                 # Selection Rules: how to choose the next position and word.
                 # 1. the special tokens must not be choose
                 if candidate in (self._start_id, self._eos_id, self._padding_id, self._mask_id):
-                    logging.debug('Rule 1 activated')
+                    logging.debug(f'batch={i} '
+                                  f'Rule 1 activated for word={candidate} '
+                                  f'with prob={word_probs[i, pos, candidate].item()}')
                     continue
 
                 # 2. the choice must not be the same words as either before and after the slot
-                inp_len = len(inputs)
                 if candidate in inputs[max(0, pos - self._stammering_window - 1):(pos + self._stammering_window)]:
-                    logging.debug('Rule 2 activated')
+                    logging.debug(f'batch={i} '
+                                  f'Rule 2 activated for word={candidate} '
+                                  f'with prob={word_probs[i, pos, candidate].item()}')
                     continue
 
                 # stop for the chosen one
@@ -322,14 +325,14 @@ class DecoupledInsertionTransformer(torch.nn.Module):
                 logging.debug('Fallback Rule activated')
                 word = choices[0]
 
-            # Modification Rules: how to build the input for the next iteration
-            # if the selected word is EndOfSpan, that span is kept the same as before
-            logging.debug(f"selected: prob={word_probs[i, pos, word].item()}, "
-                          f"word={word}, idx={pos}, original={inputs}")
-            logging.debug("-" * 40)
             if pos > 0: # only for sentence with <mask>
                 inputs.insert(pos - 1, word)
+                logging.debug(("-----------\n" if i > 0 else "") +
+                              f"batch={i} selected: prob={word_probs[i, pos, word].item()}, "
+                              f"word={word}, idx={pos}, original={inputs}")
             next_inps.append(example.new_tensor(inputs))
+
+        logging.debug('%' * 60)
 
         return next_inps
 

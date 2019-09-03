@@ -37,7 +37,7 @@ def weibo_keyword_ins():
     hparams.MIN_VOCAB_FREQ = {"tokens": 20}
 
     hparams.mixture_num = 10
-    hparams.span_end_threshold = .5
+    hparams.span_end_threshold = 0.
     hparams.num_slot_transformer_layers = 0
     hparams.num_dual_model_layers = 4
     return hparams
