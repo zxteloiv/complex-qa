@@ -96,12 +96,7 @@ class KeywordSPMInsTranslator(Translator):
     def to_tensor(self, example):
         assert self.vocab is not None
 
-        src, skwds, tgt, tkwds = example
-        src = self.filter_split_str(src)[:self.max_len]
-        tgt = self.filter_split_str(tgt)[:self.max_len]
-        skwds = self.filter_split_str(skwds)[:self.max_len]
-        tkwds = self.filter_split_str(tkwds)[:self.max_len]
-
+        src, skwds, tgt, tkwds = list(map(lambda x: self.filter_split_str(x)[:self.max_len], example))
         def tokens_to_id_vector(token_list: List[str]) -> torch.Tensor:
             ids = [self.vocab.get_token_index(tok, self.shared_namespace) for tok in token_list]
             return torch.tensor(ids, dtype=torch.long)
@@ -119,6 +114,11 @@ class KeywordSPMInsTranslator(Translator):
 
         # discard batch because every source
         return tensor_list_by_keys
+
+@Registry.translator('kwd_ins_char')
+class KeywordCharInsTranslator(KeywordSPMInsTranslator):
+    def filter_split_str(self, sent: str):
+        return list(sent.replace(" ", ""))
 
 def get_model(hparams, vocab: NSVocabulary):
     embedding = Embedding(vocab.get_vocab_size(), hparams.emb_sz)
@@ -263,7 +263,7 @@ def main():
     if '--dataset' not in sys.argv:
         args += ['--dataset', 'weibo_keywords_v3']
     if '--translator' not in sys.argv:
-        args += ['--translator', 'kwd_ins_spm']
+        args += ['--translator', 'kwd_ins_char']
 
     parser = TrialBot.get_default_parser()
     args = parser.parse_args(args)
@@ -276,7 +276,6 @@ def main():
 
     bot = TrialBot(trial_name="decoupled_ins", get_model_func=get_model, args=args)
     if args.test:
-        @bot.attach_extension(Events.ITERATION_COMPLETED)
         def predicted_output(bot: TrialBot):
             import json
             model = bot.model
@@ -294,6 +293,26 @@ def main():
 
             output["predicted_tokens"] = decode(output["predicted_tokens"])
             print(json.dumps(output["predicted_tokens"]))
+
+        @bot.attach_extension(Events.ITERATION_COMPLETED)
+        def predicted_char_output(bot: TrialBot):
+            import json
+            model = bot.model
+            output = bot.state.output
+            if output is None:
+                return
+
+            output = model.decode(output)
+            def decode(output: List):
+                elem = output[0]
+                if isinstance(elem, str):
+                    return "".join(output)
+                elif isinstance(elem, list):
+                    return [decode(x) for x in output]
+
+            output["predicted_tokens"] = decode(output["predicted_tokens"])
+            print(json.dumps(output["predicted_tokens"]))
+
 
         bot.updater = InsTestingUpdater.from_bot(bot)
     else:
