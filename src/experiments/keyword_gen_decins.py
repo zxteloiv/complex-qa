@@ -37,9 +37,26 @@ def weibo_keyword_ins():
     hparams.MIN_VOCAB_FREQ = {"tokens": 20}
 
     hparams.mixture_num = 10
-    hparams.span_end_threshold = 0.
+    hparams.span_end_threshold = 0.5
     hparams.num_slot_transformer_layers = 0
     hparams.num_dual_model_layers = 4
+
+    hparams.stammering_window = 2
+    hparams.topk_words = 6
+    return hparams
+
+@Registry.hparamset()
+def weibo_keyword_ins_freegen():
+    hparams = weibo_keyword_ins()
+    hparams.span_end_threshold = 0.01
+    hparams.topk_words = 30
+    hparams.stammering_window = 5   # free generation needs stricter rule restrictions
+    return hparams
+
+@Registry.hparamset()
+def weibo_keyword_ins_quicklearning():
+    hparams = weibo_keyword_ins()
+    hparams.ADAM_LR = 1e-4
     return hparams
 
 @Registry.hparamset()
@@ -193,6 +210,8 @@ def get_model(hparams, vocab: NSVocabulary):
                                           mask_symbol=KeywordSPMInsTranslator.MASK_SYMBOL,
                                           max_decoding_step=hparams.max_decoding_len,
                                           span_end_threshold=hparams.span_end_threshold,
+                                          stammering_window=hparams.stammering_window,
+                                          topk=hparams.topk_words,
                                           slot_trans=slot_trans,
                                           dual_model=dual_model,
                                           )

@@ -322,8 +322,8 @@ class DecoupledInsertionTransformer(torch.nn.Module):
                 break
 
             else:
-                logging.debug('Fallback Rule activated')
-                word = choices[0]
+                logging.debug('Fallback Rule activated, no words are inserted anymore.')
+                pos = -1  # a negative position is invalid and will not affect the example later in insertion
 
             if pos > 0: # only for sentence with <mask>
                 inputs.insert(pos - 1, word)
