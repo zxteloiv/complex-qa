@@ -177,6 +177,35 @@ class DecoupledInsTrans(TrainingTransformation):
         yield batch_slot_data, batch_content_data, batch_dual_data
 
     def _process_single_example(self, tgt, tkwd, skill):
+        """
+        Use an illustrative example for the function.
+
+                                   0   1   2   3   4   5   6   7   8
+        Given a sentence target: [w1, w2, k1, w3, w4, w5, k2, k3, w6]
+        keyword locations: tkwd_loc = [2, 6, 7]
+
+        suppose k = 2, select two additional words [w2, w6] despite the keywords
+        selected locations: selected_loc = [1, 2, 6, 7, 8]
+        unselected locations: complement_loc = [0, 3, 4, 5]
+        5 selected words, thus 6 slots [0, 6) in total.
+        slots of all complement words: complement_slot = [0, 2, 2, 2]
+
+        1. for slot decoder model
+          input:           slot_dec_inp = [  w2, k1, k2, k3, w6  ]
+         target:        slot_dec_target = [ 1,  0,  1,  0,  0,  0]
+        weights: slot_dec_target_weight = [ 2,  1,  4,  1,  1,  1]
+
+        2. for content decoder model
+            index: [     0,  1,  2,      3,  4,  5,  6]
+            input: [<mask>, w2, k1, <mask>, k2, k3, w6]
+           target_loc: cont_dec_target_loc    = [ 0,  3,  3,  3,  1,  2,  4,  5,  6]
+          target_word: cont_dec_target_word   = [w1, w3, w4, w5, w2, k1, k2, k3, w6]
+        target_weight: cont_dec_target_weight = [ 1, .3, .3, .3,  1,  1,  1,  1,  1]
+
+        3. for dual model
+        input:  [w2, k1, k2, k3, w6]
+        target: [ 1,  0,  0,  0,  1]
+        """
         # 1. sample a K for auxiliary words, from zero to all
         tgt_len = tgt.size()[0]
         tkwd_len = tkwd.size()[0]
