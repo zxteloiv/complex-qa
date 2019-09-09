@@ -308,11 +308,59 @@ def main():
         logging.getLogger().setLevel(logging.INFO)
 
     bot = TrialBot(trial_name="ins_trans", get_model_func=get_model, args=args)
-    from trialbot.training.extensions import every_epoch_model_saver, legacy_testing_output
     if args.test:
-        bot.add_event_handler(Events.ITERATION_COMPLETED, legacy_testing_output, 100)
+        import trialbot
+        new_engine = trialbot.training.trial_bot.Engine()
+        new_engine.register_events(*Events)
+        bot._engine = new_engine
+
+        def predicted_output(bot: TrialBot):
+            import json
+            model = bot.model
+            output = bot.state.output
+            if output is None:
+                return
+
+            output = model.decode(output)
+            def decode(output: List):
+                elem = output[0]
+                if isinstance(elem, str):
+                    return bot.translator.spm.DecodePieces(output)
+                elif isinstance(elem, list):
+                    return [decode(x) for x in output]
+
+            output["predicted_tokens"] = decode(output["predicted_tokens"])
+            print(json.dumps(output["predicted_tokens"]))
+
+        @bot.attach_extension(Events.ITERATION_COMPLETED)
+        def predicted_char_output(bot: TrialBot):
+            import json
+            model = bot.model
+            output = bot.state.output
+            if output is None:
+                return
+
+            output = model.decode(output)
+            def decode(output: List):
+                elem = output[0]
+                if isinstance(elem, str):
+                    return "".join(output)
+                elif isinstance(elem, list):
+                    return [decode(x) for x in output]
+
+            output["predicted_tokens"] = decode(output["predicted_tokens"])
+            for x in output["predicted_tokens"]:
+                print(x)
+
+        @bot.attach_extension(Events.COMPLETED)
+        def precomputed_bleu(bot: TrialBot):
+            model: KeywordInsertionTransformer = bot.model
+            metrics = model.get_metrics(reset=False)
+            print(metrics)
+
         bot.updater = InsTestingUpdater.from_bot(bot)
     else:
+        from trialbot.training.extensions import every_epoch_model_saver
         bot.add_event_handler(Events.EPOCH_COMPLETED, every_epoch_model_saver, 100)
         bot.updater = InsTrainingUpdater.from_bot(bot)
     bot.run()

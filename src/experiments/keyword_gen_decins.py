@@ -26,7 +26,7 @@ def weibo_keyword_ins():
     hparams.num_enc_layers = 4
     hparams.num_dec_layers = 4
     hparams.num_heads = 6
-    hparams.max_decoding_len = 30
+    hparams.max_decoding_len = 23
     hparams.ADAM_LR = 1e-5
     hparams.TRAINING_LIMIT = 20
     hparams.beam_size = 1
@@ -41,6 +41,9 @@ def weibo_keyword_ins():
     hparams.num_slot_transformer_layers = 0
     hparams.num_dual_model_layers = 4
 
+    hparams.alpha1 = 0.5
+    hparams.alpha2 = 0.5
+
     hparams.stammering_window = 2
     hparams.topk_words = 6
     return hparams
@@ -51,6 +54,24 @@ def weibo_keyword_ins_freegen():
     hparams.span_end_threshold = 0.01
     hparams.topk_words = 30
     hparams.stammering_window = 5   # free generation needs stricter rule restrictions
+    return hparams
+
+@Registry.hparamset()
+def weibo_keyword_ins_prototype():
+    hparams = weibo_keyword_ins()
+    hparams.span_end_threshold = 0.5
+    hparams.topk_words = 30
+    hparams.stammering_window = 5   # free generation needs stricter rule restrictions
+    hparams.mixture_num = 1     # no MoS used for smaller number of vocab mapping parameters
+    hparams.emb_sz = 512    # greater embedding for better expressiveness
+    hparams.alpha1 = .1     # 9:1 for word:slot loss
+    return hparams
+
+@Registry.hparamset()
+def weibo_keyword_ins_prototype_freegen():
+    hparams = weibo_keyword_ins_prototype()
+    hparams.span_end_threshold = 0.01
+    hparams.topk_words = 30
     return hparams
 
 @Registry.hparamset()
@@ -211,6 +232,8 @@ def get_model(hparams, vocab: NSVocabulary):
                                           max_decoding_step=hparams.max_decoding_len,
                                           span_end_threshold=hparams.span_end_threshold,
                                           stammering_window=hparams.stammering_window,
+                                          alpha1=hparams.alpha1,
+                                          alpha2=hparams.alpha2,
                                           topk=hparams.topk_words,
                                           slot_trans=slot_trans,
                                           dual_model=dual_model,
@@ -295,6 +318,11 @@ def main():
 
     bot = TrialBot(trial_name="decoupled_ins", get_model_func=get_model, args=args)
     if args.test:
+        import trialbot
+        new_engine = trialbot.training.trial_bot.Engine()
+        new_engine.register_events(*Events)
+        bot._engine = new_engine
+
         def predicted_output(bot: TrialBot):
             import json
             model = bot.model
@@ -330,8 +358,14 @@ def main():
                     return [decode(x) for x in output]
 
             output["predicted_tokens"] = decode(output["predicted_tokens"])
-            print(json.dumps(output["predicted_tokens"]))
+            for x in output["predicted_tokens"]:
+                print(x)
 
+        @bot.attach_extension(Events.COMPLETED)
+        def precomputed_bleu(bot: TrialBot):
+            model: DecoupledInsertionTransformer = bot.model
+            metrics = model.get_metrics(reset=False)
+            print(metrics)
 
         bot.updater = InsTestingUpdater.from_bot(bot)
     else:

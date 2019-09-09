@@ -159,7 +159,7 @@ class BaseSeq2Seq(allennlp.models.Model):
 
         # Initialize target predictions with the start index.
         # batch_start: (batch_size,)
-        batch_start = source_mask.new_full((batch,), fill_value=self._start_id)
+        batch_start = source_mask.new_full((batch,), value=self._start_id)
         step_hidden, step_output = init_hidden, self._decoder.get_output_state(init_hidden)
 
         if self._enc_attn is not None:
