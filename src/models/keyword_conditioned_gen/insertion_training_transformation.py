@@ -336,17 +336,7 @@ class DecoupledInsTrans(TrainingTransformation):
         tkwd_len = tkwd.size()[0]
 
         # 2. find keyword locations
-        tgt_arr, tkwd_arr = tgt.tolist(), tkwd.tolist()
-        tkwd_loc, start = [], 0
-        for k in tkwd_arr:
-            subarr = tgt_arr[start:]
-            if k not in subarr:
-                continue
-
-            loc = start + subarr.index(k)
-            tkwd_loc.append(loc)
-            start = loc + 1
-        tkwd_loc.sort()
+        tkwd_loc = DecoupledInsTrans.get_keyword_locations_in_target(tkwd, tgt)
 
         # 3. and sample auxiliary words other than keywords
         remaining_loc = list(set(range(tgt_len)) - set(tkwd_loc))
@@ -358,6 +348,38 @@ class DecoupledInsTrans(TrainingTransformation):
         complement_loc = sorted(set(range(tgt_len)) - set(selected_loc))
 
         return tkwd_loc, selected_loc, complement_loc
+
+    @staticmethod
+    def get_keyword_locations_in_target(tkwd, tgt):
+        # 2. find keyword locations
+        tgt_arr, tkwd_arr = tgt.tolist(), tkwd.tolist()
+        tkwd_loc, start = [], 0
+        for k in tkwd_arr:
+            subarr = tgt_arr[start:]
+            if k not in subarr:
+                continue
+
+            loc = start + subarr.index(k)
+            tkwd_loc.append(loc)
+            start = loc + 1
+        tkwd_loc.sort()
+        return tkwd_loc
+
+
+class ConservativeL2RTransformation(TrainingTransformation):
+
+    END_OF_SPAN_TOKEN = "<eospan>"
+    MASK_TOKEN = "<mask>"
+
+    logger = logging.getLogger(__name__)
+
+    def example_gen(self, tkwds: List[torch.LongTensor], tgts: List[torch.LongTensor]):
+        generators = [self._generate_from_example(tkwd, tgt) for tkwd, tgt in zip(tkwds, tgts)]
+        yield from zip(*generators)
+
+    def _generate_from_example(self, tkwd: torch.LongTensor, tgt: torch.LongTensor):
+        tkwd_loc = DecoupledInsTrans.get_keyword_locations_in_target(tkwd, tgt)
+        yield from []
 
 
 if __name__ == '__main__':
