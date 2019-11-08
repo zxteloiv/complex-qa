@@ -1,5 +1,6 @@
 from typing import List, Tuple, Dict, Mapping, Optional
 import torch
+import torch.nn
 
 from allennlp.modules.matrix_attention import MatrixAttention
 from allennlp.modules.attention import Attention
