@@ -28,6 +28,3 @@ def atis_full():
     return train_data, dev_data, test_data
 
 
-
-
-

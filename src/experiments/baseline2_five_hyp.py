@@ -16,7 +16,7 @@ from utils.root_finder import find_root
 _ROOT = find_root()
 
 @Registry.hparamset()
-def atis_none():
+def atis_five():
     hparams = HyperParamSet.common_settings(_ROOT)
     hparams.emb_sz = 300
     hparams.hidden_size = 150
@@ -63,29 +63,21 @@ class Re2TrainingUpdater(TrainingUpdater):
         optim.zero_grad()
 
         batch = next(iterator)
-        sent_a, sent_b = list(map(batch.get, ("source_tokens", "target_tokens")))
+        sent_a, sent_b, label = list(map(batch.get, ("source_tokens", "hyp_tokens", "hyp_label")))
 
         if device >= 0:
             sent_a = move_to_device(sent_a, device)
             sent_b = move_to_device(sent_b, device)
+            label = move_to_device(label, device)
 
-        batch_size = sent_a.size()[0]
-        pos_target = sent_a.new_ones((batch_size,))
-        pred_for_pos = model(sent_a, sent_b)
+        logits = model(sent_a, sent_b)
         if self._dry_run:
             return 0
 
-        loss1 = torch.nn.functional.cross_entropy(pred_for_pos, pos_target)
-        loss1.backward()
-
-        neg_target = sent_a.new_zeros((batch_size,))
-        pred_for_neg = model(sent_a, torch.roll(sent_b, random.randrange(1, batch_size), dims=0))
-        loss2 = torch.nn.functional.cross_entropy(pred_for_neg, neg_target)
-        loss2.backward()
+        loss = torch.nn.functional.cross_entropy(logits, label)
+        loss.backward()
         optim.step()
-
-        loss = loss1 + loss2
-        return {"loss": loss, "prediction": pred_for_pos, "ranking_score": pred_for_pos[:, 1]}
+        return {"loss": loss, "prediction": logits}
 
 class Re2TestingUpdater(TestingUpdater):
     def update_epoch(self):
@@ -109,7 +101,7 @@ def main():
     import sys
     args = sys.argv[1:]
     if '--dataset' not in sys.argv:
-        args += ['--dataset', 'atis_none_hyp']
+        args += ['--dataset', 'atis_five_hyp']
     if '--translator' not in sys.argv:
         args += ['--translator', 'atis_rank']
 
@@ -122,7 +114,7 @@ def main():
     else:
         logging.getLogger().setLevel(logging.INFO)
 
-    bot = TrialBot(trial_name="reranking_baseline1", get_model_func=get_model, args=args)
+    bot = TrialBot(trial_name="reranking_baseline2", get_model_func=get_model, args=args)
     if args.test:
         import trialbot
         new_engine = trialbot.training.trial_bot.Engine()
@@ -143,20 +135,11 @@ def main():
         bot.updater = Re2TestingUpdater.from_bot(bot)
     else:
         from trialbot.training.extensions import every_epoch_model_saver
-
-        def output_inspect(bot: TrialBot, keys):
-            iteration = bot.state.iteration
-            if iteration % 4 != 0:
-                return
-
-            output = bot.state.output
-            bot.logger.info(", ".join(f"{k}={v}" for k, v in zip(keys, map(output.get, keys))))
-
         bot.add_event_handler(Events.EPOCH_COMPLETED, every_epoch_model_saver, 100)
-        # bot.add_event_handler(Events.ITERATION_COMPLETED, output_inspect, 100, keys=["loss"])
         bot.updater = Re2TrainingUpdater.from_bot(bot)
     bot.run()
 
 if __name__ == '__main__':
     main()
+
 
