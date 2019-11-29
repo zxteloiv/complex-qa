@@ -67,13 +67,17 @@ class AtisRankTranslator(Translator):
     def to_tensor(self, example):
         assert self.vocab is not None, "vocabulary must be set before assigning ids to instances"
 
-        eid, hyp_rank, src, tgt = list(map(example.get, ("ex_id", "hyp_rank", "src", "tgt")))
+        eid, hyp_rank, src, tgt, hyp = list(map(example.get, ("ex_id", "hyp_rank", "src", "tgt", "hyp")))
         tgt = self.split_lf_seq(tgt)[:self.max_len]
+        hyp = self.split_lf_seq(hyp)[:self.max_len]
 
         ns_nl, ns_lf = self.namespace
         src_toks = torch.tensor([self.vocab.get_token_index(tok, ns_nl) for tok in src])
         tgt_toks = torch.tensor([self.vocab.get_token_index(tok, ns_lf) for tok in tgt])
-        return {"source_tokens": src_toks, "target_tokens": tgt_toks, "ex_id": eid, "hyp_rank": hyp_rank}
+        hyp_toks = torch.tensor([self.vocab.get_token_index(tok, ns_lf) for tok in hyp])
+        instance = {"source_tokens": src_toks, "target_tokens": tgt_toks, "hyp_tokens": hyp_toks,
+                    "ex_id": eid, "hyp_rank": hyp_rank}
+        return instance
 
     def batch_tensor(self, tensors: List[Mapping[str, torch.Tensor]]):
         assert len(tensors) > 0
@@ -88,6 +92,7 @@ class AtisRankTranslator(Translator):
         padval_by_keys = {
             "source_tokens": self.vocab.get_token_index(PADDING_TOKEN, self.namespace[0]),
             "target_tokens": self.vocab.get_token_index(PADDING_TOKEN, self.namespace[1]),
+            "hyp_tokens": self.vocab.get_token_index(PADDING_TOKEN, self.namespace[1]),
         }
         batched_tensor = dict(
             (
@@ -156,7 +161,7 @@ class Re2TestingUpdater(TestingUpdater):
         model, iterator, device = self._models[0], self._iterators[0], self._device
         model.eval()
         batch = next(iterator)
-        eid, hyp_rank, sent_a, sent_b = list(map(batch.get, ("ex_id", "hyp_rank", "source_tokens", "target_tokens")))
+        eid, hyp_rank, sent_a, sent_b = list(map(batch.get, ("ex_id", "hyp_rank", "source_tokens", "hyp_tokens")))
         if iterator.is_new_epoch:
             self.stop_epoch()
 
