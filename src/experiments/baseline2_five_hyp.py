@@ -48,6 +48,18 @@ def atis_five_v3():
     hparams.prediction = "symmetric"
     return hparams
 
+@Registry.hparamset()
+def atis_five_big():
+    hparams = atis_five()
+    hparams.num_stacked_block = 5
+    return hparams
+
+@Registry.hparamset()
+def atis_five_bigger():
+    hparams = atis_five()
+    hparams.num_stacked_block = 7
+    return hparams
+
 import datasets.atis_rank
 import datasets.atis_rank_translator
 

@@ -33,6 +33,12 @@ def atis_five_mha_enc():
     hparams.prediction = "full"     # simple, full, symmetric
     return hparams
 
+@Registry.hparamset()
+def atis_five_lstm_enc():
+    hparams = atis_five_mha_enc()
+    hparams.encoder = "lstm"
+    return hparams
+
 import datasets.atis_rank
 import datasets.atis_rank_translator
 
@@ -57,17 +63,23 @@ def get_model(hparams, vocab: NSVocabulary):
                          num_classes=hparams.num_classes, dropout=dropout)
     pooling = Re2Pooling()
 
+
+    def _encoder(inp_sz):
+        if hasattr(hparams, "encoder") and hparams.encoder == "lstm":
+            from allennlp.modules.seq2seq_encoders import PytorchSeq2SeqWrapper
+            return PytorchSeq2SeqWrapper(nn.LSTM(inp_sz, hid_sz, hparams.num_stacked_encoder,
+                                                 batch_first=True, dropout=dropout, bidirectional=False))
+        else:
+            return StackedEncoder([
+                MHAEncoder(inp_sz if j == 0 else hid_sz, hid_sz, hparams.num_heads, dropout)
+                for j in range(hparams.num_stacked_encoder)
+            ], inp_sz, hid_sz, dropout, output_every_layer=False)
+
     enc_inp_sz = lambda i: emb_sz if i == 0 else conn_out_sz
     blocks = nn.ModuleList([
         Re2Block(
-            StackedEncoder([
-                MHAEncoder(enc_inp_sz(i) if j == 0 else hid_sz, hid_sz, hparams.num_heads, dropout)
-                for j in range(hparams.num_stacked_encoder)
-            ], enc_inp_sz(i), hid_sz, dropout, output_every_layer=False),
-            StackedEncoder([
-                MHAEncoder(enc_inp_sz(i) if j == 0 else hid_sz, hid_sz, hparams.num_heads, dropout)
-                for j in range(hparams.num_stacked_encoder)
-            ], enc_inp_sz(i), hid_sz, dropout, output_every_layer=False),
+            _encoder(enc_inp_sz(i)),
+            _encoder(enc_inp_sz(i)),
             Re2Fusion(hid_sz + enc_inp_sz(i), hid_sz, hparams.fusion == "full", dropout),
             Re2Fusion(hid_sz + enc_inp_sz(i), hid_sz, hparams.fusion == "full", dropout),
             Re2Alignment(hid_sz + enc_inp_sz(i), hid_sz, hparams.alignment),
