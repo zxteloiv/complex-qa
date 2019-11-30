@@ -11,12 +11,11 @@ from .multi_head_attention import MultiHeadSelfAttention
 class TransformerEncoder(torch.nn.Module):
     def __init__(self,
                  input_dim: int,  # input embedding dimension
+                 hidden_dim: int = None,
                  num_layers: int = 6,
                  num_heads: int = 8,
                  feedforward_hidden_dim: int = None,
                  feedforward_dropout: float = 0.1,
-                 attention_dim: int = None,
-                 value_dim: int = None,
                  residual_dropout: float = 0.1,
                  attention_dropout: float = 0.1,
                  use_positional_embedding: bool = True,
@@ -28,25 +27,21 @@ class TransformerEncoder(torch.nn.Module):
         self._feedforward_layers: List[FeedForward] = []
         self._feedforward_norm_layers: List[LayerNorm] = []
 
-        hidden_dim = input_dim
-        attention_dim = attention_dim or (hidden_dim // num_heads)
-        value_dim = value_dim or (hidden_dim // num_heads)
+        hidden_dim = hidden_dim or input_dim
         feedforward_hidden_dim = feedforward_hidden_dim or hidden_dim
 
+        layer_inp = input_dim
         for i in range(num_layers):
-            attention = MultiHeadSelfAttention(num_heads,
-                                               hidden_dim,
-                                               attention_dim * num_heads,
-                                               value_dim * num_heads,
+            attention = MultiHeadSelfAttention(num_heads, layer_inp, layer_inp, layer_inp,
                                                attention_dropout=attention_dropout)
             self.add_module(f'attention_{i}', attention)
             self._attention_layers.append(attention)
 
-            attention_norm = LayerNorm(hidden_dim)
+            attention_norm = LayerNorm(layer_inp)
             self.add_module(f'attention_norm_{i}', attention_norm)
             self._attention_norm_layers.append(attention_norm)
 
-            feedfoward = FeedForward(hidden_dim,
+            feedfoward = FeedForward(layer_inp,
                                      num_layers=2,
                                      hidden_dims=[feedforward_hidden_dim, hidden_dim],
                                      activations=[Activation.by_name('relu')(),
@@ -58,6 +53,7 @@ class TransformerEncoder(torch.nn.Module):
             feedforward_norm = LayerNorm(hidden_dim)
             self.add_module(f"feedforward_norm_{i}", feedforward_norm)
             self._feedforward_norm_layers.append(feedforward_norm)
+            layer_inp = hidden_dim
 
         self._dropout = torch.nn.Dropout(residual_dropout)
         self.input_dim = input_dim

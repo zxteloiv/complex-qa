@@ -2,17 +2,19 @@ from typing import Optional
 import torch.nn
 
 class StackedEncoder(torch.nn.Module):
-    def __init__(self, encs, input_size, output_size, input_dropout=0.):
+    def __init__(self, encs, input_size, output_size, input_dropout=0., output_every_layer=True):
         super(StackedEncoder, self).__init__()
 
         self.layer_encs = torch.nn.ModuleList(encs)
         self.input_size = input_size
         self.output_size = output_size
         self.input_dropout = torch.nn.Dropout(input_dropout)
+        self.output_every_layer = output_every_layer
 
     def forward(self,
                 inputs: torch.Tensor,
-                mask: Optional[torch.LongTensor]):
+                mask: Optional[torch.LongTensor],
+                ):
         last_output = inputs
         layered_output = []
         for i, enc in enumerate(self.layer_encs):
@@ -23,7 +25,11 @@ class StackedEncoder(torch.nn.Module):
             layered_output.append(last_output)
 
         enc_output = layered_output[-1]
-        return enc_output, layered_output
+
+        if self.output_every_layer:
+            return enc_output, layered_output
+        else:
+            return enc_output
 
     def get_layer_num(self):
         return len(self.layer_encs)
