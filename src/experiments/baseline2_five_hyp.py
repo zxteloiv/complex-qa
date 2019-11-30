@@ -31,6 +31,23 @@ def atis_five():
     hparams.prediction = "full"     # simple, full, symmetric
     return hparams
 
+@Registry.hparamset()
+def atis_five_v2():
+    hparams = atis_five()
+    hparams.hidden_size = 200
+    hparams.num_stacked_encoder = 3
+    hparams.prediction = "symmetric"
+    return hparams
+
+@Registry.hparamset()
+def atis_five_v3():
+    hparams = atis_five()
+    hparams.emb_sz = 256
+    hparams.hidden_size = 128
+    hparams.batch_sz = 32
+    hparams.prediction = "symmetric"
+    return hparams
+
 import datasets.atis_rank
 import datasets.atis_rank_translator
 
