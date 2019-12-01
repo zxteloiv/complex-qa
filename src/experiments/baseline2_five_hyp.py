@@ -5,9 +5,8 @@ import logging
 import torch.nn
 import numpy as np
 import random
-from models.matching.re2 import RE2
 
-from trialbot.data import NSVocabulary
+from trialbot.data import NSVocabulary, PADDING_TOKEN
 from trialbot.training import Registry, TrialBot, Events
 from trialbot.training.updater import TrainingUpdater, TestingUpdater
 from trialbot.training.hparamset import HyperParamSet
@@ -33,23 +32,6 @@ def atis_five():
     return hparams
 
 @Registry.hparamset()
-def atis_five_v2():
-    hparams = atis_five()
-    hparams.hidden_size = 200
-    hparams.num_stacked_encoder = 3
-    hparams.prediction = "symmetric"
-    return hparams
-
-@Registry.hparamset()
-def atis_five_v3():
-    hparams = atis_five()
-    hparams.emb_sz = 256
-    hparams.hidden_size = 128
-    hparams.batch_sz = 32
-    hparams.prediction = "symmetric"
-    return hparams
-
-@Registry.hparamset()
 def atis_five_big():
     hparams = atis_five()
     hparams.num_stacked_block = 5
@@ -61,25 +43,93 @@ def atis_five_bigger():
     hparams.num_stacked_block = 7
     return hparams
 
+@Registry.hparamset()
+def atis_five_lstm():
+    hparams = atis_five()
+    hparams.encoder = "lstm"
+    return hparams
+
+@Registry.hparamset()
+def atis_five_lstm_big():
+    hparams = atis_five_lstm()
+    hparams.num_stacked_block = 5
+    return hparams
+
+
 import datasets.atis_rank
 import datasets.atis_rank_translator
 
 def get_model(hparams, vocab: NSVocabulary):
-    model = RE2.get_model(emb_sz=hparams.emb_sz,
-                          num_tokens_a=vocab.get_vocab_size('nl'),
-                          num_tokens_b=vocab.get_vocab_size('lf'),
-                          hid_sz=hparams.hidden_size,
-                          enc_kernel_sz=hparams.encoder_kernel_size,
-                          num_classes=hparams.num_classes,
-                          num_stacked_blocks=hparams.num_stacked_block,
-                          num_encoder_layers=hparams.num_stacked_encoder,
-                          dropout=hparams.dropout,
-                          fusion_mode=hparams.fusion,
-                          alignment_mode=hparams.alignment,
-                          connection_mode=hparams.connection,
-                          prediction_mode=hparams.prediction,
-                          use_shared_embedding=False,
-                          )
+    from models.matching.re2 import RE2
+    if hasattr(hparams, "encoder") and hparams.encoder == "lstm":
+        return get_variant_model(hparams, vocab)
+    else:
+        model = RE2.get_model(emb_sz=hparams.emb_sz,
+                              num_tokens_a=vocab.get_vocab_size('nl'),
+                              num_tokens_b=vocab.get_vocab_size('lf'),
+                              hid_sz=hparams.hidden_size,
+                              enc_kernel_sz=hparams.encoder_kernel_size,
+                              num_classes=hparams.num_classes,
+                              num_stacked_blocks=hparams.num_stacked_block,
+                              num_encoder_layers=hparams.num_stacked_encoder,
+                              dropout=hparams.dropout,
+                              fusion_mode=hparams.fusion,
+                              alignment_mode=hparams.alignment,
+                              connection_mode=hparams.connection,
+                              prediction_mode=hparams.prediction,
+                              use_shared_embedding=False,
+                              )
+    return model
+
+def get_variant_model(hparams, vocab: NSVocabulary):
+    # RE2 requires an encoder which
+    # maps (sent in (batch, N, inp_sz), and mask in (batch, N))
+    # to (sent_prime in (batch, N, hidden)
+    from models.modules.stacked_encoder import StackedEncoder
+    from models.matching.mha_encoder import MHAEncoder
+    from models.matching.re2 import RE2
+    from models.matching.re2_modules import Re2Block, Re2Prediction, Re2Pooling, Re2Conn
+    from models.matching.re2_modules import Re2Alignment, Re2Fusion
+
+    emb_sz, hid_sz, dropout = hparams.emb_sz, hparams.hidden_size, hparams.dropout
+    embedding_a = torch.nn.Embedding(vocab.get_vocab_size('nl'), emb_sz)
+    embedding_b = torch.nn.Embedding(vocab.get_vocab_size('lf'), emb_sz)
+
+    conn: Re2Conn = Re2Conn(hparams.connection, emb_sz, hid_sz)
+    conn_out_sz = conn.get_output_size()
+
+    # the input to predict is exactly the output of fusion, with the hidden size
+    pred = Re2Prediction(hparams.prediction, inp_sz=hid_sz, hid_sz=hid_sz,
+                         num_classes=hparams.num_classes, dropout=dropout)
+    pooling = Re2Pooling()
+
+    def _encoder(inp_sz):
+        if hasattr(hparams, "encoder") and hparams.encoder == "lstm":
+            from allennlp.modules.seq2seq_encoders import PytorchSeq2SeqWrapper
+            return PytorchSeq2SeqWrapper(torch.nn.LSTM(inp_sz, hid_sz, hparams.num_stacked_encoder,
+                                                       batch_first=True, dropout=dropout, bidirectional=False))
+        else:
+            return StackedEncoder([
+                MHAEncoder(inp_sz if j == 0 else hid_sz, hid_sz, hparams.num_heads, dropout)
+                for j in range(hparams.num_stacked_encoder)
+            ], inp_sz, hid_sz, dropout, output_every_layer=False)
+
+    enc_inp_sz = lambda i: emb_sz if i == 0 else conn_out_sz
+    blocks = torch.nn.ModuleList([
+        Re2Block(
+            _encoder(enc_inp_sz(i)),
+            _encoder(enc_inp_sz(i)),
+            Re2Fusion(hid_sz + enc_inp_sz(i), hid_sz, hparams.fusion == "full", dropout),
+            Re2Fusion(hid_sz + enc_inp_sz(i), hid_sz, hparams.fusion == "full", dropout),
+            Re2Alignment(hid_sz + enc_inp_sz(i), hid_sz, hparams.alignment),
+            dropout=dropout,
+        )
+        for i in range(hparams.num_stacked_block)
+    ])
+
+    model = RE2(embedding_a, embedding_b, blocks, pooling, pooling, conn, pred,
+                vocab.get_token_index(PADDING_TOKEN, 'nl'),
+                vocab.get_token_index(PADDING_TOKEN, 'lf'))
     return model
 
 class Re2TrainingUpdater(TrainingUpdater):
@@ -124,7 +174,7 @@ class Re2TrainingUpdater(TrainingUpdater):
 
         args, hparams, model = bot.args, bot.hparams, bot.model
         bot.logger.info("Changed to AdamW with not only the same lr, beta, but also the default AdamW weight decay")
-        optim = torch.optim.Adam(model.parameters(), hparams.ADAM_LR, hparams.ADAM_BETAS)
+        optim = torch.optim.AdamW(model.parameters(), hparams.ADAM_LR, hparams.ADAM_BETAS)
         obj._optims = [optim]
 
         obj._grad_clip_val = hparams.GRAD_CLIPPING
@@ -183,6 +233,10 @@ def main():
             for eid, hyp_rank, score in zip(*map(output.get, output_keys)):
                 print(json.dumps(dict(zip(output_keys, (eid, hyp_rank, score.item())))))
 
+        bot.updater = Re2TestingUpdater.from_bot(bot)
+    else:
+        from trialbot.training.extensions import every_epoch_model_saver
+
         @bot.attach_extension(Events.ITERATION_COMPLETED)
         def end_with_nan_loss(bot: TrialBot):
             output = bot.state.output
@@ -201,10 +255,9 @@ def main():
             if _isnan(loss):
                 bot.logger.error("NaN loss encountered, training ended")
                 bot.state.epoch = bot.hparams.TRAINING_LIMIT + 1
+                bot.updater.stop_epoch()
 
-        bot.updater = Re2TestingUpdater.from_bot(bot)
-    else:
-        from trialbot.training.extensions import every_epoch_model_saver
+
         bot.add_event_handler(Events.EPOCH_COMPLETED, every_epoch_model_saver, 100)
         bot.updater = Re2TrainingUpdater.from_bot(bot)
     bot.run()
