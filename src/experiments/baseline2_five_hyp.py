@@ -3,6 +3,7 @@ sys.path.insert(0, '..')
 from typing import List, Generator, Tuple, Mapping, Optional
 import logging
 import torch.nn
+import numpy as np
 import random
 from models.matching.re2 import RE2
 
@@ -105,8 +106,29 @@ class Re2TrainingUpdater(TrainingUpdater):
 
         loss = torch.nn.functional.cross_entropy(logits, label)
         loss.backward()
-        optim.step()
+        torch.nn.utils.clip_grad_value_(model.parameters(), self._grad_clip_val)
+
+        # do some clipping
+        if torch.isnan(loss).any():
+            logging.getLogger().error("NaN loss encountered")
+
+        else:
+            optim.step()
+
         return {"loss": loss, "prediction": logits}
+
+    @classmethod
+    def from_bot(cls, bot: TrialBot):
+        obj: TrainingUpdater = super().from_bot(bot)
+        del obj._optims
+
+        args, hparams, model = bot.args, bot.hparams, bot.model
+        bot.logger.info("Changed to AdamW with not only the same lr, beta, but also the default AdamW weight decay")
+        optim = torch.optim.Adam(model.parameters(), hparams.ADAM_LR, hparams.ADAM_BETAS)
+        obj._optims = [optim]
+
+        obj._grad_clip_val = hparams.GRAD_CLIPPING
+        return obj
 
 class Re2TestingUpdater(TestingUpdater):
     def update_epoch(self):
@@ -160,6 +182,25 @@ def main():
             output_keys = ("ex_id", "hyp_rank", "ranking_score")
             for eid, hyp_rank, score in zip(*map(output.get, output_keys)):
                 print(json.dumps(dict(zip(output_keys, (eid, hyp_rank, score.item())))))
+
+        @bot.attach_extension(Events.ITERATION_COMPLETED)
+        def end_with_nan_loss(bot: TrialBot):
+            output = bot.state.output
+            if output is None:
+                return
+            loss = output["loss"]
+            def _isnan(x):
+                if isinstance(x, torch.Tensor):
+                    return bool(torch.isnan(x).any())
+                elif isinstance(x, np.ndarray):
+                    return bool(np.isnan(x).any())
+                else:
+                    import math
+                    return math.isnan(x)
+
+            if _isnan(loss):
+                bot.logger.error("NaN loss encountered, training ended")
+                bot.state.epoch = bot.hparams.TRAINING_LIMIT + 1
 
         bot.updater = Re2TestingUpdater.from_bot(bot)
     else:
