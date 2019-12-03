@@ -20,6 +20,20 @@ def atis_five():
     test_data = JsonLDataset(os.path.join(_ATIS_DATA, 'atis_rank.five_hyp.test.jsonl'))
     return train_data, dev_data, test_data
 
+@Registry.dataset('atis_ten_hyp')
+def atis_five():
+    train_data = JsonLDataset(os.path.join(_ATIS_DATA, 'atis_rank.ten_hyp.train.jsonl'))
+    dev_data = JsonLDataset(os.path.join(_ATIS_DATA, 'atis_rank.ten_hyp.dev.jsonl'))
+    test_data = JsonLDataset(os.path.join(_ATIS_DATA, 'atis_rank.ten_hyp.test.jsonl'))
+    return train_data, dev_data, test_data
+
+@Registry.dataset('atis_ten_hyp_five_test')
+def atis_five():
+    train_data = JsonLDataset(os.path.join(_ATIS_DATA, 'atis_rank.ten_hyp.train.jsonl'))
+    dev_data = JsonLDataset(os.path.join(_ATIS_DATA, 'atis_rank.ten_hyp.dev.jsonl'))
+    test_data = JsonLDataset(os.path.join(_ATIS_DATA, 'atis_rank.five_hyp.test.jsonl'))
+    return train_data, dev_data, test_data
+
 @Registry.dataset('atis_full_hyp')
 def atis_full():
     train_data = JsonLDataset(os.path.join(_ATIS_DATA, 'atis_rank.full_hyp.train.jsonl'))
