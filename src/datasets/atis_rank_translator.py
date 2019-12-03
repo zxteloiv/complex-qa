@@ -48,30 +48,32 @@ class AtisRankTranslator(Translator):
         hyp_toks = torch.tensor([self.vocab.get_token_index(tok, ns_lf) for tok in hyp])
         label = torch.tensor(int(is_correct))   # 1 for True, 0 for False
         instance = {"source_tokens": src_toks, "target_tokens": tgt_toks, "hyp_tokens": hyp_toks,
-                    "ex_id": eid, "hyp_rank": hyp_rank, "hyp_label": label}
+                    "ex_id": eid, "hyp_rank": hyp_rank, "hyp_label": label, "_raw": example}
         return instance
 
     def batch_tensor(self, tensors: List[Mapping[str, torch.Tensor]]):
         assert len(tensors) > 0
-        tensor_list_by_keys = defaultdict(list)
+        list_by_keys = defaultdict(list)
         for instance in tensors:
             for k, tensor in instance.items():
-                tensor_list_by_keys[k].append(tensor)
+                list_by_keys[k].append(tensor)
 
         # # discard batch because every source
-        # return tensor_list_by_keys
+        # return list_by_keys
 
         nl_padding = self.vocab.get_token_index(PADDING_TOKEN, self.namespace[0])
         lf_padding = self.vocab.get_token_index(PADDING_TOKEN, self.namespace[1])
         def pad_tensors(key: str, pad: int):
-            return pad_sequence(tensor_list_by_keys[key], batch_first=True, padding_value=pad)
+            return pad_sequence(list_by_keys[key], batch_first=True, padding_value=pad)
 
-        batched_tensor = {"hyp_label": torch.stack(tensor_list_by_keys["hyp_label"], dim=0),
+        batched_tensor = {"hyp_label": torch.stack(list_by_keys["hyp_label"], dim=0),
                           "source_tokens": pad_tensors("source_tokens", nl_padding),
-                          "ex_id": tensor_list_by_keys["ex_id"],
-                          "hyp_rank": tensor_list_by_keys["hyp_rank"],
+                          "ex_id": list_by_keys["ex_id"],
+                          "hyp_rank": list_by_keys["hyp_rank"],
                           "target_tokens": pad_tensors("target_tokens", lf_padding),
-                          "hyp_tokens": pad_tensors("hyp_tokens", lf_padding),}
+                          "hyp_tokens": pad_tensors("hyp_tokens", lf_padding),
+                          "_raw": list_by_keys["_raw"],
+                          }
 
         return batched_tensor
 
