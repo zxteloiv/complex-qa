@@ -4,6 +4,7 @@ import torch
 from torch.nn.utils.rnn import pad_sequence
 from collections import defaultdict
 from trialbot.data import Translator, NSVocabulary, START_SYMBOL, END_SYMBOL, PADDING_TOKEN
+import logging
 
 @Registry.translator('atis_rank')
 class AtisRankTranslator(Translator):
@@ -11,6 +12,7 @@ class AtisRankTranslator(Translator):
         super().__init__()
         self.max_len = max_len
         self.namespace = ("nl", "lf")   # natural language, and logical form
+        self.logger = logging.getLogger('translator')
 
     def split_nl_sent(self, sent: str):
         return sent.strip().split(" ")
@@ -39,13 +41,17 @@ class AtisRankTranslator(Translator):
         eid, hyp_rank, src, tgt, hyp, is_correct = list(
             map(example.get, ("ex_id", "hyp_rank", "src", "tgt", "hyp", "is_correct"))
         )
-        tgt = self.split_lf_seq(tgt)[:self.max_len]
-        hyp = self.split_lf_seq(hyp)[:self.max_len]
+        try:
+            tgt = self.split_lf_seq(tgt)[:self.max_len]
+            hyp = self.split_lf_seq(hyp)[:self.max_len]
+        except:
+            self.logger.warning("Ignored invalid hypothesis %d-%d." % (eid, hyp_rank))
+            tgt = hyp = None
 
         ns_nl, ns_lf = self.namespace
         src_toks = torch.tensor([self.vocab.get_token_index(tok, ns_nl) for tok in src])
-        tgt_toks = torch.tensor([self.vocab.get_token_index(tok, ns_lf) for tok in tgt])
-        hyp_toks = torch.tensor([self.vocab.get_token_index(tok, ns_lf) for tok in hyp])
+        tgt_toks = torch.tensor([self.vocab.get_token_index(tok, ns_lf) for tok in tgt]) if tgt else None
+        hyp_toks = torch.tensor([self.vocab.get_token_index(tok, ns_lf) for tok in hyp]) if hyp else None
         label = torch.tensor(int(is_correct))   # 1 for True, 0 for False
         instance = {"source_tokens": src_toks, "target_tokens": tgt_toks, "hyp_tokens": hyp_toks,
                     "ex_id": eid, "hyp_rank": hyp_rank, "hyp_label": label, "_raw": example}
@@ -55,6 +61,8 @@ class AtisRankTranslator(Translator):
         assert len(tensors) > 0
         list_by_keys = defaultdict(list)
         for instance in tensors:
+            if instance['hyp_tokens'] is None:
+                continue    # discard invalid data
             for k, tensor in instance.items():
                 list_by_keys[k].append(tensor)
 

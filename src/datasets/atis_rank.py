@@ -6,6 +6,12 @@ import os.path
 _DATA_PATH = os.path.join(find_root(), 'data')
 _ATIS_DATA = os.path.join(_DATA_PATH, 'atis_rank')
 
+def atis_pure_none():
+    train_data = JsonLDataset(os.path.join(_ATIS_DATA, 'atis_rank.none_hyp.train.jsonl'))
+    dev_data = JsonLDataset(os.path.join(_ATIS_DATA, 'atis_rank.none_hyp.dev.jsonl'))
+    test_data = JsonLDataset(os.path.join(_ATIS_DATA, 'atis_rank.none_hyp.test.jsonl'))
+    return train_data, dev_data, test_data
+
 @Registry.dataset('atis_none_hyp')
 def atis_none():
     train_data = JsonLDataset(os.path.join(_ATIS_DATA, 'atis_rank.none_hyp.train.jsonl'))

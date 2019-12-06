@@ -55,9 +55,23 @@ def atis_five_lstm_big():
     hparams.num_stacked_block = 5
     return hparams
 
+@Registry.hparamset()
+def django_fifteen():
+    hparams = atis_five_lstm()
+    hparams.TRAINING_LIMIT = 150
+    return hparams
+
+@Registry.hparamset()
+def django_thirty():
+    hparams = atis_five_lstm()
+    hparams.TRAINING_LIMIT = 100
+    return hparams
+
 
 import datasets.atis_rank
 import datasets.atis_rank_translator
+import datasets.django_rank
+import datasets.django_rank_translator
 
 def get_model(hparams, vocab: NSVocabulary):
     from models.matching.re2 import RE2
