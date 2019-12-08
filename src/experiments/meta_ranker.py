@@ -16,7 +16,7 @@ from trialbot.training.updater import TrainingUpdater, TestingUpdater, Updater
 from trialbot.training.hparamset import HyperParamSet
 from trialbot.utils.move_to_device import move_to_device
 from utils.inner_loop_optimizers import LSLRGradientDescentLearningRule
-from datasets.cached_retriever import IDCacheRetriever
+from datasets.cached_retriever import IDCacheRetriever, HypIDCacheRetriever
 
 from utils.root_finder import find_root
 _ROOT = find_root()
@@ -46,6 +46,36 @@ def atis_five_lstm():
     return hparams
 
 @Registry.hparamset()
+def atis_five_v2():
+    p = atis_five_lstm()
+    p.emb_sz = 256
+    p.dropout = .2
+    p.hidden_size = 128
+    p.encoder = "bilstm"
+    p.batch_sz = 16
+    p.num_inner_loops = 3
+    p.task_batch_sz = 16
+    p.TRAINING_LIMIT = 5
+    p.connection = "aug"
+    return p
+
+@Registry.hparamset()
+def atis_five_v3():
+    p = atis_five_v2()
+    p.retriever_index_path = (
+        os.path.join(_ROOT, 'data', '_similarity_index', 'atis_ted_lf_train.bin'),
+        os.path.join(_ROOT, 'data', '_similarity_index', 'atis_ted_lf_dev.bin'),
+        os.path.join(_ROOT, 'data', '_similarity_index', 'atis_ted_lf_test.bin'),
+    )
+    return p
+
+@Registry.hparamset()
+def atis_five_testing_no_dropout():
+    hparams = atis_five_lstm()
+    hparams.dropout = 0.
+    return hparams
+
+@Registry.hparamset()
 def atis_five_crude_testing():
     hparams = atis_five_lstm()
     hparams.disable_inner_loop = True
@@ -54,7 +84,7 @@ def atis_five_crude_testing():
 @Registry.hparamset()
 def django_fifteen():
     hparams = atis_five_lstm()
-    hparams.TRAINING_LIMIT = 10
+    hparams.TRAINING_LIMIT = 5
     hparams.retriever_index_path = os.path.join(_ROOT, 'data', '_similarity_index', 'django_bert_nl.bin')
     return hparams
 
@@ -80,31 +110,6 @@ def get_aux_model(hparams, vocab):
     return torch.nn.ModuleDict({"model": model, "inner_optim": lslrgd})
 
 def get_model(hparams, vocab: NSVocabulary):
-    from models.matching.re2 import RE2
-    if hasattr(hparams, "encoder") and hparams.encoder == "lstm":
-        return get_variant_model(hparams, vocab)
-    else:
-        model = RE2.get_model(emb_sz=hparams.emb_sz,
-                              num_tokens_a=vocab.get_vocab_size('nl'),
-                              num_tokens_b=vocab.get_vocab_size('lf'),
-                              hid_sz=hparams.hidden_size,
-                              enc_kernel_sz=hparams.encoder_kernel_size,
-                              num_classes=hparams.num_classes,
-                              num_stacked_blocks=hparams.num_stacked_block,
-                              num_encoder_layers=hparams.num_stacked_encoder,
-                              dropout=hparams.dropout,
-                              fusion_mode=hparams.fusion,
-                              alignment_mode=hparams.alignment,
-                              connection_mode=hparams.connection,
-                              prediction_mode=hparams.prediction,
-                              use_shared_embedding=False,
-                              )
-    return model
-
-def get_variant_model(hparams, vocab: NSVocabulary):
-    # RE2 requires an encoder which
-    # maps (sent in (batch, N, inp_sz), and mask in (batch, N))
-    # to (sent_prime in (batch, N, hidden)
     from models.modules.stacked_encoder import StackedEncoder
     from models.matching.mha_encoder import MHAEncoder
     from models.matching.re2 import RE2
@@ -128,6 +133,10 @@ def get_variant_model(hparams, vocab: NSVocabulary):
             from allennlp.modules.seq2seq_encoders import PytorchSeq2SeqWrapper
             return PytorchSeq2SeqWrapper(torch.nn.LSTM(inp_sz, hid_sz, hparams.num_stacked_encoder,
                                                        batch_first=True, dropout=dropout, bidirectional=False))
+        elif hasattr(hparams, "encoder") and hparams.encoder == "bilstm":
+            from allennlp.modules.seq2seq_encoders import PytorchSeq2SeqWrapper
+            return PytorchSeq2SeqWrapper(torch.nn.LSTM(inp_sz, hid_sz // 2, hparams.num_stacked_encoder,
+                                                       batch_first=True, dropout=dropout, bidirectional=True))
         else:
             return StackedEncoder([
                 MHAEncoder(inp_sz if j == 0 else hid_sz, hid_sz, hparams.num_heads, dropout)
@@ -256,7 +265,10 @@ class MetaRankerTrainingUpdater(Updater):
         if args.debug and args.skip:
             iterator.reset(args.skip)
 
-        retriever = IDCacheRetriever(filename=hparams.retriever_index_path, dataset=bot.train_set)
+        if isinstance(hparams.retriever_index_path, str):
+            retriever = IDCacheRetriever(filename=hparams.retriever_index_path, dataset=bot.train_set)
+        else:
+            retriever = HypIDCacheRetriever(filenames=hparams.retriever_index_path, dataset=bot.train_set)
 
         from functools import partial
         updater = cls(model, iterator, outer_optim, outer_sche,
@@ -347,7 +359,10 @@ class MetaRankerTestingUpdater(Updater):
         args, hparams, model = bot.args, bot.hparams, bot.model
         device = args.device
         iterator = RandomIterator(bot.test_set, bot.hparams.batch_sz, bot.translator, shuffle=False, repeat=False)
-        retriever = IDCacheRetriever(filename=hparams.retriever_index_path, dataset=bot.train_set)
+        if isinstance(hparams.retriever_index_path, str):
+            retriever = IDCacheRetriever(filename=hparams.retriever_index_path, dataset=bot.train_set)
+        else:
+            retriever = HypIDCacheRetriever(filenames=hparams.retriever_index_path, dataset=bot.train_set)
         from functools import partial
         updater = cls(model, iterator, retriever, device, hparams.GRAD_CLIPPING,
                       partial(RandomIterator,
@@ -426,7 +441,7 @@ def main():
             bot.logger.info(", ".join(f"{k}={v}" for k, v in zip(keys, map(output.get, keys))))
 
         bot.add_event_handler(Events.EPOCH_COMPLETED, every_epoch_model_saver, 100)
-        bot.add_event_handler(Events.ITERATION_COMPLETED, save_model_every_num_iters, 100, interval=100)
+        bot.add_event_handler(Events.ITERATION_COMPLETED, save_model_every_num_iters, 100, interval=25)
         bot.add_event_handler(Events.ITERATION_COMPLETED, output_inspect, 100, keys=["loss", "task_loss_count"])
         bot.updater = MetaRankerTrainingUpdater.from_bot(bot)
     bot.run()
