@@ -12,7 +12,7 @@ import copy
 
 from trialbot.data import NSVocabulary, PADDING_TOKEN, Translator, RandomIterator
 from trialbot.training import Registry, TrialBot, Events
-from trialbot.training.updater import TrainingUpdater, TestingUpdater, Updater
+from trialbot.training.updater import Updater
 from trialbot.training.hparamset import HyperParamSet
 from trialbot.utils.move_to_device import move_to_device
 from utils.inner_loop_optimizers import LSLRGradientDescentLearningRule
@@ -60,6 +60,12 @@ def atis_five_v2():
     return p
 
 @Registry.hparamset()
+def atis_five_v2_no_dropout():
+    p = atis_five_v2()
+    p.dropout = .0
+    return p
+
+@Registry.hparamset()
 def atis_five_v3():
     p = atis_five_v2()
     p.retriever_index_path = (
@@ -67,6 +73,12 @@ def atis_five_v3():
         os.path.join(_ROOT, 'data', '_similarity_index', 'atis_ted_lf_dev.bin'),
         os.path.join(_ROOT, 'data', '_similarity_index', 'atis_ted_lf_test.bin'),
     )
+    return p
+
+@Registry.hparamset()
+def atis_five_v3_no_dropout():
+    p = atis_five_v3()
+    p.dropout = .0
     return p
 
 @Registry.hparamset()
@@ -389,6 +401,11 @@ def main():
         logging.getLogger().setLevel(logging.WARNING)
     else:
         logging.getLogger().setLevel(logging.INFO)
+
+    if hasattr(args, "seed") and args.seed:
+        from utils.fix_seed import fix_seed
+        logging.info(f"set seed={args.seed}")
+        fix_seed(args.seed)
 
     bot = TrialBot(trial_name="meta_ranker", get_model_func=get_aux_model, args=args)
     if args.test:
