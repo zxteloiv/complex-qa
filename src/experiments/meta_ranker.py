@@ -16,7 +16,7 @@ from trialbot.training.updater import Updater
 from trialbot.training.hparamset import HyperParamSet
 from trialbot.utils.move_to_device import move_to_device
 from utils.inner_loop_optimizers import LSLRGradientDescentLearningRule
-from datasets.cached_retriever import IDCacheRetriever, HypIDCacheRetriever
+from datasets.cached_retriever import IDCacheRetriever, HypIDCacheRetriever, SimRetriever
 
 from utils.root_finder import find_root
 _ROOT = find_root()
@@ -80,6 +80,16 @@ def atis_five_v3_no_dropout():
     p = atis_five_v3()
     p.dropout = .0
     return p
+
+@Registry.hparamset()
+def atis_five_v4():
+    p2 = atis_five_v2()
+    p3 = atis_five_v3()
+    p3.retriever_index_path = (
+        p2.retriever_index_path,
+        p3.retriever_index_path,
+    )  # Tuple[str, Tuple[str, str, str]]
+    return p3
 
 @Registry.hparamset()
 def atis_five_testing_no_dropout():
@@ -373,8 +383,14 @@ class MetaRankerTestingUpdater(Updater):
         iterator = RandomIterator(bot.test_set, bot.hparams.batch_sz, bot.translator, shuffle=False, repeat=False)
         if isinstance(hparams.retriever_index_path, str):
             retriever = IDCacheRetriever(filename=hparams.retriever_index_path, dataset=bot.train_set)
-        else:
+        elif len(hparams.retriever_index_path) == 2:
+            rpath = hparams.retriever_index_path
+            retriever = SimRetriever(nlfile=rpath[0], lffiles=rpath[1], dataset=bot.train_set)
+        elif len(hparams.retriever_index_path) == 3:
             retriever = HypIDCacheRetriever(filenames=hparams.retriever_index_path, dataset=bot.train_set)
+        else:
+            raise ValueError('failed to init retriever')
+
         from functools import partial
         updater = cls(model, iterator, retriever, device, hparams.GRAD_CLIPPING,
                       partial(RandomIterator,
