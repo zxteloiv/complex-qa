@@ -24,11 +24,11 @@ def main():
     # same as the TranX settings.
     print(f'counter basic stats: nl={len(counter["nl"])}, lf={len(counter["lf"])}')
     vocab = NSVocabulary(counter,
-                         min_count=({"nl": 10, "lf": 10}),
+                         min_count=({"nl": 15, "lf": 15}),
                          max_vocab_size=5000,
                          )
-    print('saving to ./django_vocab')
-    vocab.save_to_files('./django_vocab')
+    print('saving to ./django_vocab_15')
+    vocab.save_to_files('./django_vocab_15')
     print(vocab)
 
 if __name__ == '__main__':
