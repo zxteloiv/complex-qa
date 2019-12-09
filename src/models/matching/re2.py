@@ -46,8 +46,11 @@ class RE2(nn.Module):
         b = self.b_emb(sent_b)
         mask_a = (sent_a != self.padding_val_a).long()
         mask_b = (sent_b != self.padding_val_b).long()
-        res_a, res_b = a, b
+        return self.forward_embs(a, b, mask_a, mask_b)
 
+    def forward_embs(self, a, b, mask_a, mask_b):
+
+        res_a, res_b = a, b
         for i, block in enumerate(self.blocks):
             if i > 0:
                 a = self.connection(a, res_a, i)

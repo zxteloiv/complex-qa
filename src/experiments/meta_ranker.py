@@ -89,6 +89,16 @@ def atis_five_v4():
         p2.retriever_index_path,
         p3.retriever_index_path,
     )  # Tuple[str, Tuple[str, str, str]]
+
+    p3.emb_sz = 256
+    p3.hidden_size = 128
+    p3.num_stacked_block = 2
+    p3.num_stacked_encoder = 2
+    p3.dropout = .2
+    p3.TRAINING_LIMIT = 5
+    p3.batch_sz = 24
+    p3.num_inner_loops = 3
+    p3.task_batch_sz = 16
     return p3
 
 @Registry.hparamset()
@@ -116,13 +126,29 @@ def django_fifteen_crude_testing():
     hparams.disable_inner_loop = True
     return hparams
 
+@Registry.hparamset()
+def django_fifteen_v2():
+    p = atis_five_v2()
+    p.retriever_index_path = os.path.join(_ROOT, 'data', '_similarity_index', 'django_bert_nl.bin')
+    p.emb_sz = 256
+    p.hidden_size = 128
+    p.num_stacked_block = 2
+    p.num_stacked_encoder = 2
+    p.dropout = .2
+    p.TRAINING_LIMIT = 3
+    p.batch_sz = 24
+    p.num_inner_loops = 3
+    p.task_batch_sz = 16
+    return p
+
 import datasets.atis_rank
 import datasets.atis_rank_translator
 import datasets.django_rank
 import datasets.django_rank_translator
 
 def get_aux_model(hparams, vocab):
-    model: torch.nn.Module = get_model(hparams, vocab)
+    from experiments.build_model import get_re2_variant
+    model: torch.nn.Module = get_re2_variant(hparams, vocab)
     dev = torch.device('cpu') if hparams.DEVICE < 0 else torch.device(hparams.DEVICE)
     LSLRGD = LSLRGradientDescentLearningRule
     lslrgd: LSLRGD = LSLRGD(device=dev,
@@ -130,58 +156,6 @@ def get_aux_model(hparams, vocab):
                             use_learnable_learning_rates=True,)
     lslrgd.initialise(dict(model.named_parameters()))
     return torch.nn.ModuleDict({"model": model, "inner_optim": lslrgd})
-
-def get_model(hparams, vocab: NSVocabulary):
-    from models.modules.stacked_encoder import StackedEncoder
-    from models.matching.mha_encoder import MHAEncoder
-    from models.matching.re2 import RE2
-    from models.matching.re2_modules import Re2Block, Re2Prediction, Re2Pooling, Re2Conn
-    from models.matching.re2_modules import Re2Alignment, Re2Fusion
-
-    emb_sz, hid_sz, dropout = hparams.emb_sz, hparams.hidden_size, hparams.dropout
-    embedding_a = torch.nn.Embedding(vocab.get_vocab_size('nl'), emb_sz)
-    embedding_b = torch.nn.Embedding(vocab.get_vocab_size('lf'), emb_sz)
-
-    conn: Re2Conn = Re2Conn(hparams.connection, emb_sz, hid_sz)
-    conn_out_sz = conn.get_output_size()
-
-    # the input to predict is exactly the output of fusion, with the hidden size
-    pred = Re2Prediction(hparams.prediction, inp_sz=hid_sz, hid_sz=hid_sz,
-                         num_classes=hparams.num_classes, dropout=dropout)
-    pooling = Re2Pooling()
-
-    def _encoder(inp_sz):
-        if hasattr(hparams, "encoder") and hparams.encoder == "lstm":
-            from allennlp.modules.seq2seq_encoders import PytorchSeq2SeqWrapper
-            return PytorchSeq2SeqWrapper(torch.nn.LSTM(inp_sz, hid_sz, hparams.num_stacked_encoder,
-                                                       batch_first=True, dropout=dropout, bidirectional=False))
-        elif hasattr(hparams, "encoder") and hparams.encoder == "bilstm":
-            from allennlp.modules.seq2seq_encoders import PytorchSeq2SeqWrapper
-            return PytorchSeq2SeqWrapper(torch.nn.LSTM(inp_sz, hid_sz // 2, hparams.num_stacked_encoder,
-                                                       batch_first=True, dropout=dropout, bidirectional=True))
-        else:
-            return StackedEncoder([
-                MHAEncoder(inp_sz if j == 0 else hid_sz, hid_sz, hparams.num_heads, dropout)
-                for j in range(hparams.num_stacked_encoder)
-            ], inp_sz, hid_sz, dropout, output_every_layer=False)
-
-    enc_inp_sz = lambda i: emb_sz if i == 0 else conn_out_sz
-    blocks = torch.nn.ModuleList([
-        Re2Block(
-            _encoder(enc_inp_sz(i)),
-            _encoder(enc_inp_sz(i)),
-            Re2Fusion(hid_sz + enc_inp_sz(i), hid_sz, hparams.fusion == "full", dropout),
-            Re2Fusion(hid_sz + enc_inp_sz(i), hid_sz, hparams.fusion == "full", dropout),
-            Re2Alignment(hid_sz + enc_inp_sz(i), hid_sz, hparams.alignment),
-            dropout=dropout,
-        )
-        for i in range(hparams.num_stacked_block)
-    ])
-
-    model = RE2(embedding_a, embedding_b, blocks, pooling, pooling, conn, pred,
-                vocab.get_token_index(PADDING_TOKEN, 'nl'),
-                vocab.get_token_index(PADDING_TOKEN, 'lf'))
-    return model
 
 class MetaRankerTrainingUpdater(Updater):
     def __init__(self, models, iterators, optims,
@@ -289,8 +263,13 @@ class MetaRankerTrainingUpdater(Updater):
 
         if isinstance(hparams.retriever_index_path, str):
             retriever = IDCacheRetriever(filename=hparams.retriever_index_path, dataset=bot.train_set)
-        else:
+        elif len(hparams.retriever_index_path) == 2:
+            rpath = hparams.retriever_index_path
+            retriever = SimRetriever(nlfile=rpath[0], lffiles=rpath[1], dataset=bot.train_set)
+        elif len(hparams.retriever_index_path) == 3:
             retriever = HypIDCacheRetriever(filenames=hparams.retriever_index_path, dataset=bot.train_set)
+        else:
+            raise ValueError('failed to init retriever')
 
         from functools import partial
         updater = cls(model, iterator, outer_optim, outer_sche,
@@ -404,6 +383,7 @@ class MetaRankerTestingUpdater(Updater):
 def main():
     import sys
     args = sys.argv[1:]
+    args += ['--seed', '2020']
     if '--dataset' not in sys.argv:
         args += ['--dataset', 'atis_five_hyp']
     if '--translator' not in sys.argv:

@@ -1,12 +1,9 @@
 import sys
 sys.path.insert(0, '..')
-from typing import List, Generator, Tuple, Mapping, Optional
 import logging
 import torch.nn
 import random
-from models.matching.re2 import RE2
 
-from trialbot.data import NSVocabulary
 from trialbot.training import Registry, TrialBot, Events
 from trialbot.training.updater import TrainingUpdater, TestingUpdater
 from trialbot.training.hparamset import HyperParamSet
@@ -34,23 +31,9 @@ def atis_none():
 import datasets.atis_rank
 import datasets.atis_rank_translator
 
-def get_model(hparams, vocab: NSVocabulary):
-    model = RE2.get_model(emb_sz=hparams.emb_sz,
-                          num_tokens_a=vocab.get_vocab_size('nl'),
-                          num_tokens_b=vocab.get_vocab_size('lf'),
-                          hid_sz=hparams.hidden_size,
-                          enc_kernel_sz=hparams.encoder_kernel_size,
-                          num_classes=hparams.num_classes,
-                          num_stacked_blocks=hparams.num_stacked_block,
-                          num_encoder_layers=hparams.num_stacked_encoder,
-                          dropout=hparams.dropout,
-                          fusion_mode=hparams.fusion,
-                          alignment_mode=hparams.alignment,
-                          connection_mode=hparams.connection,
-                          prediction_mode=hparams.prediction,
-                          use_shared_embedding=False,
-                          )
-    return model
+def get_model(hparams, vocab):
+    from experiments.build_model import get_re2_model
+    return get_re2_model(hparams, vocab)
 
 class Re2TrainingUpdater(TrainingUpdater):
     def update_epoch(self):
