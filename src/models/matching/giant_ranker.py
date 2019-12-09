@@ -1,7 +1,7 @@
 import torch
 from torch import nn
 from torch.nn import functional as F
-from utils.nn import seq_cross_ent
+from utils.nn import seq_cross_ent, seq_likelihood
 
 from .re2 import RE2
 from .seq2seq_modeling import Seq2SeqModeling
@@ -30,7 +30,9 @@ class GiantRanker(nn.Module):
         self.a_pad = a_padding
         self.b_pad = b_padding
         self.dim_training_weight = .5
-        self._reinforce_bias = .1
+        self._reinforce_bias = -.1
+
+        self.loss_weighting = nn.Parameter(torch.zeros(5).float(), requires_grad=True)
 
     def forward(self, sent_a: torch.LongTensor, sent_b: torch.LongTensor, label: torch.LongTensor):
         """
@@ -60,27 +62,26 @@ class GiantRanker(nn.Module):
         matching_logits = self.re2.forward_embs(a_emb, b_emb, a_mask, b_mask)
         loss_m = F.cross_entropy(matching_logits, label)
 
-        # ---- language model ----
-        w = torch.pow(-1, label) # adjusting weights according to labels for generation models
-
-        a_inp_emb = self.a_embedding(a_inp)
-        logits_a = self.a_seq.forward_emb(a_inp_emb, a_inp_mask)
-        loss_a = w * seq_cross_ent(logits_a, a_tgt, a_tgt_mask, average=None)
-
-        b_inp_emb = self.b_embedding(b_inp)
-        logits_b = self.b_seq.forward_emb(b_inp_emb, b_inp_mask)
-        loss_b = w * seq_cross_ent(logits_b, b_tgt, b_tgt_mask, average=None)
-
         # ---- generation ----
         # a2b
+        b_inp_emb = self.b_embedding(b_inp)
         logits_a2b = self.a2b.forward_emb(a_emb, b_inp_emb, a_mask, b_inp_mask)
-        loss_a2b = w * seq_cross_ent(logits_a2b, b_tgt, b_tgt_mask, average=None)
+        loss_a2b = F.mse_loss(seq_likelihood(logits_a2b, b_tgt, b_tgt_mask), label.float())
 
         # b2a
+        a_inp_emb = self.a_embedding(a_inp)
         logits_b2a = self.b2a.forward_emb(b_emb, a_inp_emb, b_mask, a_inp_mask)
-        loss_b2a = w * seq_cross_ent(logits_b2a, a_tgt, a_tgt_mask, average=None)
+        loss_b2a = F.mse_loss(seq_likelihood(logits_b2a, a_tgt, a_tgt_mask), label.float())
 
-        loss_normal = loss_m + loss_a + loss_b + loss_b2a + loss_a2b
+        # ---- language model ----
+        logits_a = self.a_seq.forward_emb(a_inp_emb, a_inp_mask)
+        loss_a = seq_cross_ent(logits_a, a_tgt, a_tgt_mask, average=None)
+
+        logits_b = self.b_seq.forward_emb(b_inp_emb, b_inp_mask)
+        loss_b = seq_cross_ent(logits_b, b_tgt, b_tgt_mask, average=None)
+
+        loss_normal = loss_m + loss_a.mean() + loss_b.mean() + loss_b2a.mean() + loss_a2b.mean()
+        # return loss_normal
 
         # ---- dual model -----
         logprob_b2a = torch.log_softmax(logits_b2a, dim=-1)
@@ -119,9 +120,9 @@ class GiantRanker(nn.Module):
         loss_dim_a = neg_a_reward * best_pred_a_logprob.sum(dim=-1)
         loss_dim_b = neg_b_reward * best_pred_b_logprob.sum(dim=-1)
 
-        loss_dim = loss_dim_a + loss_dim_b  # without using an EM-analogous opt.
+        loss_dim = - loss_dim_a - loss_dim_b  # without using an EM-analogous opt.
 
-        return loss_normal.mean() + 0.5 * loss_dim.mean()
+        return loss_normal - 0.5 * loss_dim.mean()
 
     def inference(self, sent_a, sent_b):
         self.re2: RE2
@@ -143,28 +144,34 @@ class GiantRanker(nn.Module):
         a_emb, b_emb = list(map(self.a_embedding, (sent_a, sent_b)))
         # matching logits: (batch, 2)
         matching_logits = self.re2.forward_embs(a_emb, b_emb, a_mask, b_mask)
-
-        ranking_m = torch.log_softmax(matching_logits, dim=-1)[:, 1]
+        ranking_m = torch.softmax(matching_logits, dim=-1)[:, 1]
 
         # ---- language model ----
 
         a_inp_emb = self.a_embedding(a_inp)
-        logits_a = self.a_seq.forward_emb(a_inp_emb, a_inp_mask)
-        loss_a = seq_cross_ent(logits_a, a_tgt, a_tgt_mask, average=None)
+        # logits_a = self.a_seq.forward_emb(a_inp_emb, a_inp_mask)
+        # ranking_a = seq_likelihood(logits_a, a_tgt, a_tgt_mask)
 
         b_inp_emb = self.b_embedding(b_inp)
-        logits_b = self.b_seq.forward_emb(b_inp_emb, b_inp_mask)
-        loss_b = seq_cross_ent(logits_b, b_tgt, b_tgt_mask, average=None)
+        # logits_b = self.b_seq.forward_emb(b_inp_emb, b_inp_mask)
+        # ranking_b = seq_likelihood(logits_b, b_tgt, b_tgt_mask)
 
         # ---- generation ----
         # a2b
         logits_a2b = self.a2b.forward_emb(a_emb, b_inp_emb, a_mask, b_inp_mask)
-        loss_a2b = seq_cross_ent(logits_a2b, b_tgt, b_tgt_mask, average=None)
+        ranking_a2b = seq_likelihood(logits_a2b, b_tgt, b_tgt_mask)
 
         # b2a
         logits_b2a = self.b2a.forward_emb(b_emb, a_inp_emb, b_mask, a_inp_mask)
-        loss_b2a = seq_cross_ent(logits_b2a, a_tgt, a_tgt_mask, average=None)
+        ranking_b2a = seq_likelihood(logits_b2a, a_tgt, a_tgt_mask)
 
-        return ranking_m, loss_a, loss_b, loss_a2b, loss_b2a
+        # return ranking_m, ranking_a, ranking_b, ranking_a2b, ranking_b2a
+        return ranking_m, ranking_a2b, ranking_b2a
+
+    def forward_loss_weight(self, *args):
+        x = torch.stack(args, dim=1)
+        prob = torch.softmax(self.loss_weighting[:3], dim=0)
+        score = torch.matmul(x, prob)
+        return score.log()
 
 

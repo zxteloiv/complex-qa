@@ -91,6 +91,7 @@ class Re2TestingUpdater(TestingUpdater):
 def main():
     import sys
     args = sys.argv[1:]
+    args += ['--seed', '2020']
     if '--dataset' not in sys.argv:
         args += ['--dataset', 'atis_none_hyp']
     if '--translator' not in sys.argv:

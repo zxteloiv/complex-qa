@@ -161,6 +161,11 @@ class Re2Alignment(nn.Module):
         if mode == "linear":
             self.a_linear = Re2Dense(inp_sz, hid_sz, activation=nn.ReLU())
             self.b_linear = Re2Dense(inp_sz, hid_sz, activation=nn.ReLU())
+        elif mode == "bilinear":
+            from allennlp.modules.matrix_attention import BilinearMatrixAttention
+            self.a_linear = Re2Dense(inp_sz, hid_sz, activation=nn.ReLU())
+            self.b_linear = Re2Dense(inp_sz, hid_sz, activation=nn.ReLU())
+            self.bilinear = BilinearMatrixAttention(inp_sz, inp_sz, activation=nn.ReLU(), use_input_biases=True)
 
     def forward(self, a: torch.Tensor, b: torch.Tensor,
                 mask_a: torch.LongTensor, mask_b: torch.LongTensor
@@ -175,6 +180,8 @@ class Re2Alignment(nn.Module):
         # attn_strength: (batch, len_a, len_b)
         if self.mode == "linear":
             attn_strength = self._linear_attn(a, b)
+        elif self.mode == "bilinear":
+            attn_strength = self._bilinear_attn(a, b)
         else:
             attn_strength = self._identity_attn(a, b)
 
@@ -196,6 +203,10 @@ class Re2Alignment(nn.Module):
         b = self.b_linear(b)
         return self._identity_attn(a, b)
 
+    def _bilinear_attn(self, a, b):
+        a = self.a_linear(a)
+        b = self.b_linear(b)
+        return self.bilinear(a, b) * self.tau
 
 class Re2Pooling(nn.Module):
     def __init__(self):

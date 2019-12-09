@@ -51,14 +51,15 @@ class AtisRankTranslator(Translator):
         try:
             tgt = self.split_lf_seq(tgt)[:self.max_len]
             hyp = self.split_lf_seq(hyp)[:self.max_len]
+
+            if self.add_special_token:
+                src = self._add_tokens(src)
+                tgt = self._add_tokens(tgt)
+                hyp = self._add_tokens(hyp)
+
         except:
             self.logger.warning("Ignored invalid hypothesis %d-%d." % (eid, hyp_rank))
             tgt = hyp = None
-
-        if self.add_special_token:
-            src = self._add_tokens(src)
-            tgt = self._add_tokens(tgt)
-            hyp = self._add_tokens(hyp)
 
         ns_nl, ns_lf = self.namespace
         src_toks = torch.tensor([self.vocab.get_token_index(tok, ns_nl) for tok in src])

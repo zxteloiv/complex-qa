@@ -10,6 +10,7 @@ from trialbot.data import NSVocabulary, PADDING_TOKEN
 from trialbot.training import Registry, TrialBot, Events
 from trialbot.training.updater import TrainingUpdater, TestingUpdater
 from trialbot.training.hparamset import HyperParamSet
+from trialbot.data import Iterator, RandomIterator
 from trialbot.utils.move_to_device import move_to_device
 
 from utils.root_finder import find_root
@@ -21,17 +22,39 @@ def atis_five_giant():
     p.encoder_kernel_size = 3
     p.num_classes = 2     # either 0 (true) or 1 (false), only 2 classes
     p.fusion = "full"         # simple, full
-    p.alignment = "linear"    # identity, linear
+    p.alignment = "linear"    # identity, linear, bilinear
     p.connection = "aug"      # none, residual, aug
     p.prediction = "full"     # simple, full, symmetric
-    p.encoder = "lstm"
-    p.emb_sz = 200
-    p.hidden_size = 100
+    p.encoder = "bilstm"
+    p.emb_sz = 256
+    p.hidden_size = 128
     p.num_stacked_block = 2
     p.num_stacked_encoder = 2
     p.dropout = .2
     p.TRAINING_LIMIT = 50
+    p.batch_sz = 128
+    p.use_giant = True
+    return p
+
+@Registry.hparamset()
+def atis_giant_finetune():
+    p = atis_five_giant()
     p.batch_sz = 32
+    return p
+
+@Registry.hparamset()
+def atis_giant_v2():
+    p = atis_five_giant()
+    p.alignment = "bilinear"    # identity, linear, bilinear
+    p.prediction = "full"     # simple, full, symmetric
+    p.encoder = "bilstm"
+    p.emb_sz = 256
+    p.hidden_size = 128
+    p.num_stacked_block = 2
+    p.num_stacked_encoder = 2
+    p.dropout = .2
+    p.TRAINING_LIMIT = 50
+    p.batch_sz = 64
     p.use_giant = True
     return p
 
@@ -54,6 +77,43 @@ def get_model(hparams, vocab):
         return get_re2_variant(hparams, vocab)
     else:
         return get_re2_model(hparams, vocab)
+
+class DevTuningUpdater(TrainingUpdater):
+    def update_epoch(self):
+        model, optim, iterator = self._models[0], self._optims[0], self._iterators[0]
+        device = self._device
+        batch = next(iterator)
+        # eid, hyp_rank, sent_a, sent_b = list(map(batch.get, ("ex_id", "hyp_rank", "source_tokens", "hyp_tokens")))
+        sent_a, sent_b, label = list(map(batch.get, ("source_tokens", "hyp_tokens", "hyp_label")))
+        if iterator.is_new_epoch:
+            self.stop_epoch()
+
+        if device >= 0:
+            sent_a = move_to_device(sent_a, device)
+            sent_b = move_to_device(sent_b, device)
+            label = move_to_device(label, device)
+
+        model.train()
+        scores = model.inference(sent_a, sent_b)
+        optim.zero_grad()
+        final_score = model.forward_loss_weight(*scores)
+        loss = torch.nn.functional.smooth_l1_loss(final_score, label.float())
+        loss.backward()
+        optim.step()
+        return {"loss": loss}
+
+    @classmethod
+    def from_bot(cls, bot: TrialBot):
+        from models.matching.giant_ranker import GiantRanker
+        model: GiantRanker = bot.model
+        # donot forget to comment out the parameter in model file when using this
+        # model.loss_weighting = torch.nn.Parameter(torch.zeros(5).float(), requires_grad=True)
+        # if bot.args.device >= 0:
+        #     model = model.cuda(bot.args.device)
+        optim = torch.optim.AdamW([model.loss_weighting])
+        iterator = RandomIterator(bot.dev_set, bot.hparams.batch_sz, bot.translator, shuffle=True, repeat=True)
+        obj = cls(model, iterator, optim, bot.args.device)
+        return obj
 
 class GiantTrainingUpdater(TrainingUpdater):
     def update_epoch(self):
@@ -111,18 +171,20 @@ class GiantTestingUpdater(TestingUpdater):
             sent_b = move_to_device(sent_b, device)
 
         scores = model.inference(sent_a, sent_b)
-        correct_score = sum(scores) / len(scores)
+        correct_score = model.forward_loss_weight(*scores)
         return {"ranking_score": correct_score, "ex_id": eid, "hyp_rank": hyp_rank}
 
 def main():
     import sys
     args = sys.argv[1:]
+    args += ['--seed', '2020']
     if '--dataset' not in sys.argv:
         args += ['--dataset', 'atis_five_hyp']
     if '--translator' not in sys.argv:
         args += ['--translator', 'atis_rank']
 
     parser = TrialBot.get_default_parser()
+    parser.add_argument('--fine-tune', action="store_true")
     args = parser.parse_args(args)
     if args.debug:
         logging.getLogger().setLevel(logging.DEBUG)
@@ -176,7 +238,10 @@ def main():
 
 
         bot.add_event_handler(Events.EPOCH_COMPLETED, every_epoch_model_saver, 100)
-        bot.updater = GiantTrainingUpdater.from_bot(bot)
+        if args.fine_tune:
+            bot.updater = DevTuningUpdater.from_bot(bot)
+        else:
+            bot.updater = GiantTrainingUpdater.from_bot(bot)
     bot.run()
 
 if __name__ == '__main__':

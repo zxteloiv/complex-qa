@@ -164,6 +164,32 @@ def prepare_input_mask(tokens, padding_val: int = 0):
         token_ids, mask = None, None
     return token_ids, mask
 
+def seq_likelihood(logits: torch.FloatTensor,
+                   targets: torch.LongTensor,
+                   weights: torch.FloatTensor,
+                   ):
+    # shape : (batch * sequence_length, num_classes)
+    logits_flat = logits.view(-1, logits.size(-1))
+    # shape : (batch * sequence_length, num_classes)
+    probs_flat = torch.nn.functional.softmax(logits_flat, dim=-1)
+    # shape : (batch * max_len, 1)
+    targets_flat = targets.view(-1, 1).long()
+
+    # Contribution to the negative log likelihood only comes from the exact indices
+    # of the targets, as the target distributions are one-hot. Here we use torch.gather
+    # to extract the indices of the num_classes dimension which contribute to the loss.
+    # shape : (batch * sequence_length, 1)
+    likelihood_flat = torch.gather(probs_flat, dim=1, index=targets_flat)
+    # shape : (batch, sequence_length)
+    likelihood = likelihood_flat.view(*targets.size())
+    # shape : (batch, sequence_length)
+    likelihood = likelihood * weights.float()
+
+    # shape : (batch_size,)
+    per_batch_loss = likelihood.sum(1) / (weights.sum(1).float() + 1e-13)
+    return per_batch_loss
+
+
 def seq_cross_ent(logits: torch.FloatTensor,
                   targets: torch.LongTensor,
                   weights: torch.FloatTensor,
