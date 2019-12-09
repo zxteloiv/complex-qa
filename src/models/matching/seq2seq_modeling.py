@@ -41,7 +41,7 @@ class Seq2SeqModeling(nn.Module):
         # a_hid: (batch, a_len, a_hid)
         a_hid = self.encoder(a, mask_a)
         try:
-            final_states = self._encoder._states
+            final_states = self.encoder._states
         except AttributeError:
             import sys
             raise Exception("The wrapper must be stateful to get final states")

@@ -112,7 +112,7 @@ def get_giant_model(hparams, vocab: NSVocabulary):
                         encoder=RNNWrapper(nn.LSTM(emb_sz, hid_sz, num_layers=2, batch_first=True,
                                                    dropout=dropout)),
                         padding=re2.padding_val_a,
-                        prediction=nn.Linear(hid_sz, vocab.get_vocab_size('nl')),
+                        prediction=nn.Linear(hid_sz * 2, vocab.get_vocab_size('nl')),
                         attention=BilinearMatrixAttention(hid_sz, hid_sz),
                         )
 
@@ -120,7 +120,7 @@ def get_giant_model(hparams, vocab: NSVocabulary):
                         encoder=RNNWrapper(nn.LSTM(emb_sz, hid_sz, num_layers=2, batch_first=True,
                                                    dropout=dropout)),
                         padding=re2.padding_val_b,
-                        prediction=nn.Linear(hid_sz, vocab.get_vocab_size('lf')),
+                        prediction=nn.Linear(hid_sz * 2, vocab.get_vocab_size('lf')),
                         attention=BilinearMatrixAttention(hid_sz, hid_sz),
                         )
 

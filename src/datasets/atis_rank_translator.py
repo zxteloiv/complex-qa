@@ -8,17 +8,24 @@ import logging
 
 @Registry.translator('atis_rank')
 class AtisRankTranslator(Translator):
-    def __init__(self, max_len: int = 50):
+    def __init__(self, max_len: int = 60):
         super().__init__()
         self.max_len = max_len
         self.namespace = ("nl", "lf")   # natural language, and logical form
         self.logger = logging.getLogger('translator')
+        self.add_special_token = False
+
+    def turn_special_token(self, on=True):
+        self.add_special_token = on
 
     def split_nl_sent(self, sent: str):
         return sent.strip().split(" ")
 
     def split_lf_seq(self, seq: str):
         return seq.strip().split(" ")
+
+    def _add_tokens(self, seq: List):
+        return [START_SYMBOL] + seq + [END_SYMBOL]
 
     def generate_namespace_tokens(self, example) -> Generator[Tuple[str, str], None, None]:
         src, tgt = list(map(example.get, ("src", "tgt")))
@@ -47,6 +54,11 @@ class AtisRankTranslator(Translator):
         except:
             self.logger.warning("Ignored invalid hypothesis %d-%d." % (eid, hyp_rank))
             tgt = hyp = None
+
+        if self.add_special_token:
+            src = self._add_tokens(src)
+            tgt = self._add_tokens(tgt)
+            hyp = self._add_tokens(hyp)
 
         ns_nl, ns_lf = self.namespace
         src_toks = torch.tensor([self.vocab.get_token_index(tok, ns_nl) for tok in src])
