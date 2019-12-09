@@ -16,7 +16,7 @@ from utils.root_finder import find_root
 _ROOT = find_root()
 
 @Registry.hparamset()
-def atis_five():
+def atis_five_lstm():
     hparams = HyperParamSet.common_settings(_ROOT)
     hparams.emb_sz = 300
     hparams.hidden_size = 150
@@ -29,30 +29,7 @@ def atis_five():
     hparams.alignment = "linear"    # identity, linear
     hparams.connection = "aug"      # none, residual, aug
     hparams.prediction = "full"     # simple, full, symmetric
-    return hparams
-
-@Registry.hparamset()
-def atis_five_big():
-    hparams = atis_five()
-    hparams.num_stacked_block = 5
-    return hparams
-
-@Registry.hparamset()
-def atis_five_bigger():
-    hparams = atis_five()
-    hparams.num_stacked_block = 7
-    return hparams
-
-@Registry.hparamset()
-def atis_five_lstm():
-    hparams = atis_five()
     hparams.encoder = "lstm"
-    return hparams
-
-@Registry.hparamset()
-def atis_five_lstm_big():
-    hparams = atis_five_lstm()
-    hparams.num_stacked_block = 5
     return hparams
 
 @Registry.hparamset()

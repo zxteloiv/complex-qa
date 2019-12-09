@@ -22,9 +22,6 @@ def get_re2_model(hparams, vocab: NSVocabulary):
     return model
 
 def get_re2_variant(hparams, vocab: NSVocabulary):
-    # RE2 requires an encoder which
-    # maps (sent in (batch, N, inp_sz), and mask in (batch, N))
-    # to (sent_prime in (batch, N, hidden)
     from models.modules.stacked_encoder import StackedEncoder
     from models.matching.mha_encoder import MHAEncoder
     from models.matching.re2 import RE2
@@ -48,6 +45,10 @@ def get_re2_variant(hparams, vocab: NSVocabulary):
             from allennlp.modules.seq2seq_encoders import PytorchSeq2SeqWrapper
             return PytorchSeq2SeqWrapper(torch.nn.LSTM(inp_sz, hid_sz, hparams.num_stacked_encoder,
                                                        batch_first=True, dropout=dropout, bidirectional=False))
+        elif hasattr(hparams, "encoder") and hparams.encoder == "bilstm":
+            from allennlp.modules.seq2seq_encoders import PytorchSeq2SeqWrapper
+            return PytorchSeq2SeqWrapper(torch.nn.LSTM(inp_sz, hid_sz // 2, hparams.num_stacked_encoder,
+                                                       batch_first=True, dropout=dropout, bidirectional=True))
         else:
             return StackedEncoder([
                 MHAEncoder(inp_sz if j == 0 else hid_sz, hid_sz, hparams.num_heads, dropout)
