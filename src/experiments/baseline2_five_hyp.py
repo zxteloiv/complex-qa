@@ -33,6 +33,22 @@ def atis_five_lstm():
     return hparams
 
 @Registry.hparamset()
+def atis_ten_neo():
+    p = atis_five_lstm()
+    p.alignment = "bilinear"    # identity, linear, bilinear
+    p.prediction = "full"     # simple, full, symmetric
+    p.encoder = "bilstm"
+    p.fusion = "neo"    # neo rather than vanilla
+    p.emb_sz = 256
+    p.hidden_size = 128
+    p.num_stacked_block = 2
+    p.num_stacked_encoder = 2
+    p.dropout = .2
+    p.TRAINING_LIMIT = 100
+    p.batch_sz = 64
+    return p
+
+@Registry.hparamset()
 def django_fifteen():
     hparams = atis_five_lstm()
     hparams.TRAINING_LIMIT = 150
@@ -44,18 +60,14 @@ def django_thirty():
     hparams.TRAINING_LIMIT = 100
     return hparams
 
-
 import datasets.atis_rank
 import datasets.atis_rank_translator
 import datasets.django_rank
 import datasets.django_rank_translator
 
 def get_model(hparams, vocab: NSVocabulary):
-    from experiments.build_model import get_re2_model, get_re2_variant
-    if hasattr(hparams, "encoder") and hparams.encoder == "lstm":
-        return get_re2_variant(hparams, vocab)
-    else:
-        return get_re2_model(hparams, vocab)
+    from experiments.build_model import get_re2_variant
+    return get_re2_variant(hparams, vocab)
 
 class Re2TrainingUpdater(TrainingUpdater):
     def update_epoch(self):
@@ -161,30 +173,13 @@ def main():
 
         bot.updater = Re2TestingUpdater.from_bot(bot)
     else:
+        # --------------------- Training -------------------------------
         from trialbot.training.extensions import every_epoch_model_saver
+        from utils.trial_bot_extensions import debug_models, end_with_nan_loss
 
-        @bot.attach_extension(Events.ITERATION_COMPLETED)
-        def end_with_nan_loss(bot: TrialBot):
-            output = bot.state.output
-            if output is None:
-                return
-            loss = output["loss"]
-            def _isnan(x):
-                if isinstance(x, torch.Tensor):
-                    return bool(torch.isnan(x).any())
-                elif isinstance(x, np.ndarray):
-                    return bool(np.isnan(x).any())
-                else:
-                    import math
-                    return math.isnan(x)
-
-            if _isnan(loss):
-                bot.logger.error("NaN loss encountered, training ended")
-                bot.state.epoch = bot.hparams.TRAINING_LIMIT + 1
-                bot.updater.stop_epoch()
-
-
+        bot.add_event_handler(Events.ITERATION_COMPLETED, end_with_nan_loss, 100)
         bot.add_event_handler(Events.EPOCH_COMPLETED, every_epoch_model_saver, 100)
+        bot.add_event_handler(Events.STARTED, debug_models, 100)
         bot.updater = Re2TrainingUpdater.from_bot(bot)
     bot.run()
 

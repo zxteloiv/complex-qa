@@ -2,7 +2,7 @@
 from trialbot.utils.file_reader import open_json
 from collections import defaultdict
 
-def evaluate(test_file, ranking_file):
+def _aggregate_data(test_file, ranking_file, max_rank_filter):
     test_data = list(open_json(test_file))
     rank_data = list(open_json(ranking_file))
 
@@ -20,10 +20,15 @@ def evaluate(test_file, ranking_file):
 
     data = defaultdict(list)
     for example in test_data:
+        if example['hyp_rank'] >= max_rank_filter:
+            continue
+
         k = f"{example['ex_id']}-{example['hyp_rank']}"
         example['ranking_score'] = score_kv[k]
         data[example['ex_id']].append(example)
+    return data
 
+def _print_stat(data):
     stat = defaultdict(lambda : 0)
     for i, xs in data.items():
         if len(xs) == 0:
@@ -43,6 +48,31 @@ def evaluate(test_file, ranking_file):
           ("(%.4f%%)" % (stat["ranked_top_1"] / stat["example_count"]))
           if stat["example_count"] > 0 else "(n/a percentage)")
 
+def evaluate(test_file, ranking_file, max_rank_filter):
+    data = _aggregate_data(test_file, ranking_file, max_rank_filter)
+    _print_stat(data)
+
+def dump_rerank(test_file, ranking_file, max_rank_filter):
+    import json
+    data = _aggregate_data(test_file, ranking_file, max_rank_filter)
+    for k in sorted(data.keys()):
+        xs = data[k]
+        if len(xs) == 0:
+            continue
+        xs = sorted(xs, key=lambda x: x['ranking_score'], reverse=True)
+        for rerank, x in enumerate(xs):
+            x['rerank'] = rerank
+            print(json.dumps(x))
+
 if __name__ == '__main__':
-    import sys
-    evaluate(sys.argv[1], sys.argv[2])
+    import sys, argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('files', nargs=2, metavar=['TEST_FILE', 'SCORE_FILE'])
+    parser.add_argument('--max-hyp-rank', default=30, type=int)
+    parser.add_argument('--dump-rank', action="store_true")
+    args = parser.parse_args()
+    if args.dump_rank:
+        dump_rerank(*args.files, args.max_hyp_rank)
+
+    else:
+        evaluate(*args.files, args.max_hyp_rank)

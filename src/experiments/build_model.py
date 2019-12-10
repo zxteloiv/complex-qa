@@ -26,7 +26,7 @@ def get_re2_variant(hparams, vocab: NSVocabulary):
     from models.matching.mha_encoder import MHAEncoder
     from models.matching.re2 import RE2
     from models.matching.re2_modules import Re2Block, Re2Prediction, Re2Pooling, Re2Conn
-    from models.matching.re2_modules import Re2Alignment, Re2Fusion
+    from models.matching.re2_modules import Re2Alignment, Re2Fusion, NeoFusion
 
     emb_sz, hid_sz, dropout = hparams.emb_sz, hparams.hidden_size, hparams.dropout
     embedding_a = torch.nn.Embedding(vocab.get_vocab_size('nl'), emb_sz)
@@ -37,7 +37,7 @@ def get_re2_variant(hparams, vocab: NSVocabulary):
 
     # the input to predict is exactly the output of fusion, with the hidden size
     pred = Re2Prediction(hparams.prediction, inp_sz=hid_sz, hid_sz=hid_sz,
-                         num_classes=hparams.num_classes, dropout=dropout)
+                         num_classes=hparams.num_classes, dropout=dropout, activation=nn.SELU())
     pooling = Re2Pooling()
 
     def _encoder(inp_sz):
@@ -55,14 +55,16 @@ def get_re2_variant(hparams, vocab: NSVocabulary):
                 for j in range(hparams.num_stacked_encoder)
             ], inp_sz, hid_sz, dropout, output_every_layer=False)
 
+    fusion_cls = NeoFusion if hasattr(hparams, "fusion") and hparams.fusion == "neo" else Re2Fusion
+
     enc_inp_sz = lambda i: emb_sz if i == 0 else conn_out_sz
     blocks = torch.nn.ModuleList([
         Re2Block(
             _encoder(enc_inp_sz(i)),
             _encoder(enc_inp_sz(i)),
-            Re2Fusion(hid_sz + enc_inp_sz(i), hid_sz, hparams.fusion == "full", dropout),
-            Re2Fusion(hid_sz + enc_inp_sz(i), hid_sz, hparams.fusion == "full", dropout),
-            Re2Alignment(hid_sz + enc_inp_sz(i), hid_sz, hparams.alignment),
+            fusion_cls(hid_sz + enc_inp_sz(i), hid_sz, hparams.fusion == "full", dropout),
+            fusion_cls(hid_sz + enc_inp_sz(i), hid_sz, hparams.fusion == "full", dropout),
+            Re2Alignment(hid_sz + enc_inp_sz(i), hid_sz, hparams.alignment, nn.SELU()),
             dropout=dropout,
         )
         for i in range(hparams.num_stacked_block)

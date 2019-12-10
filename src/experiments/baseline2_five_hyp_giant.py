@@ -33,7 +33,6 @@ def atis_five_giant():
     p.dropout = .2
     p.TRAINING_LIMIT = 50
     p.batch_sz = 128
-    p.use_giant = True
     return p
 
 @Registry.hparamset()
@@ -55,7 +54,27 @@ def atis_giant_v2():
     p.dropout = .2
     p.TRAINING_LIMIT = 50
     p.batch_sz = 64
-    p.use_giant = True
+    return p
+
+@Registry.hparamset()
+def atis_giant_v3():
+    p = atis_five_giant()
+    p.alignment = "bilinear"    # identity, linear, bilinear
+    p.prediction = "full"     # simple, full, symmetric
+    p.encoder = "bilstm"
+    p.emb_sz = 300
+    p.hidden_size = 150
+    p.num_stacked_block = 1
+    p.num_stacked_encoder = 2
+    p.dropout = .2
+    p.TRAINING_LIMIT = 50
+    p.batch_sz = 64
+    return p
+
+@Registry.hparamset()
+def atis_giant_v4():
+    p = atis_giant_v3()
+    p.num_stacked_encoder = 1
     return p
 
 @Registry.hparamset()
@@ -70,13 +89,8 @@ import datasets.django_rank
 import datasets.django_rank_translator
 
 def get_model(hparams, vocab):
-    from experiments.build_model import get_re2_model, get_re2_variant, get_giant_model
-    if hasattr(hparams, "use_giant") and hparams.use_giant == True:
-        return get_giant_model(hparams, vocab)
-    elif hasattr(hparams, "encoder") and hparams.encoder == "lstm":
-        return get_re2_variant(hparams, vocab)
-    else:
-        return get_re2_model(hparams, vocab)
+    from experiments.build_model import get_giant_model
+    return get_giant_model(hparams, vocab)
 
 class DevTuningUpdater(TrainingUpdater):
     def update_epoch(self):
@@ -106,10 +120,6 @@ class DevTuningUpdater(TrainingUpdater):
     def from_bot(cls, bot: TrialBot):
         from models.matching.giant_ranker import GiantRanker
         model: GiantRanker = bot.model
-        # donot forget to comment out the parameter in model file when using this
-        # model.loss_weighting = torch.nn.Parameter(torch.zeros(5).float(), requires_grad=True)
-        # if bot.args.device >= 0:
-        #     model = model.cuda(bot.args.device)
         optim = torch.optim.AdamW([model.loss_weighting])
         iterator = RandomIterator(bot.dev_set, bot.hparams.batch_sz, bot.translator, shuffle=True, repeat=True)
         obj = cls(model, iterator, optim, bot.args.device)
@@ -215,29 +225,12 @@ def main():
         bot.updater = GiantTestingUpdater.from_bot(bot)
     else:
         from trialbot.training.extensions import every_epoch_model_saver
+        from trialbot.training.extensions import every_epoch_model_saver
+        from utils.trial_bot_extensions import debug_models, end_with_nan_loss
 
-        @bot.attach_extension(Events.ITERATION_COMPLETED)
-        def end_with_nan_loss(bot: TrialBot):
-            output = bot.state.output
-            if output is None:
-                return
-            loss = output["loss"]
-            def _isnan(x):
-                if isinstance(x, torch.Tensor):
-                    return bool(torch.isnan(x).any())
-                elif isinstance(x, np.ndarray):
-                    return bool(np.isnan(x).any())
-                else:
-                    import math
-                    return math.isnan(x)
-
-            if _isnan(loss):
-                bot.logger.error("NaN loss encountered, training ended")
-                bot.state.epoch = bot.hparams.TRAINING_LIMIT + 1
-                bot.updater.stop_epoch()
-
-
+        bot.add_event_handler(Events.ITERATION_COMPLETED, end_with_nan_loss, 100)
         bot.add_event_handler(Events.EPOCH_COMPLETED, every_epoch_model_saver, 100)
+        bot.add_event_handler(Events.STARTED, debug_models, 100)
         if args.fine_tune:
             bot.updater = DevTuningUpdater.from_bot(bot)
         else:
