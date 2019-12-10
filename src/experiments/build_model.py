@@ -85,13 +85,13 @@ def get_giant_model(hparams, vocab: NSVocabulary):
     re2: RE2 = get_re2_variant(hparams, vocab)
     emb_sz, hid_sz, dropout = hparams.emb_sz, hparams.hidden_size, hparams.dropout
     RNNWrapper = PytorchSeq2SeqWrapper
+    get_rnn = lambda stateful: RNNWrapper(nn.LSTM(emb_sz, hid_sz, num_layers=hparams.num_stacked_encoder,
+                                                  batch_first=True, dropout=hparams.dropout), stateful=stateful)
 
     a2b = Seq2SeqModeling(a_embedding=re2.a_emb,
                           b_embedding=re2.b_emb,
-                          encoder=RNNWrapper(nn.LSTM(emb_sz, hid_sz, num_layers=2, batch_first=True,
-                                                     dropout=dropout), stateful=True),
-                          decoder=RNNWrapper(nn.LSTM(emb_sz, hid_sz, num_layers=2, batch_first=True,
-                                                     dropout=dropout)),
+                          encoder=get_rnn(stateful=True),
+                          decoder=get_rnn(stateful=False),
                           a_padding=re2.padding_val_a,
                           b_padding=re2.padding_val_b,
                           prediction=nn.Linear(hid_sz * 2, vocab.get_vocab_size('lf')),
@@ -100,10 +100,8 @@ def get_giant_model(hparams, vocab: NSVocabulary):
 
     b2a = Seq2SeqModeling(a_embedding=re2.b_emb,
                           b_embedding=re2.a_emb,
-                          encoder=RNNWrapper(nn.LSTM(emb_sz, hid_sz, num_layers=2, batch_first=True,
-                                                     dropout=dropout), stateful=True),
-                          decoder=RNNWrapper(nn.LSTM(emb_sz, hid_sz, num_layers=2, batch_first=True,
-                                                     dropout=dropout)),
+                          encoder=get_rnn(stateful=True),
+                          decoder=get_rnn(stateful=False),
                           a_padding=re2.padding_val_b,
                           b_padding=re2.padding_val_a,
                           prediction=nn.Linear(hid_sz * 2, vocab.get_vocab_size('nl')),
@@ -111,16 +109,14 @@ def get_giant_model(hparams, vocab: NSVocabulary):
                           )
 
     a_seq = SeqModeling(embedding=re2.a_emb,
-                        encoder=RNNWrapper(nn.LSTM(emb_sz, hid_sz, num_layers=2, batch_first=True,
-                                                   dropout=dropout)),
+                        encoder=get_rnn(stateful=False),
                         padding=re2.padding_val_a,
                         prediction=nn.Linear(hid_sz * 2, vocab.get_vocab_size('nl')),
                         attention=BilinearMatrixAttention(hid_sz, hid_sz),
                         )
 
     b_seq = SeqModeling(embedding=re2.b_emb,
-                        encoder=RNNWrapper(nn.LSTM(emb_sz, hid_sz, num_layers=2, batch_first=True,
-                                                   dropout=dropout)),
+                        encoder=get_rnn(stateful=False),
                         padding=re2.padding_val_b,
                         prediction=nn.Linear(hid_sz * 2, vocab.get_vocab_size('lf')),
                         attention=BilinearMatrixAttention(hid_sz, hid_sz),

@@ -1,5 +1,6 @@
 import torch
 from torch import nn
+from .dense import Re2Dense
 
 class Re2Prediction(nn.Module):
     def __init__(self, mode: str, inp_sz: int, hid_sz: int, num_classes: int, dropout: float = .2, activation=nn.ReLU()):

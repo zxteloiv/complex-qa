@@ -56,32 +56,54 @@ def atis_giant_v2():
     p.batch_sz = 64
     return p
 
+# @Registry.hparamset()
+# def atis_giant_v3():
+#     p = atis_five_giant()
+#     p.alignment = "bilinear"    # identity, linear, bilinear
+#     p.prediction = "full"     # simple, full, symmetric
+#     p.encoder = "bilstm"
+#     p.emb_sz = 300
+#     p.hidden_size = 150
+#     p.num_stacked_block = 1
+#     p.num_stacked_encoder = 2
+#     p.dropout = .2
+#     p.TRAINING_LIMIT = 50
+#     p.batch_sz = 64
+#     return p
+#
+# @Registry.hparamset()
+# def atis_giant_v4():
+#     p = atis_giant_v3()
+#     p.num_stacked_encoder = 1
+#     return p
+
 @Registry.hparamset()
-def atis_giant_v3():
-    p = atis_five_giant()
+def atis_neo_giant():
+    p = atis_giant_v2()
     p.alignment = "bilinear"    # identity, linear, bilinear
     p.prediction = "full"     # simple, full, symmetric
     p.encoder = "bilstm"
-    p.emb_sz = 300
-    p.hidden_size = 150
-    p.num_stacked_block = 1
+    p.fusion = "neo"
+    p.emb_sz = 256
+    p.hidden_size = 128
+    p.num_stacked_block = 2
     p.num_stacked_encoder = 2
     p.dropout = .2
-    p.TRAINING_LIMIT = 50
+    p.TRAINING_LIMIT = 200
     p.batch_sz = 64
     return p
 
-@Registry.hparamset()
-def atis_giant_v4():
-    p = atis_giant_v3()
-    p.num_stacked_encoder = 1
-    return p
+# @Registry.hparamset()
+# def django_fifteen_giant():
+#     hparams = atis_five_giant()
+#     hparams.TRAINING_LIMIT = 20
+#     return hparams
 
 @Registry.hparamset()
-def django_fifteen_giant():
-    hparams = atis_five_giant()
-    hparams.TRAINING_LIMIT = 20
-    return hparams
+def django_neo_giant():
+    p = atis_neo_giant()
+    p.TRAINING_LIMIT = 100
+    return p
 
 import datasets.atis_rank
 import datasets.atis_rank_translator

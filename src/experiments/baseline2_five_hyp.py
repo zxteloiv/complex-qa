@@ -33,7 +33,7 @@ def atis_five_lstm():
     return hparams
 
 @Registry.hparamset()
-def atis_ten_neo():
+def atis_neo():
     p = atis_five_lstm()
     p.alignment = "bilinear"    # identity, linear, bilinear
     p.prediction = "full"     # simple, full, symmetric
@@ -44,19 +44,13 @@ def atis_ten_neo():
     p.num_stacked_block = 2
     p.num_stacked_encoder = 2
     p.dropout = .2
-    p.TRAINING_LIMIT = 100
+    p.TRAINING_LIMIT = 200
     p.batch_sz = 64
     return p
 
 @Registry.hparamset()
-def django_fifteen():
-    hparams = atis_five_lstm()
-    hparams.TRAINING_LIMIT = 150
-    return hparams
-
-@Registry.hparamset()
-def django_thirty():
-    hparams = atis_five_lstm()
+def django_neo():
+    hparams = atis_neo()
     hparams.TRAINING_LIMIT = 100
     return hparams
 
