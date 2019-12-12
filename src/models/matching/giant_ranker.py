@@ -30,7 +30,7 @@ class GiantRanker(nn.Module):
         self.a_pad = a_padding
         self.b_pad = b_padding
         self.dim_training_weight = .5
-        self._reinforce_bias = -.1
+        self._reinforce_bias = .1
 
         self.loss_weighting = nn.Parameter(torch.zeros(5).float(), requires_grad=True)
 
@@ -97,9 +97,9 @@ class GiantRanker(nn.Module):
         pred_b_mask = (pred_b != self.b_pad).long()
 
         logits_pred_a2b = self.a2b.forward_emb(self.a_embedding(pred_a), b_inp_emb, pred_a_mask, b_inp_mask)
-        loss_pred_a2b = - seq_cross_ent(logits_pred_a2b, b_tgt, b_tgt_mask, average=None)
+        loss_pred_a2b = seq_cross_ent(logits_pred_a2b, b_tgt, b_tgt_mask, average=None)
         logits_pred_b2a = self.b2a.forward_emb(self.b_embedding(pred_b), a_inp_emb, pred_b_mask, a_inp_mask)
-        loss_pred_b2a = - seq_cross_ent(logits_pred_b2a, a_tgt, a_tgt_mask, average=None)
+        loss_pred_b2a = seq_cross_ent(logits_pred_b2a, a_tgt, a_tgt_mask, average=None)
 
         pred_a_inp, pred_b_inp = pred_a[:, :-1].contiguous(), pred_b[:, :-1].contiguous()
         pred_a_tgt, pred_b_tgt = pred_a[:, 1:].contiguous(), pred_b[:, 1:].contiguous()
@@ -109,10 +109,12 @@ class GiantRanker(nn.Module):
         pred_b_tgt_mask = (pred_b_tgt != self.b_pad).long()
 
         logits_pred_a = self.a_seq.forward_emb(self.a_embedding(pred_a_inp), pred_a_inp_mask)
-        loss_pred_a = - seq_cross_ent(logits_pred_a, pred_a_tgt, pred_a_tgt_mask, average=None)
+        loss_pred_a = seq_cross_ent(logits_pred_a, pred_a_tgt, pred_a_tgt_mask, average=None)
         logits_pred_b = self.b_seq.forward_emb(self.b_embedding(pred_b_inp), pred_b_inp_mask)
-        loss_pred_b = - seq_cross_ent(logits_pred_b, pred_b_tgt, pred_b_tgt_mask, average=None)
+        loss_pred_b = seq_cross_ent(logits_pred_b, pred_b_tgt, pred_b_tgt_mask, average=None)
 
+        # these losses from sequence cross entropy are negative rewards to minimize, instead of maximizing.
+        # Thus we add a positive bias
         # neg_reward: (batch,)
         neg_a_reward = loss_pred_a + loss_pred_a2b + self._reinforce_bias
         neg_b_reward = loss_pred_b + loss_pred_b2a + self._reinforce_bias
@@ -120,9 +122,9 @@ class GiantRanker(nn.Module):
         loss_dim_a = neg_a_reward * best_pred_a_logprob.sum(dim=-1)
         loss_dim_b = neg_b_reward * best_pred_b_logprob.sum(dim=-1)
 
-        loss_dim = - loss_dim_a - loss_dim_b  # without using an EM-analogous opt.
+        loss_dim = loss_dim_a + loss_dim_b  # without using an EM-analogous opt.
 
-        return loss_normal - 0.5 * loss_dim.mean()
+        return loss_normal + 0.5 * loss_dim.mean()
 
     def inference(self, sent_a, sent_b):
         self.re2: RE2
