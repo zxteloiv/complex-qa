@@ -105,6 +105,14 @@ def django_neo_giant():
     p.TRAINING_LIMIT = 100
     return p
 
+@Registry.hparamset()
+def django_neo_giant_v2():
+    p = django_neo_giant()
+    p.emb_sz = 320
+    p.hidden_size = 160
+    p.TRAINING_LIMIT = 60
+    return p
+
 import datasets.atis_rank
 import datasets.atis_rank_translator
 import datasets.django_rank
@@ -224,6 +232,11 @@ def main():
         logging.getLogger().setLevel(logging.WARNING)
     else:
         logging.getLogger().setLevel(logging.INFO)
+
+    if hasattr(args, "seed") and args.seed:
+        from utils.fix_seed import fix_seed
+        logging.info(f"set seed={args.seed}")
+        fix_seed(args.seed)
 
     bot = TrialBot(trial_name="baseline2_giant", get_model_func=get_model, args=args)
     bot.translator.turn_special_token(on=True)

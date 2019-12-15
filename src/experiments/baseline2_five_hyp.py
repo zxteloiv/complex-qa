@@ -54,6 +54,14 @@ def django_neo():
     hparams.TRAINING_LIMIT = 100
     return hparams
 
+@Registry.hparamset()
+def django_neo_v2():
+    p = django_neo()
+    p.emb_sz = 320
+    p.hidden_size = 160
+    p.TRAINING_LIMIT = 60
+    return p
+
 import datasets.atis_rank
 import datasets.atis_rank_translator
 import datasets.django_rank
@@ -146,6 +154,11 @@ def main():
         logging.getLogger().setLevel(logging.WARNING)
     else:
         logging.getLogger().setLevel(logging.INFO)
+
+    if hasattr(args, "seed") and args.seed:
+        from utils.fix_seed import fix_seed
+        logging.info(f"set seed={args.seed}")
+        fix_seed(args.seed)
 
     bot = TrialBot(trial_name="reranking_baseline2", get_model_func=get_model, args=args)
     if args.test:

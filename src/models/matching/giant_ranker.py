@@ -96,9 +96,9 @@ class GiantRanker(nn.Module):
         pred_b_mask = (pred_b != self.b_pad).long()
 
         logits_pred_a2b = self.a2b.forward_emb(self.a_embedding(pred_a), b_inp_emb, pred_a_mask, b_inp_mask)
-        reward_pred_a2b = seq_likelihood(logits_pred_a2b, b_tgt, b_tgt_mask, average=None)
+        reward_pred_a2b = seq_likelihood(logits_pred_a2b, b_tgt, b_tgt_mask)
         logits_pred_b2a = self.b2a.forward_emb(self.b_embedding(pred_b), a_inp_emb, pred_b_mask, a_inp_mask)
-        reward_pred_b2a = seq_likelihood(logits_pred_b2a, a_tgt, a_tgt_mask, average=None)
+        reward_pred_b2a = seq_likelihood(logits_pred_b2a, a_tgt, a_tgt_mask)
 
         pred_a_inp, pred_b_inp = pred_a[:, :-1].contiguous(), pred_b[:, :-1].contiguous()
         pred_a_tgt, pred_b_tgt = pred_a[:, 1:].contiguous(), pred_b[:, 1:].contiguous()
@@ -108,9 +108,9 @@ class GiantRanker(nn.Module):
         pred_b_tgt_mask = (pred_b_tgt != self.b_pad).long()
 
         logits_pred_a = self.a_seq.forward_emb(self.a_embedding(pred_a_inp), pred_a_inp_mask)
-        reward_pred_a = seq_likelihood(logits_pred_a, pred_a_tgt, pred_a_tgt_mask, average=None)
+        reward_pred_a = seq_likelihood(logits_pred_a, pred_a_tgt, pred_a_tgt_mask)
         logits_pred_b = self.b_seq.forward_emb(self.b_embedding(pred_b_inp), pred_b_inp_mask)
-        reward_pred_b = seq_likelihood(logits_pred_b, pred_b_tgt, pred_b_tgt_mask, average=None)
+        reward_pred_b = seq_likelihood(logits_pred_b, pred_b_tgt, pred_b_tgt_mask)
 
         # baseline omitted
         # reward: (batch,)
