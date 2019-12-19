@@ -36,12 +36,6 @@ def atis_five_giant():
     return p
 
 @Registry.hparamset()
-def atis_giant_finetune():
-    p = atis_five_giant()
-    p.batch_sz = 32
-    return p
-
-@Registry.hparamset()
 def atis_giant_v2():
     p = atis_five_giant()
     p.alignment = "bilinear"    # identity, linear, bilinear
@@ -55,27 +49,6 @@ def atis_giant_v2():
     p.TRAINING_LIMIT = 50
     p.batch_sz = 64
     return p
-
-# @Registry.hparamset()
-# def atis_giant_v3():
-#     p = atis_five_giant()
-#     p.alignment = "bilinear"    # identity, linear, bilinear
-#     p.prediction = "full"     # simple, full, symmetric
-#     p.encoder = "bilstm"
-#     p.emb_sz = 300
-#     p.hidden_size = 150
-#     p.num_stacked_block = 1
-#     p.num_stacked_encoder = 2
-#     p.dropout = .2
-#     p.TRAINING_LIMIT = 50
-#     p.batch_sz = 64
-#     return p
-#
-# @Registry.hparamset()
-# def atis_giant_v4():
-#     p = atis_giant_v3()
-#     p.num_stacked_encoder = 1
-#     return p
 
 @Registry.hparamset()
 def atis_neo_giant():
@@ -92,12 +65,6 @@ def atis_neo_giant():
     p.TRAINING_LIMIT = 200
     p.batch_sz = 64
     return p
-
-# @Registry.hparamset()
-# def django_fifteen_giant():
-#     hparams = atis_five_giant()
-#     hparams.TRAINING_LIMIT = 20
-#     return hparams
 
 @Registry.hparamset()
 def django_neo_giant():
