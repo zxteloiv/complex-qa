@@ -1,0 +1,139 @@
+import sys
+sys.path = ['..'] + sys.path
+
+from tqdm import tqdm
+import pickle
+import os.path
+import logging
+from collections import defaultdict
+from utils.root_finder import find_root
+logging.basicConfig(level=logging.INFO)
+from utils.code_transformation import CodeTransform
+from utils.ir_client import SolrClient
+
+def nl_ngram(args):
+    if args.dataset == "atis":
+        from datasets.atis_rank import atis_pure_none
+        fn_load_data = atis_pure_none
+        core = "atis_none_lf"
+    elif args.dataset == "django":
+        from datasets.django_rank import django_pure_none
+        fn_load_data = django_pure_none
+        core = "django_none_lf"
+    else:
+        raise ValueError("dataset not found")
+
+    idx = SolrClient(core)
+    datasets = fn_load_data()
+
+    # find similarities for training, dev, and test set
+    output = []
+    for dataset in datasets:
+        ds_rtn = []
+        for ex in tqdm(dataset, total=len(dataset)):  # datasets are all ensured to be ordered and to start from 0
+            text = idx.escape(' '.join(ex['src']))
+            query = {"q": text, "wt": "json", "rows": 30,
+                     "df": "hyp", 'fl': 'id, score', 'sort': 'score desc'}
+            res = idx.search(query)['response']['docs']
+            similar_ids = [r['id'] for r in res]
+            ds_rtn.append(similar_ids)
+        output.append(ds_rtn)
+
+    outfile = os.path.join(args.output_dir, "{0}_{1}.bin".format(args.dataset, args.action))
+    pickle.dump(output, open(outfile, 'wb'))
+
+def lf_ngram(args):
+    if args.dataset == "atis":
+        from datasets.atis_rank import atis_five
+        fn_load_data = atis_five
+        core = "atis_5_lf"
+    elif args.dataset == "django":
+        from datasets.django_rank import django_15
+        fn_load_data = django_15
+        core = "django_15_lf"
+    else:
+        raise ValueError("dataset not found")
+
+    idx = SolrClient(core)
+    datasets = fn_load_data()
+
+    # find similarities for training, dev, and test set
+    output = []
+    from datasets.cached_retriever import get_hyp_key
+    for dataset in datasets:
+        ds_rtn = defaultdict(list)
+        for ex in tqdm(dataset, total=len(dataset)):
+            text = idx.escape(ex['hyp'])
+            query = {"q": text, "wt": "json", "rows": 30,
+                     "df": "hyp", 'fl': 'id, score', 'sort': 'score desc'}
+            res = idx.search(query)['response']['docs']
+            similar_keys = [r['id'] for r in res]
+            ds_rtn[get_hyp_key(ex)].append(similar_keys)
+        output.append(ds_rtn)
+
+    outfile = os.path.join(args.output_dir, "{0}_{1}.bin".format(args.dataset, args.action))
+    pickle.dump(output, open(outfile, 'wb'))
+
+def lf_ted(args):
+    if args.dataset == "atis":
+        from datasets.atis_rank import atis_five as fn_load_data
+        transform = CodeTransform.dump_lambda
+        core = "atis_5_lf"
+    elif args.dataset == "django":
+        from datasets.django_rank import django_15 as fn_load_data
+        transform = CodeTransform.dump_python_ast_tree
+        core = "django_15_lf"
+    else:
+        raise ValueError("dataset not found")
+
+    idx = SolrClient(core)
+    datasets = fn_load_data()
+
+    def _get_ted(t1: str, t2: str):
+        import apted
+        from apted.helpers import Tree
+        try:
+            t1, t2 = list(map(transform, (t1, t2)))
+            ted = apted.APTED(Tree.from_text(t1), Tree.from_text(t2),
+                              config=apted.PerEditOperationConfig(1., 1., 1.))
+            d = ted.compute_edit_distance()
+        except:
+            d = 2147483647
+        return d
+
+    # find similarities for training, dev, and test set
+    output = []
+    from datasets.cached_retriever import get_hyp_key
+    for dataset in datasets:
+        ds_rtn = defaultdict(list)
+        for ex in tqdm(dataset, total=len(dataset)):
+            text = idx.escape(ex['hyp'])
+            query = {"q": text, "wt": "json", "rows": 100,
+                     "df": "hyp", 'fl': 'id, hyp_tree, score', 'sort': 'score desc'}
+            candidates = idx.search(query)
+            reranking = sorted(candidates, key=lambda c: _get_ted(ex['hyp_tree'], c['hyp_tree'][0]))
+            similar_keys = [r['id'] for r in reranking][:30]
+            ds_rtn[get_hyp_key(ex)].append(similar_keys)
+        output.append(ds_rtn)
+
+    outfile = os.path.join(args.output_dir, "{0}_{1}.bin".format(args.dataset, args.action))
+    pickle.dump(output, open(outfile, 'wb'))
+
+def main():
+    import os.path
+    sim_dir = os.path.join(find_root(), 'data', '_similarity_index')
+
+    supported_action = ['nl_ngram', 'lf_ngram', 'lf_ngram_ted']
+
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--action', type=str, required=True, choices=supported_action)
+    parser.add_argument('--dataset', type=str, required=True, choices=['atis', 'django'])
+    parser.add_argument('--output-dir', type=str, default=sim_dir)
+    args = parser.parse_args()
+
+    func = eval(args.action)
+    func(args)
+
+if __name__ == '__main__':
+    main()
