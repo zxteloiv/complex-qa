@@ -5,11 +5,14 @@ from tqdm import tqdm
 import pickle
 import os.path
 import logging
+import multiprocessing
 from collections import defaultdict
 from utils.root_finder import find_root
 logging.basicConfig(level=logging.INFO)
 from utils.code_transformation import CodeTransform
 from utils.ir_client import SolrClient
+from utils.merge_sort_parallel import merge_sort_parallel
+from functools import partial
 
 def nl_ngram(args):
     if args.dataset == "atis":
@@ -96,41 +99,51 @@ def lf_ted(args):
     idx = SolrClient(core)
     datasets = fn_load_data()
 
-    def _get_ted(t1: str, t2: str):
-        import apted
-        from apted.helpers import Tree
-        try:
-            t1, t2 = list(map(transform, (t1, t2)))
-            ted = apted.APTED(Tree.from_text(t1), Tree.from_text(t2),
-                              config=apted.PerEditOperationConfig(1., 1., 1.))
-            d = ted.compute_edit_distance()
-        except:
-            d = 2147483647
-        return d
-
     # find similarities for training, dev, and test set
     output = []
     from datasets.cached_retriever import get_hyp_key
     for dataset in datasets:
         ds_rtn = defaultdict(list)
+        pool = multiprocessing.Pool(processes=min(multiprocessing.cpu_count(), 6))
+        # dataset = dataset[:100]
         for ex in tqdm(dataset, total=len(dataset)):
             text = idx.escape(ex['hyp'])
             query = {"q": text, "wt": "json",
-                     "rows": 50 if args.dataset == "atis" else 100,
+                     "rows": 50 if args.dataset == "atis" else 60,
                      "df": "hyp", 'fl': 'id, hyp, hyp_tree, score', 'sort': 'score desc'}
             try:
                 candidates = idx.search(query)['response']['docs']
+            except KeyboardInterrupt:
+                return
             except:
                 logging.warning(f"Error Request: ID={get_hyp_key(ex)} Text={text}")
                 continue
 
-            reranking = sorted(candidates, key=lambda c: _get_ted(ex[ted_key], c[ted_key][0]))
+            comp_key = partial(get_ted, ex=ex, transform=transform, ted_key=ted_key)
+            reranking = sorted(candidates, key=comp_key)
+            # reranking = merge_sort_parallel(candidates, key=comp_key, max_pool_size=6, pool=pool)
             similar_keys = [r['id'] for r in reranking][:30]
             ds_rtn[get_hyp_key(ex)].append(similar_keys)
         output.append(ds_rtn)
 
     outfile = os.path.join(args.output_dir, "{0}_{1}.bin".format(args.dataset, args.action))
     pickle.dump(output, open(outfile, 'wb'))
+
+# to run Pool.map for the candidates, they must be defined as a function object rather than lambda exp.
+def get_ted(c, ex, transform, ted_key):
+    import apted
+    from apted.helpers import Tree
+    try:
+        t1, t2 = c[ted_key][0], ex[ted_key]
+        t1, t2 = list(map(transform, (t1, t2)))
+        ted = apted.APTED(Tree.from_text(t1), Tree.from_text(t2),
+                          config=apted.PerEditOperationConfig(1., 1., 1.))
+        d = ted.compute_edit_distance()
+    except KeyboardInterrupt:
+        raise KeyboardInterrupt()
+    except:
+        d = 2147483647
+    return d
 
 def main():
     import os.path
