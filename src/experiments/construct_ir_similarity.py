@@ -34,7 +34,11 @@ def nl_ngram(args):
             text = idx.escape(' '.join(ex['src']))
             query = {"q": text, "wt": "json", "rows": 30,
                      "df": "hyp", 'fl': 'id, score', 'sort': 'score desc'}
-            res = idx.search(query)['response']['docs']
+            try:
+                res = idx.search(query)['response']['docs']
+            except:
+                logging.warning(f"Error Request: ID={ex['ex_id']} Text={text}")
+                continue
             similar_ids = [r['id'] for r in res]
             ds_rtn.append(similar_ids)
         output.append(ds_rtn)
@@ -66,7 +70,12 @@ def lf_ngram(args):
             text = idx.escape(ex['hyp'])
             query = {"q": text, "wt": "json", "rows": 30,
                      "df": "hyp", 'fl': 'id, score', 'sort': 'score desc'}
-            res = idx.search(query)['response']['docs']
+            try:
+                res = idx.search(query)['response']['docs']
+            except:
+                logging.warning(f"Error Request: ID={get_hyp_key(ex)} Text={text}")
+                continue
+
             similar_keys = [r['id'] for r in res]
             ds_rtn[get_hyp_key(ex)].append(similar_keys)
         output.append(ds_rtn)
@@ -77,12 +86,10 @@ def lf_ngram(args):
 def lf_ted(args):
     if args.dataset == "atis":
         from datasets.atis_rank import atis_five as fn_load_data
-        transform = CodeTransform.dump_lambda
-        core = "atis_5_lf"
+        core, ted_key, transform = "atis_5_lf", "hyp", CodeTransform.dump_lambda
     elif args.dataset == "django":
         from datasets.django_rank import django_15 as fn_load_data
-        transform = CodeTransform.dump_python_ast_tree
-        core = "django_15_lf"
+        core, ted_key, transform = "django_15_lf", "hyp_tree", CodeTransform.dump_python_ast_tree
     else:
         raise ValueError("dataset not found")
 
@@ -108,10 +115,16 @@ def lf_ted(args):
         ds_rtn = defaultdict(list)
         for ex in tqdm(dataset, total=len(dataset)):
             text = idx.escape(ex['hyp'])
-            query = {"q": text, "wt": "json", "rows": 100,
-                     "df": "hyp", 'fl': 'id, hyp_tree, score', 'sort': 'score desc'}
-            candidates = idx.search(query)
-            reranking = sorted(candidates, key=lambda c: _get_ted(ex['hyp_tree'], c['hyp_tree'][0]))
+            query = {"q": text, "wt": "json",
+                     "rows": 50 if args.dataset == "atis" else 100,
+                     "df": "hyp", 'fl': 'id, hyp, hyp_tree, score', 'sort': 'score desc'}
+            try:
+                candidates = idx.search(query)['response']['docs']
+            except:
+                logging.warning(f"Error Request: ID={get_hyp_key(ex)} Text={text}")
+                continue
+
+            reranking = sorted(candidates, key=lambda c: _get_ted(ex[ted_key], c[ted_key][0]))
             similar_keys = [r['id'] for r in reranking][:30]
             ds_rtn[get_hyp_key(ex)].append(similar_keys)
         output.append(ds_rtn)
@@ -123,7 +136,7 @@ def main():
     import os.path
     sim_dir = os.path.join(find_root(), 'data', '_similarity_index')
 
-    supported_action = ['nl_ngram', 'lf_ngram', 'lf_ngram_ted']
+    supported_action = ['nl_ngram', 'lf_ngram', 'lf_ted']
 
     import argparse
     parser = argparse.ArgumentParser()
