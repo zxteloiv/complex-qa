@@ -37,8 +37,8 @@ class SolrClient:
         self.core = core
         self.host = host
         self.port = port
-        import requests
-        self.session = requests.Session()
+        # import requests
+        # self.session = requests.Session()
         self.logger = logging.getLogger(__name__)
 
     def indexing(self, *args, **kwargs):
@@ -50,7 +50,10 @@ class SolrClient:
         if query.get('df') is None:
             query['df'] = 'hyp'
 
-        response = self.session.post(f'http://{self.host}:{self.port}/solr/{self.core}/query', data=query)
+        import requests
+
+        # response = self.session.post(f'http://{self.host}:{self.port}/solr/{self.core}/query', data=query)
+        response = requests.post(f'http://{self.host}:{self.port}/solr/{self.core}/query', data=query)
         return response.json()
 
     @staticmethod

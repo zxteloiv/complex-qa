@@ -1,6 +1,10 @@
 import sys
 sys.path = ['..'] + sys.path
 
+# import pyximport
+# pyximport.install(language_level=3)
+# from numba import jit
+# from utils.merge_sort_parallel import merge_sort_parallel
 from tqdm import tqdm
 import pickle
 import os.path
@@ -11,7 +15,6 @@ from utils.root_finder import find_root
 logging.basicConfig(level=logging.INFO)
 from utils.code_transformation import CodeTransform
 from utils.ir_client import SolrClient
-from utils.merge_sort_parallel import merge_sort_parallel
 from functools import partial
 
 def nl_ngram(args):
@@ -104,7 +107,7 @@ def lf_ted(args):
     from datasets.cached_retriever import get_hyp_key
     for dataset in datasets:
         ds_rtn = defaultdict(list)
-        pool = multiprocessing.Pool(processes=min(multiprocessing.cpu_count(), 6))
+        # pool = multiprocessing.Pool(processes=min(multiprocessing.cpu_count(), 6))
         # dataset = dataset[:100]
         for ex in tqdm(dataset, total=len(dataset)):
             text = idx.escape(ex['hyp'])
@@ -129,18 +132,24 @@ def lf_ted(args):
     outfile = os.path.join(args.output_dir, "{0}_{1}.bin".format(args.dataset, args.action))
     pickle.dump(output, open(outfile, 'wb'))
 
-# to run Pool.map for the candidates, they must be defined as a function object rather than lambda exp.
+# import apted
+# from apted.helpers import Tree
+# @jit(nopython=True, parallel=True, cache=True)
+# def _ted(t1: str, t2: str) -> float:
+#     return apted.APTED(Tree.from_text(t1), Tree.from_text(t2),
+#                        config=apted.PerEditOperationConfig(1., 1., 1.)).compute_edit_distance()
+from cffi import FFI
+ffi = FFI()
+ffi.cdef("float apted(const char* s1, const char* s2);")
+lib = ffi.dlopen(os.path.join(find_root(), "lib", "libapted.so"))
+
 def get_ted(c, ex, transform, ted_key):
-    import apted
-    from apted.helpers import Tree
     try:
         t1, t2 = c[ted_key][0], ex[ted_key]
         t1, t2 = list(map(transform, (t1, t2)))
-        ted = apted.APTED(Tree.from_text(t1), Tree.from_text(t2),
-                          config=apted.PerEditOperationConfig(1., 1., 1.))
-        d = ted.compute_edit_distance()
-    except KeyboardInterrupt:
-        raise KeyboardInterrupt()
+        t1bytes = t1.replace(' ', '').encode()
+        t2bytes = t2.replace(' ', '').encode()
+        d = lib.apted(t1bytes, t2bytes)
     except:
         d = 2147483647
     return d
