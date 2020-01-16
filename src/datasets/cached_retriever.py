@@ -1,138 +1,63 @@
-
+from typing import Callable, TypeVar, Any, Optional, Tuple, Mapping, List
 from .retriever import Retriever
+from functools import reduce
 import pickle
 import logging
 from collections import defaultdict
+from trialbot.data.dataset import Dataset
 
-class IDCacheRetriever(Retriever):
-    """
-    IDCacheRetriever.
-    Training set are indexed by ids.
-    Similar examples for a given one could be directly retrieved via id.
-    """
-    def __init__(self, filename, dataset):
+ExampleType = Any
+KeyFuncType = Callable[[ExampleType], Optional[str]]
+SimilarityType = Mapping[str, List[str]]
+SimilarityCacheType = Tuple[SimilarityType, SimilarityType, SimilarityType]
+
+class KVCacheRetriever(Retriever):
+    def __init__(self, key: KeyFuncType, dataset: Dataset, similarity_cache: SimilarityCacheType):
         super().__init__(dataset)
-        matrices = pickle.load(open(filename, 'rb'))
-        self._sim_matrics = matrices
+        self._kvstore = defaultdict(list)
         self.logger = logging.getLogger(__name__)
+        self.get_example_key = key
+        self._sim_cache = similarity_cache
 
-        # natural language input are indexed by the exid only
-        self._eid_to_examples = defaultdict(list)
-
-    def build_example_index(self):
-        if len(self._eid_to_examples) == 0:
+    def build_key_value_store(self):
+        if len(self._kvstore) == 0:
             for i, example in enumerate(self.dataset):
-                self._eid_to_examples[example["ex_id"]].append(i)
+                key = self.get_example_key(example)
+                if key is None:
+                    self.logger.warning("The example do not have a key and is thus IGNORED.")
+                    continue
+
+                self._kvstore[self.get_example_key(example)].append(i)
 
     def search(self, example, example_source: str = "train"):
-        self.build_example_index()
-
-        eid = example.get("ex_id")
-        if eid is None or example_source not in ("train", "dev", "test"):
-            self.logger.warning("Given example do not have an ID.")
-            return []
-        eid = int(eid)
-
-        m = self._sim_matrics[["train", "dev", "test"].index(example_source)]
-        similar_example_ids = []
-        for similar_eid in m[eid]:
-            similar_example_ids += self._eid_to_examples[similar_eid]
-
-        return self.dataset[similar_example_ids]
-
-class HypIDCacheRetriever(Retriever):
-    """
-    IDCacheRetriever.
-    Training set are indexed by ids.
-    Similar examples for a given one could be directly retrieved via id.
-    """
-    def __init__(self, filenames, dataset):
-        super().__init__(dataset)
-        matrices = [pickle.load(open(f, 'rb')) for f in filenames]
-        self._sim_matrics = matrices
-        self.logger = logging.getLogger(__name__)
-
-        # natural language input are indexed by the exid only
-        self._eid_to_examples = defaultdict(list)
-
-    def build_example_index(self):
-        if len(self._eid_to_examples) == 0:
-            for i, example in enumerate(self.dataset):
-                self._eid_to_examples[example["ex_id"]].append(i)
-
-    def search(self, example, example_source: str = "train"):
-        self.build_example_index()
-
-        eid, hyp_rank = list(map(example.get, ("ex_id", "hyp_rank")))
-        if eid is None or hyp_rank is None or example_source not in ("train", "dev", "test"):
-            self.logger.warning("Given example do not have an ID.")
-            return []
-        eid = int(eid)
-        hyp_rank = int(hyp_rank)
-        query_key = f"{eid}-{hyp_rank}"
-
-        m = self._sim_matrics[["train", "dev", "test"].index(example_source)]
-        if query_key not in m:
+        self.build_key_value_store()
+        key = self.get_example_key(example)
+        if key is None or example_source not in ("train", "dev", "test"):
+            self.logger.warning("The example do not have a Key")
             return []
 
-        similar_example_ids = []
-        for similar_eid in m[query_key]:
-            similar_example_ids += self._eid_to_examples[similar_eid]
+        sim: SimilarityType = self._sim_cache[["train", "dev", "test"].index(example_source)]
+        similar_keys = sim[key]
+        if len(similar_keys) > 0 and isinstance(similar_keys[0], list):
+            similar_keys = similar_keys[0]  # flat the list if possible: [[1, 2, 3]] -> [1, 2, 3]
+        similar_ids = reduce(lambda x, y: x + y, (self._kvstore[k] for k in similar_keys), [])
+        return self.dataset[similar_ids]
 
-        return self.dataset[similar_example_ids]
+IDCacheRetriever = lambda filename, dataset: KVCacheRetriever(
+    key=lambda example: example.get('ex_id'),
+    dataset=dataset,
+    similarity_cache=pickle.load(open(filename, 'rb')),
+)
 
-class SimRetriever(Retriever):
-    def __init__(self, nlfile, lffiles, dataset):
-        super().__init__(dataset)
-        self.logger = logging.getLogger(__name__)
+def get_hyp_key(example: ExampleType) -> Optional[str]:
+    ex_id, hyp_rank = list(map(example.get, ('ex_id', 'hyp_rank')))
+    if ex_id is None or hyp_rank is None:
+        return None
+    return f"{ex_id}-{hyp_rank}"
 
-        self._sim_nl = pickle.load(open(nlfile, 'rb'))
-        self._sim_lf = [pickle.load(open(f, 'rb')) for f in lffiles]
+HypIDCacheRetriever = lambda filename, dataset: KVCacheRetriever(
+    key=get_hyp_key,
+    dataset=dataset,
+    similarity_cache=pickle.load(open(filename, 'rb')),
+)
 
-        # natural language input are indexed by the exid only
-        self._eid_to_examples = defaultdict(list)
-
-    def build_example_index(self):
-        if len(self._eid_to_examples) == 0:
-            for i, example in enumerate(self.dataset):
-                self._eid_to_examples[example["ex_id"]].append(i)
-
-    def _search_lf(self, example, example_source: str = "train"):
-        self.build_example_index()
-
-        eid, hyp_rank = list(map(example.get, ("ex_id", "hyp_rank")))
-        if eid is None or hyp_rank is None or example_source not in ("train", "dev", "test"):
-            self.logger.warning("Given example do not have an ID.")
-            return []
-        eid = int(eid)
-        hyp_rank = int(hyp_rank)
-        query_key = f"{eid}-{hyp_rank}"
-
-        m = self._sim_lf[["train", "dev", "test"].index(example_source)]
-        if query_key not in m:
-            return []
-
-        similar_example_ids = []
-        for similar_eid in m[query_key]:
-            similar_example_ids += self._eid_to_examples[similar_eid]
-
-        return self.dataset[similar_example_ids]
-
-    def _search_nl(self, example, example_source: str = "train"):
-        self.build_example_index()
-
-        eid = example.get("ex_id")
-        if eid is None or example_source not in ("train", "dev", "test"):
-            self.logger.warning("Given example do not have an ID.")
-            return []
-        eid = int(eid)
-
-        m = self._sim_nl[["train", "dev", "test"].index(example_source)]
-        similar_example_ids = []
-        for similar_eid in m[eid]:
-            similar_example_ids += self._eid_to_examples[similar_eid]
-
-        return self.dataset[similar_example_ids]
-
-    def search(self, example, example_source: str = "train"):
-        return self._search_lf(example, example_source) + self._search_nl(example, example_source)

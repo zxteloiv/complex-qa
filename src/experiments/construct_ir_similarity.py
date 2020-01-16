@@ -35,7 +35,7 @@ def nl_ngram(args):
     # find similarities for training, dev, and test set
     output = []
     for dataset in datasets:
-        ds_rtn = []
+        ds_rtn = defaultdict(list)
         for ex in tqdm(dataset, total=len(dataset)):  # datasets are all ensured to be ordered and to start from 0
             text = idx.escape(' '.join(ex['src']))
             query = {"q": text, "wt": "json", "rows": 30,
@@ -45,8 +45,8 @@ def nl_ngram(args):
             except:
                 logging.warning(f"Error Request: ID={ex['ex_id']} Text={text}")
                 continue
-            similar_ids = [r['id'] for r in res]
-            ds_rtn.append(similar_ids)
+            similar_ids = [int(r['id']) for r in res]
+            ds_rtn[ex['ex_id']].append(similar_ids)
         output.append(ds_rtn)
 
     outfile = os.path.join(args.output_dir, "{0}_{1}.bin".format(args.dataset, args.action))
