@@ -1,15 +1,15 @@
 #!/bin/bash 
 # Start training on two models, and two datasets
 
-# ../../snapshots/atis_ten_hyp/baseline2_giant/20191213-152416-repaired-giant/model_state_200.th
-# ../../snapshots/atis_ten_hyp/reranking_baseline2/20191213-152416-fixed-seed/model_state_200.th
-# ../../snapshots/django_thirty_hyp/baseline2_giant/20191213-152416-repaired-giant/model_state_60.th
-# ../../snapshots/django_thirty_hyp/reranking_baseline2/20191213-152416-fixed-seed/model_state_60.th
+# ../../snapshots/atis_five_hyp/baseline2_giant/20200116-183245-giant-base/model_state_200.th
+# ../../snapshots/atis_five_hyp/reranking_baseline2/20200116-183245-re2-base/model_state_200.th
+# ../../snapshots/django_fifteen_hyp/baseline2_giant/20200116-183245-giant-base/model_state_60.th
+# ../../snapshots/django_fifteen_hyp/reranking_baseline2/20200116-183245-re2-base/model_state_60.th
 
 function eval_django_neo_re2 () {
-    STAT_OUTFILE=django.neo-re2-fixed-seed.log
-    DECODE_PREFIX=/tmp/decode.django.neo-re2-fixed-seed
-    MODEL_PREFIX=../../snapshots/django_thirty_hyp/reranking_baseline2/20191213-152416-fixed-seed
+    STAT_OUTFILE=django.re2-base.log
+    DECODE_PREFIX=/tmp/decode.django.re2-base
+    MODEL_PREFIX=../../snapshots/django_fifteen_hyp/reranking_baseline2/20200116-183245-re2-base
     TEST_FILE=../../data/django_rank/django_rank.five_hyp.test.jsonl
     for ((i=1; i<501; i++));
     do
@@ -17,7 +17,7 @@ function eval_django_neo_re2 () {
             continue
         fi
         echo $i >> $STAT_OUTFILE;
-        CUDA_VISIBLE_DEVICES=0 nohup python -u baseline2_five_hyp.py \
+        CUDA_VISIBLE_DEVICES=3 nohup python -u baseline2_five_hyp.py \
             -p django_neo_v2 \
             --translator django_rank \
             --dataset django_five_hyp \
@@ -30,9 +30,9 @@ function eval_django_neo_re2 () {
 }
 
 function eval_atis_neo_re2 () {
-    STAT_OUTFILE=atis.neo-re2-fixed-seed.log
-    DECODE_PREFIX=/tmp/decode.atis.neo-re2-fixed-seed
-    MODEL_PREFIX=../../snapshots/atis_ten_hyp/reranking_baseline2/20191213-152416-fixed-seed
+    STAT_OUTFILE=atis.re2-base.log
+    DECODE_PREFIX=/tmp/decode.atis.re2-base
+    MODEL_PREFIX=../../snapshots/atis_five_hyp/reranking_baseline2/20200116-183245-re2-base
     TEST_FILE=../../data/atis_rank/atis_rank.five_hyp.test.jsonl
     for ((i=1; i<501; i++));
     do
@@ -53,9 +53,9 @@ function eval_atis_neo_re2 () {
 }
 
 function eval_django_neo_giant () {
-    STAT_OUTFILE=django.neo-giant-repaired.log
-    DECODE_PREFIX=/tmp/decode.django.neo-giant-repaired
-    MODEL_PREFIX=../../snapshots/django_thirty_hyp/baseline2_giant/20191213-152416-repaired-giant
+    STAT_OUTFILE=django.giant-base.log
+    DECODE_PREFIX=/tmp/decode.django.giant-base
+    MODEL_PREFIX=../../snapshots/django_fifteen_hyp/baseline2_giant/20200116-183245-giant-base
     TEST_FILE=../../data/django_rank/django_rank.five_hyp.test.jsonl
     for ((i=1; i<501; i++));
     do
@@ -76,9 +76,9 @@ function eval_django_neo_giant () {
 }
 
 function eval_atis_neo_giant () {
-    STAT_OUTFILE=atis.neo-giant-repaired.log
-    DECODE_PREFIX=/tmp/decode.atis.neo-giant-repaired
-    MODEL_PREFIX=../../snapshots/atis_ten_hyp/baseline2_giant/20191213-152416-repaired-giant
+    STAT_OUTFILE=atis.giant-base.log
+    DECODE_PREFIX=/tmp/decode.atis.giant-base
+    MODEL_PREFIX=../../snapshots/atis_five_hyp/baseline2_giant/20200116-183245-giant-base
     TEST_FILE=../../data/atis_rank/atis_rank.five_hyp.test.jsonl
     for ((i=1; i<501; i++));
     do
@@ -86,7 +86,7 @@ function eval_atis_neo_giant () {
             continue
         fi
         echo $i >> $STAT_OUTFILE;
-        CUDA_VISIBLE_DEVICES=3 nohup python -u baseline2_five_hyp_giant.py \
+        CUDA_VISIBLE_DEVICES=0 nohup python -u baseline2_five_hyp_giant.py \
             -p atis_neo_giant \
             --translator atis_rank \
             --dataset atis_five_hyp \
@@ -98,4 +98,7 @@ function eval_atis_neo_giant () {
     done;
 }
 
-eval_django_neo_giant;
+eval_django_neo_giant &> log.eval.django.giant-base;
+eval_django_neo_re2 &> log.eval.django.re2-base;
+eval_atis_neo_giant &> log.eval.atis.giant-base;
+eval_atis_neo_re2 &> log.eval.atis.re2-base;
