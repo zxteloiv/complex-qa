@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+
+for ((i=1;i<=60;i++)); do echo $i >> django.re2-base.top2.log;  python evaluator.py ../../data/django_rank/django_rank.five_hyp.test.jsonl ../../result_evaluation/04base/decodes/decode.django.re2-base.$i --max-hyp-rank 2 >> django.re2-base.top2.log ; done;
+for ((i=1;i<=60;i++)); do echo $i >> django.re2-base.top4.log;  python evaluator.py ../../data/django_rank/django_rank.five_hyp.test.jsonl ../../result_evaluation/04base/decodes/decode.django.re2-base.$i --max-hyp-rank 4 >> django.re2-base.top4.log ; done;
+for ((i=1;i<=60;i++)); do echo $i >> django.re2-base.top5.log;  python evaluator.py ../../data/django_rank/django_rank.five_hyp.test.jsonl ../../result_evaluation/04base/decodes/decode.django.re2-base.$i --max-hyp-rank 5 >> django.re2-base.top5.log ; done;
+for ((i=1;i<=60;i++)); do echo $i >> django.giant-base.top5.log;  python evaluator.py ../../data/django_rank/django_rank.five_hyp.test.jsonl ../../result_evaluation/04base/decodes/decode.django.giant-base.$i --max-hyp-rank 5 >> django.giant-base.top5.log ; done;
+for ((i=1;i<=60;i++)); do echo $i >> django.giant-base.top4.log;  python evaluator.py ../../data/django_rank/django_rank.five_hyp.test.jsonl ../../result_evaluation/04base/decodes/decode.django.giant-base.$i --max-hyp-rank 4 >> django.giant-base.top4.log ; done;
+for ((i=1;i<=60;i++)); do echo $i >> django.giant-base.top2.log;  python evaluator.py ../../data/django_rank/django_rank.five_hyp.test.jsonl ../../result_evaluation/04base/decodes/decode.django.giant-base.$i --max-hyp-rank 2 >> django.giant-base.top2.log ; done;
+
+for ((i=1;i<=200;i++)); do echo $i >> atis.re2-base.top2.log;  python evaluator.py ../../data/atis_rank/atis_rank.five_hyp.test.jsonl ../../result_evaluation/04base/decodes/decode.atis.re2-base.$i --max-hyp-rank 2 >> atis.re2-base.top2.log ; done;
+for ((i=1;i<=200;i++)); do echo $i >> atis.re2-base.top4.log;  python evaluator.py ../../data/atis_rank/atis_rank.five_hyp.test.jsonl ../../result_evaluation/04base/decodes/decode.atis.re2-base.$i --max-hyp-rank 4 >> atis.re2-base.top4.log ; done;
+for ((i=1;i<=200;i++)); do echo $i >> atis.re2-base.top5.log;  python evaluator.py ../../data/atis_rank/atis_rank.five_hyp.test.jsonl ../../result_evaluation/04base/decodes/decode.atis.re2-base.$i --max-hyp-rank 5 >> atis.re2-base.top5.log ; done;
+for ((i=1;i<=200;i++)); do echo $i >> atis.giant-base.top5.log;  python evaluator.py ../../data/atis_rank/atis_rank.five_hyp.test.jsonl ../../result_evaluation/04base/decodes/decode.atis.giant-base.$i --max-hyp-rank 5 >> atis.giant-base.top5.log ; done;
+for ((i=1;i<=200;i++)); do echo $i >> atis.giant-base.top4.log;  python evaluator.py ../../data/atis_rank/atis_rank.five_hyp.test.jsonl ../../result_evaluation/04base/decodes/decode.atis.giant-base.$i --max-hyp-rank 4 >> atis.giant-base.top4.log ; done;
+for ((i=1;i<=200;i++)); do echo $i >> atis.giant-base.top2.log;  python evaluator.py ../../data/atis_rank/atis_rank.five_hyp.test.jsonl ../../result_evaluation/04base/decodes/decode.atis.giant-base.$i --max-hyp-rank 2 >> atis.giant-base.top2.log ; done;
