@@ -1,6 +1,5 @@
 from typing import List, Generator, Tuple, Mapping, Optional
 import os.path
-import config
 import torch.nn
 from collections import defaultdict
 from allennlp.modules import Embedding
@@ -15,12 +14,15 @@ from trialbot.training import Registry, TrialBot, Events
 from trialbot.training.updater import TrainingUpdater, TestingUpdater
 from trialbot.utils.move_to_device import move_to_device
 from sentencepiece import SentencePieceProcessor
+from trialbot.training.hparamset import HyperParamSet
+from utils.root_finder import find_root
+_DATA_PATH = os.path.join(find_root(), 'data')
 
 import logging
 
 @Registry.hparamset()
 def weibo_keyword_ins():
-    hparams = config.common_settings()
+    hparams = HyperParamSet.common_settings(find_root())
     hparams.emb_sz = 300
     hparams.batch_sz = 100
     hparams.num_enc_layers = 4
@@ -88,16 +90,16 @@ def training_debug():
 
 @Registry.dataset('small_keywords_v3')
 def weibo_keyword():
-    train_data = TabSepFileDataset(os.path.join(config.DATA_PATH, 'weibo', 'small_keywords_v3', 'train_data'))
-    valid_data = TabSepFileDataset(os.path.join(config.DATA_PATH, 'weibo', 'small_keywords_v3', 'valid_data'))
-    test_data = TabSepFileDataset(os.path.join(config.DATA_PATH, 'weibo', 'small_keywords_v3', 'test_data'))
+    train_data = TabSepFileDataset(os.path.join(_DATA_PATH, 'weibo', 'small_keywords_v3', 'train_data'))
+    valid_data = TabSepFileDataset(os.path.join(_DATA_PATH, 'weibo', 'small_keywords_v3', 'valid_data'))
+    test_data = TabSepFileDataset(os.path.join(_DATA_PATH, 'weibo', 'small_keywords_v3', 'test_data'))
     return train_data, valid_data, test_data
 
 @Registry.dataset('weibo_keywords_v3')
 def weibo_keyword():
-    train_data = TabSepFileDataset(os.path.join(config.DATA_PATH, 'weibo_keywords_v3', 'train_data'))
-    valid_data = TabSepFileDataset(os.path.join(config.DATA_PATH, 'weibo_keywords_v3', 'valid_data'))
-    test_data = TabSepFileDataset(os.path.join(config.DATA_PATH, 'weibo_keywords_v3', 'test_data'))
+    train_data = TabSepFileDataset(os.path.join(_DATA_PATH, 'weibo_keywords_v3', 'train_data'))
+    valid_data = TabSepFileDataset(os.path.join(_DATA_PATH, 'weibo_keywords_v3', 'valid_data'))
+    test_data = TabSepFileDataset(os.path.join(_DATA_PATH, 'weibo_keywords_v3', 'test_data'))
     return train_data, valid_data, test_data
 
 @Registry.translator('kwd_ins_spm')

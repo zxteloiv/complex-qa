@@ -1,6 +1,5 @@
 from typing import List, Generator, Tuple, Mapping
 import os.path
-import config
 import torch
 from torch.nn.utils.rnn import pad_sequence
 from allennlp.modules import Embedding
@@ -13,12 +12,15 @@ from models.modules.mixture_softmax import MoSProjection
 
 from trialbot.data import Translator, NSVocabulary, START_SYMBOL, END_SYMBOL, PADDING_TOKEN, TabSepFileDataset
 from trialbot.training import Registry, TrialBot, Events
+from trialbot.training.hparamset import HyperParamSet
+from utils.root_finder import find_root
+_DATA_PATH = os.path.join(find_root(), 'data')
 
 import logging
 
 @Registry.hparamset()
 def weibo_keyword_gen():
-    hparams = config.common_settings()
+    hparams = HyperParamSet.common_settings(find_root())
     hparams.emb_sz = 300
     hparams.batch_sz = 100
     hparams.num_enc_layers = 2
@@ -38,7 +40,7 @@ def weibo_keyword_gen():
 
 @Registry.hparamset()
 def weibo_keyword_small():
-    hparams = config.common_settings()
+    hparams = HyperParamSet.common_settings(find_root())
     hparams.emb_sz = 100
     hparams.batch_sz = 100
     hparams.num_enc_layers = 2
@@ -58,7 +60,7 @@ def weibo_keyword_small():
 
 @Registry.hparamset()
 def weibo_keyword_gen_word():
-    hparams = config.common_settings()
+    hparams = HyperParamSet.common_settings(find_root())
     hparams.emb_sz = 300
     hparams.batch_sz = 50
     hparams.num_enc_layers = 2
@@ -78,7 +80,7 @@ def weibo_keyword_gen_word():
 
 @Registry.hparamset()
 def weibo_keyword_gen_word2():
-    hparams = config.common_settings()
+    hparams = HyperParamSet.common_settings(find_root())
     hparams.emb_sz = 300
     hparams.batch_sz = 50
     hparams.num_enc_layers = 2
@@ -98,7 +100,7 @@ def weibo_keyword_gen_word2():
 
 @Registry.hparamset()
 def weibo_debug():
-    hparams = config.common_settings()
+    hparams = HyperParamSet.common_settings(find_root())
     hparams.emb_sz = 300
     hparams.batch_sz = 100
     hparams.num_enc_layers = 2
@@ -115,18 +117,19 @@ def weibo_debug():
     hparams.acc_factor = 1.
     return hparams
 
-@Registry.dataset('small_keywords_v2')
+
+@Registry.dataset('small_keywords_v3')
 def weibo_keyword():
-    train_data = TabSepFileDataset(os.path.join(config.DATA_PATH, 'weibo', 'small_keywords_v2', 'train_data'))
-    valid_data = TabSepFileDataset(os.path.join(config.DATA_PATH, 'weibo', 'small_keywords_v2', 'valid_data'))
-    test_data = TabSepFileDataset(os.path.join(config.DATA_PATH, 'weibo', 'small_keywords_v2', 'test_data'))
+    train_data = TabSepFileDataset(os.path.join(_DATA_PATH, 'weibo', 'small_keywords_v3', 'train_data'))
+    valid_data = TabSepFileDataset(os.path.join(_DATA_PATH, 'weibo', 'small_keywords_v3', 'valid_data'))
+    test_data = TabSepFileDataset(os.path.join(_DATA_PATH, 'weibo', 'small_keywords_v3', 'test_data'))
     return train_data, valid_data, test_data
 
-@Registry.dataset('weibo_keywords_v2')
+@Registry.dataset('weibo_keywords_v3')
 def weibo_keyword():
-    train_data = TabSepFileDataset(os.path.join(config.DATA_PATH, 'weibo_keywords_v2', 'train_data'))
-    valid_data = TabSepFileDataset(os.path.join(config.DATA_PATH, 'weibo_keywords_v2', 'valid_data'))
-    test_data = TabSepFileDataset(os.path.join(config.DATA_PATH, 'weibo_keywords_v2', 'test_data'))
+    train_data = TabSepFileDataset(os.path.join(_DATA_PATH, 'weibo_keywords_v3', 'train_data'))
+    valid_data = TabSepFileDataset(os.path.join(_DATA_PATH, 'weibo_keywords_v3', 'valid_data'))
+    test_data = TabSepFileDataset(os.path.join(_DATA_PATH, 'weibo_keywords_v3', 'test_data'))
     return train_data, valid_data, test_data
 
 @Registry.translator('weibo_trans_char')
@@ -145,7 +148,7 @@ class WeiboKeywordCharTranslator(Translator):
             logging.warning('Skip invalid line: %s' % str(example))
             return
 
-        src, _, _, tgt  = example
+        src, _, tgt, _  = example
         src = self.filter_split_str(src)[:self.max_len]
         tgt = [START_SYMBOL] + self.filter_split_str(tgt)[:self.max_len] + [END_SYMBOL]
 
@@ -156,7 +159,7 @@ class WeiboKeywordCharTranslator(Translator):
     def to_tensor(self, example):
         assert self.vocab is not None
 
-        src, kwds, conds, tgt = example
+        src, kwds, tgt, conds = example
         src = self.filter_split_str(src)[:self.max_len]
         tgt = [START_SYMBOL] + self.filter_split_str(tgt)[:self.max_len] + [END_SYMBOL]
         kwds = self.filter_split_str(kwds)[:self.max_len] + [END_SYMBOL]
@@ -198,6 +201,7 @@ class WeiboKeywordWordTranslator(WeiboKeywordCharTranslator):
     @staticmethod
     def filter_split_str(sent: str) -> List[str]:
         return list(filter(lambda x: x not in ("", ' ', '\t'), sent.split(' ')))
+
 
 def get_model(hparams, vocab: NSVocabulary):
     src_enc = StackedEncoder(
@@ -253,7 +257,7 @@ def main():
     import json
     args = sys.argv[1:]
     if '--dataset' not in sys.argv:
-        args += ['--dataset', 'weibo_keywords_v2']
+        args += ['--dataset', 'weibo_keywords_v3']
     if '--translator' not in sys.argv:
         args += ['--translator', 'weibo_trans_char']
 

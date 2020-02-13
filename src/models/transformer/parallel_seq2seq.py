@@ -58,6 +58,15 @@ class ParallelSeq2Seq(allennlp.models.Model):
         self._diversity_factor = diversity_factor
         self._acc_factor = accumulation_factor
 
+    def prepare_input(self, tokens, padding_val: int = 0):
+        if tokens is None:
+            token_ids, mask = None, None
+        elif tokens is not None and isinstance(tokens, dict):
+            token_ids, mask = tokens['tokens'], util.get_text_field_mask(tokens)
+        else:
+            token_ids, mask = tokens, (tokens != padding_val).long()
+        return token_ids, mask
+
     def forward(self,
                 source_tokens: Dict[str, torch.LongTensor],
                 target_tokens: Dict[str, torch.LongTensor] = None) -> Dict[str, torch.Tensor]:
@@ -66,11 +75,11 @@ class ParallelSeq2Seq(allennlp.models.Model):
         # source: (batch, source_length), containing the input word IDs
         # target: (batch, target_length), containing the output IDs
 
-        source, source_mask = source_tokens['tokens'], util.get_text_field_mask(source_tokens)
+        source, source_mask = self.prepare_input(source_tokens)
         state = self._encode(source, source_mask)
 
         if target_tokens is not None and self.training:
-            target, target_mask = target_tokens['tokens'], util.get_text_field_mask(target_tokens)
+            target, target_mask = self.prepare_input(target_tokens)
 
             predictions, logits = self._forward_training(state, target[:, :-1], source_mask, target_mask[:, :-1])
             if self._output_is_logit:

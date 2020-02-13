@@ -20,7 +20,7 @@ import config
 
 import data_adapter
 import training.exp_runner.opt_parser
-from models.transformer.encoder import TransformerEncoder, UTEncoder
+from models.transformer.encoder import TransformerEncoder
 
 
 def main():
@@ -28,7 +28,6 @@ def main():
     parser.add_argument('models', nargs='*', help='pretrained models for the same setting')
     parser.add_argument('--test', action="store_true", help='use testing mode')
     parser.add_argument('--num-layer', type=int, help='maximum number of stacked layers')
-    parser.add_argument('--use-ut', action="store_true", help='Use universal transformer instead of transformer')
 
     args = parser.parse_args()
 
@@ -54,30 +53,19 @@ def main():
         token_embedders={ "tokens": Embedding(vocab.get_vocab_size('nltokens'), emb_sz)}
     )
 
-    if args.use_ut:
-        transformer_encoder = UTEncoder(input_dim=emb_sz,
-                                        max_num_layers=st_ds_conf['max_num_layers'],
-                                        num_heads=st_ds_conf['num_heads'],
-                                        feedforward_hidden_dim=emb_sz,
-                                        feedforward_dropout=st_ds_conf['feedforward_dropout'],
-                                        attention_dropout=st_ds_conf['attention_dropout'],
-                                        residual_dropout=st_ds_conf['residual_dropout'],
-                                        use_act=st_ds_conf['act'],
-                                        use_vanilla_wiring=st_ds_conf['vanilla_wiring'])
-    else:
-        transformer_encoder = TransformerEncoder(input_dim=emb_sz,
-                                                 num_layers=st_ds_conf['max_num_layers'],
-                                                 num_heads=st_ds_conf['num_heads'],
-                                                 feedforward_hidden_dim=emb_sz,
-                                                 feedforward_dropout=st_ds_conf['feedforward_dropout'],
-                                                 attention_dropout=st_ds_conf['attention_dropout'],
-                                                 residual_dropout=st_ds_conf['residual_dropout'],
-                                                 )
+    encoder = TransformerEncoder(input_dim=emb_sz,
+                                 num_layers=st_ds_conf['max_num_layers'],
+                                 num_heads=st_ds_conf['num_heads'],
+                                 feedforward_hidden_dim=emb_sz,
+                                 feedforward_dropout=st_ds_conf['feedforward_dropout'],
+                                 attention_dropout=st_ds_conf['attention_dropout'],
+                                 residual_dropout=st_ds_conf['residual_dropout'],
+                                 )
 
     model = allennlp.models.SimpleSeq2Seq(
         vocab,
         source_embedder=src_embedder,
-        encoder=transformer_encoder,
+        encoder=encoder,
         max_decoding_steps=50,
         attention=allennlp.modules.attention.DotProductAttention(),
         beam_size=6,

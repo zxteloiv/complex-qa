@@ -1,6 +1,5 @@
 from typing import List, Generator, Tuple, Mapping, Optional
 import os.path
-import config
 import torch.nn
 from collections import defaultdict
 from allennlp.modules import Embedding
@@ -14,12 +13,15 @@ from trialbot.data import Translator, NSVocabulary, START_SYMBOL, END_SYMBOL, PA
 from trialbot.training import Registry, TrialBot, Events
 from trialbot.training.updater import TrainingUpdater, TestingUpdater
 from trialbot.utils.move_to_device import move_to_device
+from trialbot.training.hparamset import HyperParamSet
+from utils.root_finder import find_root
+_DATA_PATH = os.path.join(find_root(), 'data')
 
 import logging
 
 @Registry.hparamset()
 def weibo_keyword_ins():
-    hparams = config.common_settings()
+    hparams = HyperParamSet.common_settings(find_root())
     hparams.emb_sz = 300
     hparams.batch_sz = 100
     hparams.num_enc_layers = 2
@@ -89,16 +91,16 @@ def weibo_large_seq_loss_rbst():
 
 @Registry.dataset('small_keywords_v3')
 def weibo_keyword():
-    train_data = TabSepFileDataset(os.path.join(config.DATA_PATH, 'weibo', 'small_keywords_v3', 'train_data'))
-    valid_data = TabSepFileDataset(os.path.join(config.DATA_PATH, 'weibo', 'small_keywords_v3', 'valid_data'))
-    test_data = TabSepFileDataset(os.path.join(config.DATA_PATH, 'weibo', 'small_keywords_v3', 'test_data'))
+    train_data = TabSepFileDataset(os.path.join(_DATA_PATH, 'weibo', 'small_keywords_v3', 'train_data'))
+    valid_data = TabSepFileDataset(os.path.join(_DATA_PATH, 'weibo', 'small_keywords_v3', 'valid_data'))
+    test_data = TabSepFileDataset(os.path.join(_DATA_PATH, 'weibo', 'small_keywords_v3', 'test_data'))
     return train_data, valid_data, test_data
 
 @Registry.dataset('weibo_keywords_v3')
 def weibo_keyword():
-    train_data = TabSepFileDataset(os.path.join(config.DATA_PATH, 'weibo_keywords_v3', 'train_data'))
-    valid_data = TabSepFileDataset(os.path.join(config.DATA_PATH, 'weibo_keywords_v3', 'valid_data'))
-    test_data = TabSepFileDataset(os.path.join(config.DATA_PATH, 'weibo_keywords_v3', 'test_data'))
+    train_data = TabSepFileDataset(os.path.join(_DATA_PATH, 'weibo_keywords_v3', 'train_data'))
+    valid_data = TabSepFileDataset(os.path.join(_DATA_PATH, 'weibo_keywords_v3', 'valid_data'))
+    test_data = TabSepFileDataset(os.path.join(_DATA_PATH, 'weibo_keywords_v3', 'test_data'))
     return train_data, valid_data, test_data
 
 @Registry.translator('kwd_ins_char')
@@ -234,11 +236,11 @@ class InsTrainingUpdater(TrainingUpdater):
 
         eosid = bot.vocab.get_token_index(UniformInsTrans.END_OF_SPAN_TOKEN)
         if hparams.intraspan_weight == "uniform":
-            updater._order = UniformInsTrans(eosid, hparams.slot_loss)
+            updater._transform = UniformInsTrans(eosid, hparams.slot_loss)
         elif hparams.intraspan_weight == "bst":
-            updater._order = BSTInsTrans(eosid, hparams.slot_loss, tao=hparams.bst_tao)
+            updater._transform = BSTInsTrans(eosid, hparams.slot_loss, tao=hparams.bst_tao)
         elif hparams.intraspan_weight == "rbst":
-            updater._order = BSTInsTrans(eosid, hparams.slot_loss, tao=hparams.bst_tao, reverse=True)
+            updater._transform = BSTInsTrans(eosid, hparams.slot_loss, tao=hparams.bst_tao, reverse=True)
         return updater
 
     def update_epoch(self):
@@ -313,24 +315,6 @@ def main():
         new_engine = trialbot.training.trial_bot.Engine()
         new_engine.register_events(*Events)
         bot._engine = new_engine
-
-        def predicted_output(bot: TrialBot):
-            import json
-            model = bot.model
-            output = bot.state.output
-            if output is None:
-                return
-
-            output = model.decode(output)
-            def decode(output: List):
-                elem = output[0]
-                if isinstance(elem, str):
-                    return bot.translator.spm.DecodePieces(output)
-                elif isinstance(elem, list):
-                    return [decode(x) for x in output]
-
-            output["predicted_tokens"] = decode(output["predicted_tokens"])
-            print(json.dumps(output["predicted_tokens"]))
 
         @bot.attach_extension(Events.ITERATION_COMPLETED)
         def predicted_char_output(bot: TrialBot):

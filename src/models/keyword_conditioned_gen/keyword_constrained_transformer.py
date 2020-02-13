@@ -44,9 +44,9 @@ class KeywordConstrainedTransformer(ParallelSeq2Seq):
         self._alpha = alpha
 
     def forward(self,
-                source_tokens: Dict[str, torch.LongTensor],
-                target_tokens: Dict[str, torch.LongTensor] = None,
-                keyword_tokens: Dict[str, torch.LongTensor] = None):
+                source_tokens: torch.LongTensor,
+                target_tokens: Optional[torch.LongTensor] = None,
+                keyword_tokens: Optional[torch.LongTensor] = None):
 
         source, source_mask = self.prepare_input(source_tokens)
         target, target_mask = self.prepare_input(target_tokens)
@@ -84,11 +84,13 @@ class KeywordConstrainedTransformer(ParallelSeq2Seq):
         if self._bleu:
             self._bleu(predictions, target[:, 1:])
 
-    def prepare_input(self, tokens):
-        if tokens is not None:
+    def prepare_input(self, tokens, padding_val: int = 0):
+        if tokens is None:
+            token_ids, mask = None, None
+        elif tokens is not None and isinstance(tokens, dict):
             token_ids, mask = tokens['tokens'], util.get_text_field_mask(tokens)
         else:
-            token_ids, mask = None, None
+            token_ids, mask = tokens, (tokens != padding_val).long()
         return token_ids, mask
 
     def get_training_loss(self,
