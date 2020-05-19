@@ -242,3 +242,48 @@ def seq_cross_ent(logits: torch.FloatTensor,
         per_batch_loss = negative_log_likelihood.sum(1) / (weights.sum(1).float() + 1e-13)
         return per_batch_loss
 
+
+def seq_masked_mean(x: torch.Tensor, mask: torch.LongTensor, dim: int = 1):
+    """
+    estimate the mean of given sequence x along the length dimension,
+    not being concerned with masked slots as speicified.
+    :param x: (batch, L, dim)
+    :param mask: (batch, L)
+    :return: mean of x: (batch, dim)
+    """
+    summation: torch.Tensor = (x * mask.unsqueeze(-1)).sum(dim=dim)  # (batch, dim)
+    count: torch.Tensor = mask.sum(-1, keepdim=True).float() # (batch, 1)
+    mean = summation / (count + 1e-20)
+    return mean
+
+
+def seq_masked_var_mean(x: torch.Tensor, mask: torch.LongTensor, dim: int = 1):
+    """
+    estimate the variance and mean of given sequence x along the length dimension,
+    not being concerned with masked slots as speicified.
+    :param x: (batch, L, dim)
+    :param mask: (batch, L)
+    :return: mean of x: (batch, dim)
+    """
+    summation: torch.Tensor = (x * mask.unsqueeze(-1)).sum(dim=dim)  # (batch, dim)
+    squared_summation: torch.Tensor = ((x * mask.unsqueeze(-1)) ** 2).sum(dim=dim)  # (batch, dim)
+
+    count: torch.Tensor = mask.sum(-1, keepdim=True).float() # (batch, 1)
+    mean = summation * (count + 1e-13).reciprocal() # (batch, dim)
+
+    var = squared_summation - mean ** 2
+    return var, mean
+
+
+def seq_masked_std_mean(x: torch.Tensor, mask: torch.LongTensor, dim: int = 1):
+    """
+    estimate the standard variance and mean of given sequence x along the length dimension,
+    not being concerned with masked slots as speicified.
+    :param x: (batch, L, dim)
+    :param mask: (batch, L)
+    :return: mean of x: (batch, dim)
+    """
+    var, mean = seq_masked_var_mean(x, mask, dim)
+    std = (var.abs() + 1e-20) ** 0.5
+    return std, mean
+

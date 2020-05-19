@@ -25,8 +25,8 @@ def get_re2_variant(hparams, vocab: NSVocabulary):
     from models.modules.stacked_encoder import StackedEncoder
     from models.matching.mha_encoder import MHAEncoder
     from models.matching.re2 import RE2
-    from models.matching.re2_modules import Re2Block, Re2Prediction, Re2Pooling, Re2Conn
-    from models.matching.re2_modules import Re2Alignment, Re2Fusion, NeoFusion
+    from models.matching.re2_modules import Re2Block, Re2Prediction, Re2Conn, Re2Fusion, Re2Alignment, Re2Pooling
+    from models.matching.re2_modules import NeoRe2Pooling, NeoFusion
 
     emb_sz, hid_sz, dropout = hparams.emb_sz, hparams.hidden_size, hparams.dropout
     embedding_a = torch.nn.Embedding(vocab.get_vocab_size('nl'), emb_sz)
@@ -35,10 +35,17 @@ def get_re2_variant(hparams, vocab: NSVocabulary):
     conn: Re2Conn = Re2Conn(hparams.connection, emb_sz, hid_sz)
     conn_out_sz = conn.get_output_size()
 
-    # the input to predict is exactly the output of fusion, with the hidden size
-    pred = Re2Prediction(hparams.prediction, inp_sz=hid_sz, hid_sz=hid_sz,
+    if hasattr(hparams, "pooling") and hparams.pooling == "neo":
+        # neo fusion outputs 3times larger embedding, contains max, mean, and std pooling
+        pooling = NeoRe2Pooling()
+        pred_inp = hid_sz * 3
+    else:
+        # common fusion uses only max pooling
+        pooling = Re2Pooling()
+        pred_inp = hid_sz
+
+    pred = Re2Prediction(hparams.prediction, inp_sz=pred_inp, hid_sz=hid_sz,
                          num_classes=hparams.num_classes, dropout=dropout, activation=nn.SELU())
-    pooling = Re2Pooling()
 
     def _encoder(inp_sz):
         if hasattr(hparams, "encoder") and hparams.encoder == "lstm":
