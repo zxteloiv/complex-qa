@@ -13,27 +13,38 @@ from utils.root_finder import find_root
 _ROOT = find_root()
 
 @Registry.hparamset()
-def atis_none():
-    hparams = HyperParamSet.common_settings(_ROOT)
-    hparams.emb_sz = 300
-    hparams.hidden_size = 150
-    hparams.encoder_kernel_size = 3
-    hparams.num_classes = 2     # either 0 (true) or 1 (false), only 2 classes
-    hparams.num_stacked_block = 3
-    hparams.num_stacked_encoder = 2
-    hparams.dropout = .5
-    hparams.fusion = "full"         # simple, full
-    hparams.alignment = "linear"    # identity, linear
-    hparams.connection = "aug"      # none, residual, aug
-    hparams.prediction = "full"     # simple, full, symmetric
+def atis_neo_none():
+    p = HyperParamSet.common_settings(_ROOT)
+    p.alignment = "bilinear"    # identity, linear, bilinear
+    p.prediction = "full"     # simple, full, symmetric
+    p.encoder = "bilstm"
+    p.pooling = "neo"  # neo or vanilla
+    p.fusion = "neo"    # neo or vanilla
+    p.connection = "aug"      # none, residual, aug
+    p.num_classes = 2     # either 0 (true) or 1 (false), only 2 classes
+    p.emb_sz = 256
+    p.hidden_size = 128
+    p.num_stacked_block = 2
+    p.num_stacked_encoder = 2
+    p.dropout = .2
+    p.TRAINING_LIMIT = 200
+    p.batch_sz = 64
+    return p
+
+@Registry.hparamset()
+def django_neo_none():
+    hparams = atis_neo_none()
+    hparams.TRAINING_LIMIT = 60
     return hparams
 
 import datasets.atis_rank
 import datasets.atis_rank_translator
+import datasets.django_rank
+import datasets.django_rank_translator
 
 def get_model(hparams, vocab):
-    from experiments.build_model import get_re2_model
-    return get_re2_model(hparams, vocab)
+    from experiments.build_model import get_re2_variant
+    return get_re2_variant(hparams, vocab)
 
 class Re2TrainingUpdater(TrainingUpdater):
     def update_epoch(self):
@@ -105,6 +116,10 @@ def main():
         logging.getLogger().setLevel(logging.WARNING)
     else:
         logging.getLogger().setLevel(logging.INFO)
+
+    from utils.fix_seed import fix_seed
+    logging.info(f"set seed={args.seed}")
+    fix_seed(args.seed)
 
     bot = TrialBot(trial_name="reranking_baseline1", get_model_func=get_model, args=args)
     if args.test:
