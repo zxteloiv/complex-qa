@@ -5,6 +5,7 @@ import logging
 import torch.nn
 import numpy as np
 import random
+from fairseq.optim.adafactor import Adafactor
 
 from trialbot.data import NSVocabulary, PADDING_TOKEN
 from trialbot.training import Registry, TrialBot, Events
@@ -16,51 +17,30 @@ from utils.root_finder import find_root
 _ROOT = find_root()
 
 @Registry.hparamset()
-def atis_five_lstm():
-    hparams = HyperParamSet.common_settings(_ROOT)
-    hparams.emb_sz = 300
-    hparams.hidden_size = 150
-    hparams.encoder_kernel_size = 3
-    hparams.num_classes = 2     # either 0 (true) or 1 (false), only 2 classes
-    hparams.num_stacked_block = 3
-    hparams.num_stacked_encoder = 2
-    hparams.dropout = .5
-    hparams.fusion = "full"         # simple, full
-    hparams.alignment = "linear"    # identity, linear
-    hparams.connection = "aug"      # none, residual, aug
-    hparams.prediction = "full"     # simple, full, symmetric
-    hparams.encoder = "lstm"
-    return hparams
-
-@Registry.hparamset()
-def atis_neo():
-    p = atis_five_lstm()
+def atis_neo_five():
+    p = HyperParamSet.common_settings(_ROOT)
     p.alignment = "bilinear"    # identity, linear, bilinear
     p.prediction = "full"     # simple, full, symmetric
     p.encoder = "bilstm"
-    p.fusion = "neo"    # neo rather than vanilla
+    p.pooling = "neo"  # neo or vanilla
+    p.fusion = "neo"    # neo or vanilla
+    p.connection = "aug"      # none, residual, aug
+    p.num_classes = 2     # either 0 (true) or 1 (false), only 2 classes
     p.emb_sz = 256
-    p.hidden_size = 128
+    p.hidden_size = 256
     p.num_stacked_block = 2
     p.num_stacked_encoder = 2
-    p.dropout = .2
+    p.dropout = .5
     p.TRAINING_LIMIT = 200
+    p.weight_decay = 0.2
     p.batch_sz = 64
     return p
 
 @Registry.hparamset()
-def django_neo():
-    hparams = atis_neo()
-    hparams.TRAINING_LIMIT = 100
+def django_neo_five():
+    hparams = atis_neo_five()
+    hparams.TRAINING_LIMIT = 60
     return hparams
-
-@Registry.hparamset()
-def django_neo_v2():
-    p = django_neo()
-    p.emb_sz = 320
-    p.hidden_size = 160
-    p.TRAINING_LIMIT = 60
-    return p
 
 import datasets.atis_rank
 import datasets.atis_rank_translator
@@ -95,7 +75,6 @@ class Re2TrainingUpdater(TrainingUpdater):
 
         loss = torch.nn.functional.cross_entropy(logits, label)
         loss.backward()
-        torch.nn.utils.clip_grad_value_(model.parameters(), self._grad_clip_val)
 
         # do some clipping
         if torch.isnan(loss).any():
@@ -112,11 +91,9 @@ class Re2TrainingUpdater(TrainingUpdater):
         del obj._optims
 
         args, hparams, model = bot.args, bot.hparams, bot.model
-        bot.logger.info("Changed to AdamW with not only the same lr, beta, but also the default AdamW weight decay")
-        optim = torch.optim.AdamW(model.parameters(), hparams.ADAM_LR, hparams.ADAM_BETAS)
+        optim = Adafactor(model.parameters(), weight_decay=hparams.weight_decay)
+        bot.logger.info("Use Adafactor optimizer: " + str(optim))
         obj._optims = [optim]
-
-        obj._grad_clip_val = hparams.GRAD_CLIPPING
         return obj
 
 class Re2TestingUpdater(TestingUpdater):
