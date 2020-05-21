@@ -1,7 +1,7 @@
 import torch
 
 
-class SeqEmbeddingDropoutWrapper:
+class SeqEmbeddingDropoutWrapper(torch.nn.Module):
     """
     Add several dropout to the embedding tensor directly after the word embedding module.
     """
