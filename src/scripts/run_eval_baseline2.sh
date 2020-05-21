@@ -50,14 +50,14 @@ function eval_template () {
 # $5 hyperparameter used for tests
 # $6 python executable script name, based on trialbot
 snapshot=../../snapshots/django_five_hyp/reranking_baseline2/20200520-164346-neore2
-eval_template django 06base2 neore2 "$snapshot" django_neo_five baseline2_five_hyp.py
+eval_template django 06base2-dropout neore2 "$snapshot" django_neo_five_dropout baseline2_five_hyp.py
 
 snapshot=../../snapshots/django_five_hyp/baseline2_giant/20200520-170810-giant
-eval_template django 06base2 giant "$snapshot" django_giant_five baseline2_five_hyp_giant.py
+eval_template django 06base2-dropout giant "$snapshot" django_giant_five_dropout baseline2_five_hyp_giant.py
 
 snapshot=../../snapshots/atis_five_hyp/reranking_baseline2/20200520-164346-neore2
-eval_template atis 06base2 neore2 "$snapshot" atis_neo_five baseline2_five_hyp.py
+eval_template atis 06base2-dropout neore2 "$snapshot" atis_neo_five_dropout baseline2_five_hyp.py
 
 snapshot=../../snapshots/atis_five_hyp/baseline2_giant/20200520-170810-giant
-eval_template atis 06base2 giant "$snapshot" atis_giant_five baseline2_five_hyp_giant.py
+eval_template atis 06base2-dropout giant "$snapshot" atis_giant_five_dropout baseline2_five_hyp_giant.py
 

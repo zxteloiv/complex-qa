@@ -43,6 +43,20 @@ def django_giant_five():
     hparams.TRAINING_LIMIT = 60
     return hparams
 
+@Registry.hparamset()
+def atis_giant_five_dropout():
+    p = atis_giant_five()
+    p.dropout = .2
+    p.discrete_dropout = .1
+    p.TRAINING_LIMIT = 300
+    return p
+
+@Registry.hparamset()
+def django_giant_five_dropout():
+    p = atis_giant_five_dropout()
+    p.TRAINING_LIMIT = 80
+    return p
+
 import datasets.atis_rank
 import datasets.atis_rank_translator
 import datasets.django_rank

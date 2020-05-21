@@ -42,6 +42,20 @@ def django_neo_five():
     hparams.TRAINING_LIMIT = 60
     return hparams
 
+@Registry.hparamset()
+def atis_neo_five_dropout():
+    p = atis_neo_five()
+    p.dropout = .2
+    p.discrete_dropout = .1
+    p.TRAINING_LIMIT = 300
+    return p
+
+@Registry.hparamset()
+def django_neo_five_dropout():
+    p = atis_neo_five_dropout()
+    p.TRAINING_LIMIT = 80
+    return p
+
 import datasets.atis_rank
 import datasets.atis_rank_translator
 import datasets.django_rank

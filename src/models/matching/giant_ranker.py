@@ -126,7 +126,7 @@ class GiantRanker(nn.Module):
 
         loss_dim = loss_dim_a + loss_dim_b  # without using an EM-analogous opt.
 
-        return loss_normal + 0.5 * loss_dim.mean()
+        return loss_normal + self.dim_training_weight * loss_dim.mean()
 
     def inference(self, sent_a, sent_b):
         self.re2: RE2

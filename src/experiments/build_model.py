@@ -23,6 +23,7 @@ def get_re2_model(hparams, vocab: NSVocabulary):
 
 def get_re2_variant(hparams, vocab: NSVocabulary):
     from models.modules.stacked_encoder import StackedEncoder
+    from models.modules.embedding_dropout import SeqEmbeddingDropoutWrapper
     from models.matching.mha_encoder import MHAEncoder
     from models.matching.re2 import RE2
     from models.matching.re2_modules import Re2Block, Re2Prediction, Re2Conn, Re2Fusion, Re2Alignment, Re2Pooling
@@ -31,6 +32,11 @@ def get_re2_variant(hparams, vocab: NSVocabulary):
     emb_sz, hid_sz, dropout = hparams.emb_sz, hparams.hidden_size, hparams.dropout
     embedding_a = torch.nn.Embedding(vocab.get_vocab_size('nl'), emb_sz)
     embedding_b = torch.nn.Embedding(vocab.get_vocab_size('lf'), emb_sz)
+
+    d_dropout = hparams.discrete_dropout if hasattr(hparams, "discrete_dropout") else 0.
+    i_dropout = hparams.dropout if hasattr(hparams, "dropout") else 0.
+    embedding_a = SeqEmbeddingDropoutWrapper(embedding_a, d_dropout, i_dropout)
+    embedding_b = SeqEmbeddingDropoutWrapper(embedding_b, d_dropout, i_dropout)
 
     conn: Re2Conn = Re2Conn(hparams.connection, emb_sz, hid_sz)
     conn_out_sz = conn.get_output_size()
