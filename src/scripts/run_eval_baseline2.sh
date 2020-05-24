@@ -20,7 +20,7 @@ function eval_template () {
     mkdir -p ${DECODE_DIR}
     STAT_OUTFILE=${STAT_DIR}/${DATASET_TYPE}.${MODEL_NAME}.top
     DECODE_PREFIX=${DECODE_DIR}/decode.${DATASET_TYPE}.${MODEL_NAME}
-    TEST_FILE=../../data/${DATASET_TYPE}_rank/${DATASET_TYPE}_rank.five_hyp.test.jsonl
+    TEST_FILE=../../data/${DATASET_TYPE}_rank/${DATASET_TYPE}_rank.five_hyp.train.jsonl
     for ((i=1; i<501; i++));
     do
         if [ ! -f "$MODEL_PREFIX/model_state_$i.th" ]; then
