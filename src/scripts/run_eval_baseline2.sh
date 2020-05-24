@@ -43,21 +43,24 @@ function eval_template () {
     done;
 }
 
+# parameters must include:
+#   on which dataset, with which model (name and dump parameters), in which hyper-parameters
+#
 # $1 atis or django, dataset name
 # $2 stat output folder name
 # $3 model name, used in output files
 # $4 snapshot prefix, where the trained model are saved
 # $5 hyperparameter used for tests
 # $6 python executable script name, based on trialbot
-snapshot=../../snapshots/django_five_hyp/reranking_baseline2/20200520-164346-neore2
+snapshot=../../snapshots/django_five_hyp/reranking_baseline2/20200521-220647-neore2-dropout
 eval_template django 06base2-dropout neore2 "$snapshot" django_neo_five_dropout baseline2_five_hyp.py
 
-snapshot=../../snapshots/django_five_hyp/baseline2_giant/20200520-170810-giant
+snapshot=../../snapshots/django_five_hyp/baseline2_giant/20200521-220742-giant-dropout
 eval_template django 06base2-dropout giant "$snapshot" django_giant_five_dropout baseline2_five_hyp_giant.py
 
-snapshot=../../snapshots/atis_five_hyp/reranking_baseline2/20200520-164346-neore2
+snapshot=../../snapshots/atis_five_hyp/reranking_baseline2/20200521-220647-neore2-dropout
 eval_template atis 06base2-dropout neore2 "$snapshot" atis_neo_five_dropout baseline2_five_hyp.py
 
-snapshot=../../snapshots/atis_five_hyp/baseline2_giant/20200520-170810-giant
+snapshot=../../snapshots/atis_five_hyp/baseline2_giant/20200521-220742-giant-dropout
 eval_template atis 06base2-dropout giant "$snapshot" atis_giant_five_dropout baseline2_five_hyp_giant.py
 
