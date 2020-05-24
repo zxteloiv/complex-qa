@@ -47,4 +47,10 @@ def atis_full():
     test_data = JsonLDataset(os.path.join(_ATIS_DATA, 'atis_rank.full_hyp.test.jsonl'))
     return train_data, dev_data, test_data
 
+@Registry.dataset('atis_test_on_training')
+def atis_test_on_training():
+    train_data = JsonLDataset(os.path.join(_ATIS_DATA, 'atis_rank.five_hyp.train.jsonl'))
+    dev_data = JsonLDataset(os.path.join(_ATIS_DATA, 'atis_rank.five_hyp.dev.jsonl'))
+    test_data = JsonLDataset(os.path.join(_ATIS_DATA, 'atis_rank.five_hyp.train.jsonl'))
+    return train_data, dev_data, test_data
 
