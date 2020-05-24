@@ -29,7 +29,7 @@ function eval_template () {
         CUDA_VISIBLE_DEVICES=0 nohup python -u $EXECUTABLE \
             -p $HPARAM_SET \
             --translator ${DATASET_TYPE}_rank \
-            --dataset ${DATASET_TYPE}_five_hyp \
+            --dataset ${DATASET_TYPE}_test_on_training \
             --device 0 \
             --vocab-dump $MODEL_PREFIX/vocab \
             --test $MODEL_PREFIX/model_state_$i.th \
@@ -53,14 +53,14 @@ function eval_template () {
 # $5 hyperparameter used for tests
 # $6 python executable script name, based on trialbot
 snapshot=../../snapshots/django_five_hyp/reranking_baseline2/20200521-220647-neore2-dropout
-eval_template django 06base2-dropout neore2 "$snapshot" django_neo_five_dropout baseline2_five_hyp.py
+eval_template django 06base2-dropout-ontrain neore2 "$snapshot" django_neo_five_dropout baseline2_five_hyp.py
 
 snapshot=../../snapshots/django_five_hyp/baseline2_giant/20200521-220742-giant-dropout
-eval_template django 06base2-dropout giant "$snapshot" django_giant_five_dropout baseline2_five_hyp_giant.py
+eval_template django 06base2-dropout-ontrain giant "$snapshot" django_giant_five_dropout baseline2_five_hyp_giant.py
 
 snapshot=../../snapshots/atis_five_hyp/reranking_baseline2/20200521-220647-neore2-dropout
-eval_template atis 06base2-dropout neore2 "$snapshot" atis_neo_five_dropout baseline2_five_hyp.py
+eval_template atis 06base2-dropout-ontrain neore2 "$snapshot" atis_neo_five_dropout baseline2_five_hyp.py
 
 snapshot=../../snapshots/atis_five_hyp/baseline2_giant/20200521-220742-giant-dropout
-eval_template atis 06base2-dropout giant "$snapshot" atis_giant_five_dropout baseline2_five_hyp_giant.py
+eval_template atis 06base2-dropout-ontrain giant "$snapshot" atis_giant_five_dropout baseline2_five_hyp_giant.py
 
