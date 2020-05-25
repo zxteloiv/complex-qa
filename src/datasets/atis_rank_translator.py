@@ -99,7 +99,7 @@ class AtisRankTranslator(Translator):
 
         return batched_tensor
 
-@Registry.translator('atis_rank_ch')
+@Registry.translator('atis_rank_char')
 class AtisRankChTranslator(AtisRankTranslator):
     def __init__(self, max_len: int = 60):
         super().__init__(max_len)
@@ -223,10 +223,10 @@ class AtisRankChTranslator(AtisRankTranslator):
                     padded_word = ptpad(word, [0, max_char_size - word.size()[0]], mode="constant", value=pad)
                     e_tensors.append(padded_word)
 
-                e_tensor = torch.cat(e_tensors, dim=0)  # (words, C)
+                e_tensor = torch.stack(e_tensors, dim=0)  # (words, C)
                 padded_e = ptpad(e_tensor, [0, 0, 0, max_word_count - len(example)])    # (W, C)
                 b_tensors.append(padded_e)
-            b_tensor = torch.cat(b_tensors, dim=0) # (batch, W, C)
+            b_tensor = torch.stack(b_tensors, dim=0) # (batch, W, C)
             return b_tensor
 
         batched_tensor = {"hyp_label": torch.stack(list_by_keys["hyp_label"], dim=0),
