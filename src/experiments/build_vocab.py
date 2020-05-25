@@ -26,9 +26,9 @@ def atis():
     counter = _get_counter(train_data, translator)
 
     # same as the TranX settings.
-    print(f'counter basic stats: nl={len(counter["nl"])}, lf={len(counter["lf"])}')
+    print('counter basic stats: ' + ",".join(f"{ns}={len(counts)}" for ns, counts in counter.items()))
     vocab = NSVocabulary(counter,
-                         min_count=({"nl": 0, "lf": 0}),
+                         min_count=({"nl": 0, "lf": 0, "nlch": 0, "lfch": 0}),
                          max_vocab_size=5000,
                          )
     print('saving to ./atis_vocab')
@@ -43,9 +43,9 @@ def django():
     counter = _get_counter(train_data, translator)
 
     # same as the TranX settings.
-    print(f'counter basic stats: nl={len(counter["nl"])}, lf={len(counter["lf"])}')
+    print('counter basic stats: ' + ",".join(f"{ns}={len(counts)}" for ns, counts in counter.items()))
     vocab = NSVocabulary(counter,
-                         min_count=({"nl": 15, "lf": 15}),
+                         min_count=({"nl": 15, "lf": 15, "nlch": 0, "lfch": 0}),
                          max_vocab_size=5000,
                          )
     print('saving to ./django_vocab_15')

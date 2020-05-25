@@ -1,6 +1,6 @@
 import io
 import tokenize
-from .atis_rank_translator import AtisRankTranslator
+from .atis_rank_translator import AtisRankTranslator, AtisRankChTranslator
 from trialbot.training import Registry
 
 import token as tk
@@ -46,6 +46,16 @@ class DjangoRankTranslator(AtisRankTranslator):
     def split_lf_seq(self, seq: str):
         g = tokenize_code(seq, mode="decoder")
         return list(tok for tok in g)
+
+@Registry.translator('django_rank_char')
+class DjangoRankChTranslator(AtisRankChTranslator):
+    def __init__(self, max_len=50):
+        super().__init__(max_len)
+
+    def split_lf_seq(self, seq: str):
+        g = tokenize_code(seq, mode="decoder")
+        return list(tok for tok in g)
+
 
 if __name__ == '__main__':
     print(tokenize_code('offset = self.getpos()()'))
