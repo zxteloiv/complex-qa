@@ -18,9 +18,12 @@ def _get_counter(train_data, translator):
             counter[namespace][w] += 1
     return counter
 
-def atis():
+def atis(g):
     from datasets import atis_rank, atis_rank_translator
-    translator = atis_rank_translator.AtisRankTranslator(70)
+    if g == 'word':
+        translator = atis_rank_translator.AtisRankTranslator(70)
+    else:
+        translator = atis_rank_translator.AtisRankChTranslator(70)
     train_data, _, _ = atis_rank.atis_pure_none()
 
     counter = _get_counter(train_data, translator)
@@ -35,9 +38,12 @@ def atis():
     vocab.save_to_files('./atis_vocab')
     print(vocab)
 
-def django():
+def django(g):
     from datasets import django_rank, django_rank_translator
-    translator = django_rank_translator.DjangoRankTranslator(70)
+    if g == 'word':
+        translator = django_rank_translator.DjangoRankTranslator(70)
+    else:
+        translator = django_rank_translator.DjangoRankChTranslator(70)
     train_data, _, _ = django_rank.django_pure_none()
 
     counter = _get_counter(train_data, translator)
@@ -53,13 +59,17 @@ def django():
     print(vocab)
 
 if __name__ == '__main__':
-    import sys
-    dataset = sys.argv[1]
-    if dataset == "atis":
-        atis()
+    import sys, argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--dataset', '-d', choices=["atis", "django"])
+    parser.add_argument('--granularity', '-g', choices=['word', 'char'], default='word')
+    args = parser.parse_args()
 
-    elif dataset == "django":
-        django()
+    if args.dataset == 'atis':
+        atis(args.granularity)
+
+    elif args.dataset == "django":
+        django(args.granularity)
 
     else:
         print("dataset not available")
