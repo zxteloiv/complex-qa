@@ -34,6 +34,8 @@ def atis_neo_five():
     p.TRAINING_LIMIT = 200
     p.weight_decay = 0.2
     p.batch_sz = 64
+    p.char_emb_sz = 128
+    p.char_hid_sz = 128
     return p
 
 @Registry.hparamset()
@@ -65,7 +67,7 @@ def get_model(hparams, vocab: NSVocabulary):
     from experiments.build_model import get_re2_variant
     return get_re2_variant(hparams, vocab)
 
-class Re2TrainingUpdater(TrainingUpdater):
+class ChRE2TrainingUpdater(TrainingUpdater):
     def update_epoch(self):
         model, optim, iterator = self._models[0], self._optims[0], self._iterators[0]
         if iterator.is_new_epoch:
@@ -76,14 +78,20 @@ class Re2TrainingUpdater(TrainingUpdater):
         optim.zero_grad()
 
         batch = next(iterator)
-        sent_a, sent_b, label = list(map(batch.get, ("source_tokens", "hyp_tokens", "hyp_label")))
+        sent_a = batch['source_tokens']
+        sent_b = batch['hyp_tokens']
+        sent_char_a = batch['src_char_ids']
+        sent_char_b = batch['hyp_char_ids']
+        label = batch['hyp_label']
 
         if device >= 0:
             sent_a = move_to_device(sent_a, device)
             sent_b = move_to_device(sent_b, device)
+            sent_char_a = move_to_device(sent_char_a, device)
+            sent_char_b = move_to_device(sent_char_b, device)
             label = move_to_device(label, device)
 
-        logits = model(sent_a, sent_b)
+        logits = model(sent_a, sent_char_a, sent_b, sent_char_b)
         if self._dry_run:
             return 0
 
@@ -110,20 +118,28 @@ class Re2TrainingUpdater(TrainingUpdater):
         obj._optims = [optim]
         return obj
 
-class Re2TestingUpdater(TestingUpdater):
+class ChRE2TestingUpdater(TestingUpdater):
     def update_epoch(self):
         model, iterator, device = self._models[0], self._iterators[0], self._device
         model.eval()
         batch = next(iterator)
-        eid, hyp_rank, sent_a, sent_b = list(map(batch.get, ("ex_id", "hyp_rank", "source_tokens", "hyp_tokens")))
         if iterator.is_new_epoch:
             self.stop_epoch()
+
+        eid = batch['ex_id']
+        hyp_rank = batch['hyp_rank']
+        sent_a = batch['source_tokens']
+        sent_b = batch['hyp_tokens']
+        sent_char_a = batch['src_char_ids']
+        sent_char_b = batch['hyp_char_ids']
 
         if device >= 0:
             sent_a = move_to_device(sent_a, device)
             sent_b = move_to_device(sent_b, device)
+            sent_char_a = move_to_device(sent_char_a, device)
+            sent_char_b = move_to_device(sent_char_b, device)
 
-        output = model(sent_a, sent_b)
+        output = model(sent_a, sent_char_a, sent_b, sent_char_b)
         output = torch.log_softmax(output, dim=-1)
         correct_score = output[:, 1]
         return {"prediction": output, "ranking_score": correct_score, "ex_id": eid, "hyp_rank": hyp_rank}
@@ -135,7 +151,7 @@ def main():
     if '--dataset' not in sys.argv:
         args += ['--dataset', 'atis_five_hyp']
     if '--translator' not in sys.argv:
-        args += ['--translator', 'atis_rank']
+        args += ['--translator', 'atis_rank_char']
 
     parser = TrialBot.get_default_parser()
     args = parser.parse_args(args)
@@ -169,7 +185,7 @@ def main():
             for eid, hyp_rank, score in zip(*map(output.get, output_keys)):
                 print(json.dumps(dict(zip(output_keys, (eid, hyp_rank, score.item())))))
 
-        bot.updater = Re2TestingUpdater.from_bot(bot)
+        bot.updater = ChRE2TestingUpdater.from_bot(bot)
     else:
         # --------------------- Training -------------------------------
         from trialbot.training.extensions import every_epoch_model_saver
@@ -178,7 +194,7 @@ def main():
         bot.add_event_handler(Events.ITERATION_COMPLETED, end_with_nan_loss, 100)
         bot.add_event_handler(Events.EPOCH_COMPLETED, every_epoch_model_saver, 100)
         bot.add_event_handler(Events.STARTED, debug_models, 100)
-        bot.updater = Re2TrainingUpdater.from_bot(bot)
+        bot.updater = ChRE2TrainingUpdater.from_bot(bot)
     bot.run()
 
 if __name__ == '__main__':

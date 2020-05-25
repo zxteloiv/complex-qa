@@ -137,3 +137,90 @@ def get_giant_model(hparams, vocab: NSVocabulary):
 
     model = GiantRanker(re2.a_emb, re2.b_emb, re2, a2b, b2a, a_seq, b_seq, re2.padding_val_a, re2.padding_val_b)
     return model
+
+def get_re2_char_model(hparams, vocab: NSVocabulary):
+    from models.modules.stacked_encoder import StackedEncoder
+    from models.modules.embedding_dropout import SeqEmbeddingDropoutWrapper
+    from models.modules.word_char_embedding import WordCharEmbedding
+    from models.matching.mha_encoder import MHAEncoder
+    from models.matching.re2 import ChRE2
+    from models.matching.re2_modules import Re2Block, Re2Prediction, Re2Conn, Re2Fusion, Re2Alignment, Re2Pooling
+    from models.matching.re2_modules import NeoRe2Pooling, NeoFusion
+    from allennlp.modules.seq2seq_encoders import PytorchSeq2SeqWrapper
+
+    word_emb_sz, hid_sz, dropout = hparams.emb_sz, hparams.hidden_size, hparams.dropout
+    char_emb_sz, char_hid_sz = hparams.char_emb_sz, hparams.char_hid_sz
+    d_dropout = hparams.discrete_dropout if hasattr(hparams, "discrete_dropout") else 0.
+    i_dropout = hparams.dropout if hasattr(hparams, "dropout") else 0.
+
+    embedding_a = nn.Embedding(vocab.get_vocab_size('nl'), word_emb_sz)
+    embedding_char_a = nn.Embedding(vocab.get_vocab_size('nlch'), char_emb_sz)
+    embedding_b = nn.Embedding(vocab.get_vocab_size('lf'), word_emb_sz)
+    embedding_char_b = nn.Embedding(vocab.get_vocab_size('lfch'), char_emb_sz)
+
+    embedding_a = SeqEmbeddingDropoutWrapper(embedding_a, d_dropout, i_dropout)
+    embedding_char_a = SeqEmbeddingDropoutWrapper(embedding_char_a, d_dropout, i_dropout)
+    embedding_b = SeqEmbeddingDropoutWrapper(embedding_b, d_dropout, i_dropout)
+    embedding_char_b = SeqEmbeddingDropoutWrapper(embedding_char_b, d_dropout, i_dropout)
+
+
+    wc_emb_a = WordCharEmbedding(embedding_a, embedding_char_a,
+                                 PytorchSeq2SeqWrapper(
+                                     nn.LSTM(char_emb_sz, char_emb_sz, batch_first=True, dropout=i_dropout),
+                                 ))
+    wc_emb_b = WordCharEmbedding(embedding_b, embedding_char_b,
+                                 PytorchSeq2SeqWrapper(
+                                     nn.LSTM(char_emb_sz, char_emb_sz, batch_first=True, dropout=i_dropout),
+                                 ))
+
+    emb_sz = word_emb_sz + char_emb_sz
+    conn: Re2Conn = Re2Conn(hparams.connection, emb_sz, hid_sz)
+    conn_out_sz = conn.get_output_size()
+
+    if hasattr(hparams, "pooling") and hparams.pooling == "neo":
+        # neo fusion outputs 3times larger embedding, contains max, mean, and std pooling
+        pooling = NeoRe2Pooling()
+        pred_inp = hid_sz * 3
+    else:
+        # common fusion uses only max pooling
+        pooling = Re2Pooling()
+        pred_inp = hid_sz
+
+    pred = Re2Prediction(hparams.prediction, inp_sz=pred_inp, hid_sz=hid_sz,
+                         num_classes=hparams.num_classes, dropout=dropout, activation=nn.SELU())
+
+    def _encoder(inp_sz):
+        if hasattr(hparams, "encoder") and hparams.encoder == "lstm":
+            return PytorchSeq2SeqWrapper(torch.nn.LSTM(inp_sz, hid_sz, hparams.num_stacked_encoder,
+                                                       batch_first=True, dropout=dropout, bidirectional=False))
+        elif hasattr(hparams, "encoder") and hparams.encoder == "bilstm":
+            return PytorchSeq2SeqWrapper(torch.nn.LSTM(inp_sz, hid_sz // 2, hparams.num_stacked_encoder,
+                                                       batch_first=True, dropout=dropout, bidirectional=True))
+        else:
+            return StackedEncoder([
+                MHAEncoder(inp_sz if j == 0 else hid_sz, hid_sz, hparams.num_heads, dropout)
+                for j in range(hparams.num_stacked_encoder)
+            ], inp_sz, hid_sz, dropout, output_every_layer=False)
+
+    fusion_cls = NeoFusion if hasattr(hparams, "fusion") and hparams.fusion == "neo" else Re2Fusion
+
+    enc_inp_sz = lambda i: emb_sz if i == 0 else conn_out_sz
+    blocks = torch.nn.ModuleList([
+        Re2Block(
+            _encoder(enc_inp_sz(i)),
+            _encoder(enc_inp_sz(i)),
+            fusion_cls(hid_sz + enc_inp_sz(i), hid_sz, hparams.fusion == "full", dropout),
+            fusion_cls(hid_sz + enc_inp_sz(i), hid_sz, hparams.fusion == "full", dropout),
+            Re2Alignment(hid_sz + enc_inp_sz(i), hid_sz, hparams.alignment, nn.SELU()),
+            dropout=dropout,
+        )
+        for i in range(hparams.num_stacked_block)
+    ])
+
+    model = ChRE2(vocab.get_token_index(PADDING_TOKEN, 'nlch'),
+                  vocab.get_token_index(PADDING_TOKEN, 'lfch'),
+                  wc_emb_a, wc_emb_b, blocks, pooling, pooling, conn, pred,
+                  vocab.get_token_index(PADDING_TOKEN, 'nl'),
+                  vocab.get_token_index(PADDING_TOKEN, 'lf'))
+    return model
+

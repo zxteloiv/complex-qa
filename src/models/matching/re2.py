@@ -12,6 +12,7 @@ import torch
 from torch import nn
 from .re2_modules import Re2Block, Re2Prediction, Re2Pooling, Re2Conn
 from .re2_modules import Re2Encoder, Re2Alignment, Re2Fusion
+from utils.nn import prepare_input_mask
 
 class RE2(nn.Module):
     def __init__(self,
@@ -107,3 +108,33 @@ class RE2(nn.Module):
 
         model = RE2(embedding_a, embedding_b, blocks, pooling, pooling, conn, pred, padding_val_a, padding_val_b)
         return model
+
+
+class ChRE2(RE2):
+    def __init__(self,
+                 padding_char_a,
+                 padding_char_b,
+                 *args,
+                 **kwargs,
+                 ):
+        super().__init__(*args, **kwargs)
+        self.padding_char_a = padding_char_a
+        self.padding_char_b = padding_char_b
+
+    def forward(self,
+                sent_a: torch.LongTensor,
+                sent_a_char: torch.LongTensor,
+                sent_b: torch.LongTensor,
+                sent_b_char: torch.LongTensor,
+                ):
+
+        _, mask_a = prepare_input_mask(sent_a, self.padding_val_a)
+        _, chmask_a = prepare_input_mask(sent_a_char, self.padding_char_a)
+        _, mask_b = prepare_input_mask(sent_b, self.padding_val_b)
+        _, chmask_b = prepare_input_mask(sent_b_char, self.padding_char_b)
+
+        a = self.a_emb(sent_a, sent_a_char, chmask_a)
+        b = self.b_emb(sent_b, sent_b_char, chmask_b)
+        return self.forward_embs(a, b, mask_a, mask_b)
+
+
