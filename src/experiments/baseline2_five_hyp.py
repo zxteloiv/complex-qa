@@ -64,8 +64,8 @@ import datasets.django_rank
 import datasets.django_rank_translator
 
 def get_model(hparams, vocab: NSVocabulary):
-    from experiments.build_model import get_re2_variant
-    return get_re2_variant(hparams, vocab)
+    from experiments.build_model import get_re2_char_model
+    return get_re2_char_model(hparams, vocab)
 
 class ChRE2TrainingUpdater(TrainingUpdater):
     def update_epoch(self):
