@@ -106,9 +106,9 @@ class CharGiantRanker(nn.Module):
         pred_a_mask = (pred_a != self.a_pad).long()
         pred_b_mask = (pred_b != self.b_pad).long()
 
-        logits_pred_a2b = self.a2b.forward_emb(self.a_embedding.word_emb(pred_a), b_inp_emb, pred_a_mask, b_inp_mask)
+        logits_pred_a2b = self.a2b.forward_emb(self.a_embedding(pred_a), b_inp_emb, pred_a_mask, b_inp_mask)
         reward_pred_a2b = seq_likelihood(logits_pred_a2b, b_tgt, b_tgt_mask)
-        logits_pred_b2a = self.b2a.forward_emb(self.b_embedding.word_emb(pred_b), a_inp_emb, pred_b_mask, a_inp_mask)
+        logits_pred_b2a = self.b2a.forward_emb(self.b_embedding(pred_b), a_inp_emb, pred_b_mask, a_inp_mask)
         reward_pred_b2a = seq_likelihood(logits_pred_b2a, a_tgt, a_tgt_mask)
 
         pred_a_inp, pred_b_inp = pred_a[:, :-1].contiguous(), pred_b[:, :-1].contiguous()

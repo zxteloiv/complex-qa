@@ -140,15 +140,15 @@ class AtisRankChTranslator(AtisRankTranslator):
 
         ns_nl, ns_lf, ns_nlch, ns_lfch = self.namespace
 
-        # for every seq, get the list of characters of each word
-        src_chs_list = self._seq_char_vecs(src, ns_nlch)
-        tgt_chs_list = self._seq_char_vecs(tgt, ns_lfch)
-        hyp_chs_list = self._seq_char_vecs(hyp, ns_lfch)
-
         if self.add_special_token:
             src = self._add_tokens(src)
             tgt = self._add_tokens(tgt) if tgt else None
             hyp = self._add_tokens(hyp) if hyp else None
+
+        # for every seq, get the list of characters of each word
+        src_chs_list = self._seq_char_vecs(src, ns_nlch)
+        tgt_chs_list = self._seq_char_vecs(tgt, ns_lfch)
+        hyp_chs_list = self._seq_char_vecs(hyp, ns_lfch)
 
         src_toks = self._seq_word_vec(src, ns_nl)
         tgt_toks = self._seq_word_vec(tgt, ns_lf)
@@ -170,20 +170,24 @@ class AtisRankChTranslator(AtisRankTranslator):
 
     def _seq_char_vecs(self, seq: List[str], ns: str) -> Optional[List[torch.LongTensor]]:
         """get the list of char vector of each word"""
-        if seq is None:
+        if seq is None or len(seq) == 0:
             return None
 
         # list of char tokens
         all_token_chs: List[torch.LongTensor] = []
         for tok in seq:
-            chs = self._add_tokens(list(tok))
+            if tok in (START_SYMBOL, END_SYMBOL):
+                chs = self._add_tokens([PADDING_TOKEN])
+            else:
+                chs = self._add_tokens(list(tok))
+
             chs_ids = torch.tensor(list(self.vocab.get_token_index(ch, ns) for ch in chs))
             all_token_chs.append(chs_ids)
 
         return all_token_chs
 
     def _seq_word_vec(self, seq: List[str], ns: str) -> Optional[torch.Tensor]:
-        if seq is None:
+        if seq is None or len(seq) == 0:
             return None
         # word tokens
         return torch.tensor([self.vocab.get_token_index(tok, ns) for tok in seq])
