@@ -28,8 +28,8 @@ function eval_template () {
         fi
         CUDA_VISIBLE_DEVICES=0 nohup python -u $EXECUTABLE \
             -p $HPARAM_SET \
-            --translator ${DATASET_TYPE}_rank \
-            --dataset ${DATASET_TYPE}_test_on_training \
+            --translator ${DATASET_TYPE}_rank_char \
+            --dataset ${DATASET_TYPE}_five_hyp \
             --device 0 \
             --vocab-dump $MODEL_PREFIX/vocab \
             --test $MODEL_PREFIX/model_state_$i.th \
