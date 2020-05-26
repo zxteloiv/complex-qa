@@ -193,7 +193,7 @@ def seq_likelihood(logits: torch.FloatTensor,
 def seq_cross_ent(logits: torch.FloatTensor,
                   targets: torch.LongTensor,
                   weights: torch.FloatTensor,
-                  average: str = "batch",
+                  average: Optional[str] = "batch",
                   ):
     """
     logits : ``torch.FloatTensor``, required.

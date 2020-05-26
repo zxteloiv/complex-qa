@@ -230,3 +230,55 @@ def get_re2_char_model(hparams, vocab: NSVocabulary):
                   vocab.get_token_index(PADDING_TOKEN, 'lf'))
     return model
 
+def get_char_giant(hparams, vocab: NSVocabulary):
+    from models.matching.char_giant_ranker import CharGiantRanker
+    from models.matching.re2 import ChRE2
+    from models.matching.seq2seq_modeling import Seq2SeqModeling
+    from models.matching.seq_modeling import SeqModeling, PytorchSeq2SeqWrapper
+    from allennlp.modules.matrix_attention import BilinearMatrixAttention
+
+    re2: ChRE2 = get_re2_char_model(hparams, vocab)
+    emb_sz, hid_sz, dropout = hparams.emb_sz, hparams.hidden_size, hparams.dropout
+    RNNWrapper = PytorchSeq2SeqWrapper
+    get_rnn = lambda stateful: RNNWrapper(nn.LSTM(emb_sz, hid_sz, num_layers=hparams.num_stacked_encoder,
+                                                  batch_first=True, dropout=hparams.dropout), stateful=stateful)
+
+    a2b = Seq2SeqModeling(a_embedding=re2.a_emb.word_emb,
+                          b_embedding=re2.b_emb.word_emb,
+                          encoder=get_rnn(stateful=True),
+                          decoder=get_rnn(stateful=False),
+                          a_padding=re2.padding_val_a,
+                          b_padding=re2.padding_val_b,
+                          prediction=nn.Linear(hid_sz * 2, vocab.get_vocab_size('lf')),
+                          attention=BilinearMatrixAttention(hid_sz, hid_sz),
+                          )
+
+    b2a = Seq2SeqModeling(a_embedding=re2.b_emb.word_emb,
+                          b_embedding=re2.a_emb.word_emb,
+                          encoder=get_rnn(stateful=True),
+                          decoder=get_rnn(stateful=False),
+                          a_padding=re2.padding_val_b,
+                          b_padding=re2.padding_val_a,
+                          prediction=nn.Linear(hid_sz * 2, vocab.get_vocab_size('nl')),
+                          attention=BilinearMatrixAttention(hid_sz, hid_sz),
+                          )
+
+    a_seq = SeqModeling(embedding=re2.a_emb.word_emb,
+                        encoder=get_rnn(stateful=False),
+                        padding=re2.padding_val_a,
+                        prediction=nn.Linear(hid_sz * 2, vocab.get_vocab_size('nl')),
+                        attention=BilinearMatrixAttention(hid_sz, hid_sz),
+                        )
+
+    b_seq = SeqModeling(embedding=re2.b_emb.word_emb,
+                        encoder=get_rnn(stateful=False),
+                        padding=re2.padding_val_b,
+                        prediction=nn.Linear(hid_sz * 2, vocab.get_vocab_size('lf')),
+                        attention=BilinearMatrixAttention(hid_sz, hid_sz),
+                        )
+
+    model = CharGiantRanker(re2.a_emb.word_emb, re2.b_emb.word_emb,
+                            re2, a2b, b2a, a_seq, b_seq,
+                            re2.padding_val_a, re2.padding_val_b, re2.padding_char_a, re2.padding_char_b)
+    return model
+
