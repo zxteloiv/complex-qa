@@ -35,6 +35,8 @@ def atis_giant_five():
     p.TRAINING_LIMIT = 200
     p.weight_decay = 0.2
     p.batch_sz = 64
+    p.char_emb_sz = 128
+    p.char_hid_sz = 128
     return p
 
 @Registry.hparamset()
@@ -57,14 +59,30 @@ def django_giant_five_dropout():
     p.TRAINING_LIMIT = 80
     return p
 
+@Registry.hparamset()
+def atis_deep_giant():
+    p = atis_giant_five_dropout()
+    p.num_stacked_block = 4
+    p.num_stacked_encoder = 1
+    p.TRAINING_LIMIT = 200
+    return p
+
+@Registry.hparamset()
+def django_deep_giant():
+    p = django_giant_five_dropout()
+    p.num_stacked_block = 4
+    p.num_stacked_encoder = 1
+    p.TRAINING_LIMIT = 60
+    return p
+
 import datasets.atis_rank
 import datasets.atis_rank_translator
 import datasets.django_rank
 import datasets.django_rank_translator
 
 def get_model(hparams, vocab):
-    from experiments.build_model import get_giant_model
-    return get_giant_model(hparams, vocab)
+    from experiments.build_model import get_char_giant
+    return get_char_giant(hparams, vocab)
 
 class GiantTrainingUpdater(TrainingUpdater):
     def update_epoch(self):
@@ -77,14 +95,20 @@ class GiantTrainingUpdater(TrainingUpdater):
         optim.zero_grad()
 
         batch = next(iterator)
-        sent_a, sent_b, label = list(map(batch.get, ("source_tokens", "hyp_tokens", "hyp_label")))
+        sent_a = batch['source_tokens']
+        sent_b = batch['hyp_tokens']
+        sent_char_a = batch['src_char_ids']
+        sent_char_b = batch['hyp_char_ids']
+        label = batch['hyp_label']
 
         if device >= 0:
             sent_a = move_to_device(sent_a, device)
             sent_b = move_to_device(sent_b, device)
+            sent_char_a = move_to_device(sent_char_a, device)
+            sent_char_b = move_to_device(sent_char_b, device)
             label = move_to_device(label, device)
 
-        loss = model(sent_a, sent_b, label)
+        loss = model(sent_a, sent_b, sent_char_a, sent_char_b, label)
         loss.backward()
 
         # do some clipping
@@ -110,15 +134,23 @@ class GiantTestingUpdater(TestingUpdater):
         model, iterator, device = self._models[0], self._iterators[0], self._device
         model.eval()
         batch = next(iterator)
-        eid, hyp_rank, sent_a, sent_b = list(map(batch.get, ("ex_id", "hyp_rank", "source_tokens", "hyp_tokens")))
         if iterator.is_new_epoch:
             self.stop_epoch()
+
+        eid = batch['ex_id']
+        hyp_rank = batch['hyp_rank']
+        sent_a = batch['source_tokens']
+        sent_b = batch['hyp_tokens']
+        sent_char_a = batch['src_char_ids']
+        sent_char_b = batch['hyp_char_ids']
 
         if device >= 0:
             sent_a = move_to_device(sent_a, device)
             sent_b = move_to_device(sent_b, device)
+            sent_char_a = move_to_device(sent_char_a, device)
+            sent_char_b = move_to_device(sent_char_b, device)
 
-        scores = model.inference(sent_a, sent_b)
+        scores = model.inference(sent_a, sent_b, sent_char_a, sent_char_b)
         correct_score = model.forward_loss_weight(*scores)
         return {"ranking_score": correct_score, "ex_id": eid, "hyp_rank": hyp_rank}
 
@@ -132,7 +164,6 @@ def main():
         args += ['--translator', 'atis_rank']
 
     parser = TrialBot.get_default_parser()
-    parser.add_argument('--fine-tune', action="store_true")
     args = parser.parse_args(args)
     if args.debug:
         logging.getLogger().setLevel(logging.DEBUG)
@@ -174,10 +205,7 @@ def main():
         bot.add_event_handler(Events.ITERATION_COMPLETED, end_with_nan_loss, 100)
         bot.add_event_handler(Events.EPOCH_COMPLETED, every_epoch_model_saver, 100)
         bot.add_event_handler(Events.STARTED, debug_models, 100)
-        if args.fine_tune:
-            bot.updater = DevTuningUpdater.from_bot(bot)
-        else:
-            bot.updater = GiantTrainingUpdater.from_bot(bot)
+        bot.updater = GiantTrainingUpdater.from_bot(bot)
     bot.run()
 
 if __name__ == '__main__':
