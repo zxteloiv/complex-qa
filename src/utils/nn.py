@@ -287,3 +287,39 @@ def seq_masked_std_mean(x: torch.Tensor, mask: torch.LongTensor, dim: int = 1):
     std = (var.abs() + 1e-20) ** 0.5
     return std, mean
 
+def get_final_encoder_states(encoder_outputs: torch.Tensor,
+                             mask: torch.Tensor,
+                             bidirectional: bool = False) -> torch.Tensor:
+    """
+    Given the output from a ``Seq2SeqEncoder``, with shape ``(batch_size, sequence_length,
+    encoding_dim)``, this method returns the final hidden state for each element of the batch,
+    giving a tensor of shape ``(batch_size, encoding_dim)``.  This is not as simple as
+    ``encoder_outputs[:, -1]``, because the sequences could have different lengths.  We use the
+    mask (which has shape ``(batch_size, sequence_length)``) to find the final state for each batch
+    instance.
+
+    If all words are masked, which is an edge case not considered in the original AllenNLP code,
+    we simply chose the first (id=0) output as the embedding.
+
+    Additionally, if ``bidirectional`` is ``True``, we will split the final dimension of the
+    ``encoder_outputs`` into two and assume that the first half is for the forward direction of the
+    encoder and the second half is for the backward direction.  We will concatenate the last state
+    for each encoder dimension, giving ``encoder_outputs[:, -1, :encoding_dim/2]`` concatenated with
+    ``encoder_outputs[:, 0, encoding_dim/2:]``.
+    """
+    # These are the indices of the last words in the sequences (i.e. length sans padding - 1).  We
+    # are assuming sequences are right padded.
+    # Shape: (batch_size,)
+    last_word_indices = mask.sum(1).long() - 1
+    last_word_indices = last_word_indices * (last_word_indices >= 0)
+    batch_size, _, encoder_output_dim = encoder_outputs.size()
+    expanded_indices = last_word_indices.view(-1, 1, 1).expand(batch_size, 1, encoder_output_dim)
+    # Shape: (batch_size, 1, encoder_output_dim)
+    final_encoder_output = encoder_outputs.gather(1, expanded_indices)
+    final_encoder_output = final_encoder_output.squeeze(1)  # (batch_size, encoder_output_dim)
+    if bidirectional:
+        final_forward_output = final_encoder_output[:, :(encoder_output_dim // 2)]
+        final_backward_output = encoder_outputs[:, 0, (encoder_output_dim // 2):]
+        final_encoder_output = torch.cat([final_forward_output, final_backward_output], dim=-1)
+    return final_encoder_output
+

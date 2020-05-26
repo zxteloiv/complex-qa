@@ -166,11 +166,11 @@ def get_re2_char_model(hparams, vocab: NSVocabulary):
 
     wc_emb_a = WordCharEmbedding(embedding_a, embedding_char_a,
                                  PytorchSeq2SeqWrapper(
-                                     nn.LSTM(char_emb_sz, char_emb_sz, batch_first=True, dropout=i_dropout),
+                                     nn.LSTM(char_emb_sz, char_emb_sz, batch_first=True),
                                  ))
     wc_emb_b = WordCharEmbedding(embedding_b, embedding_char_b,
                                  PytorchSeq2SeqWrapper(
-                                     nn.LSTM(char_emb_sz, char_emb_sz, batch_first=True, dropout=i_dropout),
+                                     nn.LSTM(char_emb_sz, char_emb_sz, batch_first=True),
                                  ))
 
     emb_sz = word_emb_sz + char_emb_sz

@@ -143,7 +143,7 @@ class AtisRankChTranslator(AtisRankTranslator):
         # for every seq, get the list of characters of each word
         src_chs_list = self._seq_char_vecs(src, ns_nlch)
         tgt_chs_list = self._seq_char_vecs(tgt, ns_lfch)
-        hyp_chs_list = self._seq_char_vecs(tgt, ns_lfch)
+        hyp_chs_list = self._seq_char_vecs(hyp, ns_lfch)
 
         if self.add_special_token:
             src = self._add_tokens(src)
@@ -192,7 +192,12 @@ class AtisRankChTranslator(AtisRankTranslator):
         assert len(tensors) > 0
         list_by_keys = defaultdict(list)
         for instance in tensors:
-            if instance['hyp_tokens'] is None:
+            if any(x is None or len(x) == 0    # some hypothesis has no tokens
+                   for x in map(instance.get,
+                                ['hyp_tokens', 'hyp_char_list',
+                                 'source_tokens', 'src_char_list',
+                                 'target_tokens', 'tgt_char_list',
+                                 ])):
                 continue    # discard invalid data
             for k, tensor in instance.items():
                 list_by_keys[k].append(tensor)
@@ -223,6 +228,9 @@ class AtisRankChTranslator(AtisRankTranslator):
                     padded_word = ptpad(word, [0, max_char_size - word.size()[0]], mode="constant", value=pad)
                     e_tensors.append(padded_word)
 
+                if len(e_tensors) == 0:
+                    e_tensors.append(torch.full((max_word_count, max_char_size), pad))
+
                 e_tensor = torch.stack(e_tensors, dim=0)  # (words, C)
                 padded_e = ptpad(e_tensor, [0, 0, 0, max_word_count - len(example)])    # (W, C)
                 b_tensors.append(padded_e)
@@ -243,5 +251,9 @@ class AtisRankChTranslator(AtisRankTranslator):
 
                           "_raw": list_by_keys["_raw"],
                           }
+
+        assert batched_tensor['hyp_tokens'].size() == batched_tensor['hyp_char_ids'].size()[:-1]
+        assert batched_tensor['target_tokens'].size() == batched_tensor['tgt_char_ids'].size()[:-1]
+        assert batched_tensor['source_tokens'].size() == batched_tensor['src_char_ids'].size()[:-1]
 
         return batched_tensor

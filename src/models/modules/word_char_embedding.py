@@ -1,6 +1,6 @@
 import torch
 from torch import nn
-from allennlp.nn.util import get_final_encoder_states
+from utils.nn import get_final_encoder_states
 
 
 class WordCharEmbedding(nn.Module):
@@ -48,7 +48,7 @@ class WordCharEmbedding(nn.Module):
         # final_state: (batch * L, hid_emb)
         # final_char_state: (batch, L, hid_emb)
         final_state = get_final_encoder_states(hid, char_mask_rs, bidirectional=False)
-        final_char_state = final_state.reshape(orig_size[:2], -1)
+        final_char_state = final_state.reshape(*orig_size[:2], -1)
 
         # concat_word_emb: (batch, L, word_emb + hid_emb)
         concat_word_emb = torch.cat([word_emb, final_char_state], dim=-1)
