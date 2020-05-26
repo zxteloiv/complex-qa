@@ -49,13 +49,13 @@ def atis_neo_five_dropout():
     p = atis_neo_five()
     p.dropout = .2
     p.discrete_dropout = .1
-    p.TRAINING_LIMIT = 300
+    p.TRAINING_LIMIT = 200
     return p
 
 @Registry.hparamset()
 def django_neo_five_dropout():
     p = atis_neo_five_dropout()
-    p.TRAINING_LIMIT = 80
+    p.TRAINING_LIMIT = 60
     return p
 
 @Registry.hparamset()
@@ -70,6 +70,22 @@ def atis_deep_stack():
 def django_deep_stack():
     p = django_neo_five_dropout()
     p.num_stacked_block = 4
+    p.num_stacked_encoder = 1
+    p.TRAINING_LIMIT = 60
+    return p
+
+@Registry.hparamset()
+def atis_deeper():
+    p = atis_neo_five_dropout()
+    p.num_stacked_block = 6
+    p.num_stacked_encoder = 1
+    p.TRAINING_LIMIT = 200
+    return p
+
+@Registry.hparamset()
+def django_deeper():
+    p = django_neo_five_dropout()
+    p.num_stacked_block = 6
     p.num_stacked_encoder = 1
     p.TRAINING_LIMIT = 60
     return p
