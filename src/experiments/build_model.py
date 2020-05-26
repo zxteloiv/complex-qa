@@ -191,11 +191,17 @@ def get_re2_char_model(hparams, vocab: NSVocabulary):
 
     def _encoder(inp_sz):
         if hasattr(hparams, "encoder") and hparams.encoder == "lstm":
-            return PytorchSeq2SeqWrapper(torch.nn.LSTM(inp_sz, hid_sz, hparams.num_stacked_encoder,
-                                                       batch_first=True, dropout=dropout, bidirectional=False))
+            return PytorchSeq2SeqWrapper(
+                torch.nn.LSTM(inp_sz, hid_sz, hparams.num_stacked_encoder,
+                              batch_first=True, bidirectional=False,
+                              dropout=dropout if hparams.num_stacked_encoder > 1 else 0.)
+            )
         elif hasattr(hparams, "encoder") and hparams.encoder == "bilstm":
-            return PytorchSeq2SeqWrapper(torch.nn.LSTM(inp_sz, hid_sz // 2, hparams.num_stacked_encoder,
-                                                       batch_first=True, dropout=dropout, bidirectional=True))
+            return PytorchSeq2SeqWrapper(
+                torch.nn.LSTM(inp_sz, hid_sz // 2, hparams.num_stacked_encoder,
+                              batch_first=True, bidirectional=True,
+                              dropout=dropout if hparams.num_stacked_encoder > 1 else 0.)
+            )
         else:
             return StackedEncoder([
                 MHAEncoder(inp_sz if j == 0 else hid_sz, hid_sz, hparams.num_heads, dropout)
