@@ -6,7 +6,9 @@ class Re2Prediction(nn.Module):
     def __init__(self, mode: str, inp_sz: int, hid_sz: int, num_classes: int, dropout: float = .2, activation=nn.ReLU()):
         super().__init__()
         self.mode = mode.lower()
-        if mode in ("full", "symmetric"):
+        if mode == "full":
+            feat_sz = inp_sz * 5
+        elif mode == "symmetric":
             feat_sz = inp_sz * 4
         else:
             feat_sz = inp_sz * 2
@@ -25,7 +27,7 @@ class Re2Prediction(nn.Module):
 
     def _get_features(self, a, b):
         if self.mode == "full":
-            return torch.cat([a, b, a * b, a - b], dim=-1)
+            return torch.cat([a, b, a * b, a - b, b - a], dim=-1)
         elif self.mode == "symmetric":
             return torch.cat([a, b, a * b, torch.abs(a - b)], dim=-1)
         else:

@@ -52,13 +52,13 @@ class NeoFusion(nn.Module):
         self.full_mode = use_full_mode
         self.feature_mapping = Re2Dense(inp_sz, hid_sz, nn.SELU(), use_bias=True, use_weight_norm=True)
         self.dropout = nn.Dropout(dropout)
-        proj_inp = hid_sz * 4 if use_full_mode else hid_sz * 2
+        proj_inp = hid_sz * 5 if use_full_mode else hid_sz * 2
         self.proj = Re2Dense(proj_inp, hid_sz, nn.SELU(), use_bias=True, use_weight_norm=True)
 
     def forward(self, x, align):
         x = self.feature_mapping(x)
         align = self.feature_mapping(align)
-        features = [x, align, x - align, x * align] if self.full_mode else [x, align]
+        features = [x, align, x - align, align - x, x * align] if self.full_mode else [x, align]
         features = torch.cat(features, dim=-1)
         return self.proj(features)
 
