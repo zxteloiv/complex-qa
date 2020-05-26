@@ -35,6 +35,8 @@ def atis_giant_five():
     p.TRAINING_LIMIT = 200
     p.weight_decay = 0.2
     p.batch_sz = 64
+    p.char_emb_sz = 128
+    p.char_hid_sz = 128
     return p
 
 @Registry.hparamset()
