@@ -52,14 +52,20 @@ function eval_template () {
 # $4 snapshot prefix, where the trained model are saved
 # $5 hyperparameter used for tests
 # $6 python executable script name, based on trialbot
-snapshot=../../snapshots/django_five_hyp/reranking_baseline2/20200526-142818-chre2
-eval_template django 07base2-chre2 chre2 "$snapshot" django_deep_stack baseline2_five_hyp.py
+snapshot=../../snapshots/django_five_hyp/reranking_baseline2/20200526-231601-chre2
+eval_template django 07base2-chre2-dropout-f97e21c chre2 "$snapshot" django_neo_five_dropout baseline2_five_hyp.py
+
+snapshot=../../snapshots/django_five_hyp/reranking_baseline2/20200526-231722-chre2-deeper
+eval_template django 07base2-chre2-deeper-f97e21c chre2 "$snapshot" django_deeper baseline2_five_hyp.py
 
 #snapshot=../../snapshots/django_five_hyp/baseline2_giant/20200521-220742-giant-dropout
 #eval_template django 06base2-dropout-ontrain giant "$snapshot" django_giant_five_dropout baseline2_five_hyp_giant.py
 
-snapshot=../../snapshots/atis_five_hyp/reranking_baseline2/20200526-142818-chre2
-eval_template atis 06base2-chre2 chre2 "$snapshot" atis_deep_stack baseline2_five_hyp.py
+snapshot=../../snapshots/atis_five_hyp/reranking_baseline2/20200526-231601-chre2
+eval_template atis 07base2-chre2-dropout-f97e21c chre2 "$snapshot" atis_neo_five_dropout baseline2_five_hyp.py
+
+snapshot=../../snapshots/atis_five_hyp/reranking_baseline2/20200526-231601-chre2-deeper
+eval_template atis 07base2-chre2-deeper-f97e21c chre2 "$snapshot" atis_deeper baseline2_five_hyp.py
 
 #snapshot=../../snapshots/atis_five_hyp/baseline2_giant/20200521-220742-giant-dropout
 #eval_template atis 06base2-dropout-ontrain giant "$snapshot" atis_giant_five_dropout baseline2_five_hyp_giant.py
