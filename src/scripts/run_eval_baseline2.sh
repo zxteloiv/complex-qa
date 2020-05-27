@@ -56,11 +56,11 @@ function eval_template () {
 #eval_template django 06base2-dropout-ontrain neore2 "$snapshot" django_neo_five_dropout baseline2_five_hyp.py
 
 snapshot=../../snapshots/django_five_hyp/baseline2_giant/20200526-211640-chgiant
-eval_template django 07base2-chgiant giant "$snapshot" django_giant_five_dropout baseline2_five_hyp_giant.py
+eval_template django 07base2-chgiant giant "$snapshot" django_deep_giant baseline2_five_hyp_giant.py
 
 #snapshot=../../snapshots/atis_five_hyp/reranking_baseline2/20200521-220647-neore2-dropout
 #eval_template atis 06base2-dropout-ontrain neore2 "$snapshot" atis_neo_five_dropout baseline2_five_hyp.py
 
 snapshot=../../snapshots/atis_five_hyp/baseline2_giant/20200526-211632-chgiant
-eval_template atis 07base2-chgiant giant "$snapshot" atis_giant_five_dropout baseline2_five_hyp_giant.py
+eval_template atis 07base2-chgiant giant "$snapshot" atis_deep_giant baseline2_five_hyp_giant.py
 
