@@ -28,7 +28,7 @@ print(example)
 print('=' * 64)
 for ret in (nl_ret, lf_ret, ted_ret):
     all_res = ret.search(example, "dev")
-    for res in all_res:
+    for res in all_res[:10]:
         print(f" id: {res['ex_id']}-{res['hyp_rank']},\n"
               f"src: {' '.join(res['src'])},\n"
               f"tgt: {res['tgt']},\n"

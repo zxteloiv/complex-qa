@@ -39,7 +39,7 @@ def nl_ngram(args):
         for ex in tqdm(dataset, total=len(dataset)):  # datasets are all ensured to be ordered and to start from 0
             text = idx.escape(' '.join(ex['src']))
             query = {"q": text, "wt": "json", "rows": 30,
-                     "df": "hyp", 'fl': 'id, score', 'sort': 'score desc'}
+                     "df": "src", 'fl': 'id, score', 'sort': 'score desc'}
             try:
                 res = idx.search(query)['response']['docs']
             except:
