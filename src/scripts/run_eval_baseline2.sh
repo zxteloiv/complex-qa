@@ -55,7 +55,7 @@ function eval_template () {
 #snapshot=../../snapshots/django_five_hyp/reranking_baseline2/20200521-220647-neore2-dropout
 #eval_template django 06base2-dropout-ontrain neore2 "$snapshot" django_neo_five_dropout baseline2_five_hyp.py
 
-snapshot=../../snapshots/django_five_hyp/baseline2_giant/20200521-220742-giant-dropout
+snapshot=../../snapshots/django_five_hyp/baseline2_giant/20200526-211640-chgiant
 eval_template django 07base2-chgiant giant "$snapshot" django_giant_five_dropout baseline2_five_hyp_giant.py
 
 #snapshot=../../snapshots/atis_five_hyp/reranking_baseline2/20200521-220647-neore2-dropout
