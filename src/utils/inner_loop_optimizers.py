@@ -48,8 +48,7 @@ class GradientDescentLearningRule(nn.Module):
         updated_names_weights_dict = dict()
         for key in names_weights_dict.keys():
             updated_names_weights_dict[key] = names_weights_dict[key] - self.learning_rate * \
-                                              names_grads_wrt_params_dict[
-                                                  key]
+                                              names_grads_wrt_params_dict[key]
 
         return updated_names_weights_dict
 
