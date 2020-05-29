@@ -199,7 +199,8 @@ class CharGiantRanker(nn.Module):
 
     def forward_loss_weight(self, *args):
         x = torch.stack(args, dim=1)
-        prob = torch.softmax(self.loss_weighting[:3], dim=0)
+        loss_weighting = nn.Parameter(torch.zeros(5).float(), requires_grad=True)
+        prob = torch.softmax(loss_weighting[:3], dim=0)
         score = torch.matmul(x, prob)
         return score.log()
 

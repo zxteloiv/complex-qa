@@ -42,7 +42,7 @@ def _atis_base():
     p.discrete_dropout = .1
 
     p.TRAINING_LIMIT = 20
-    p.batch_sz = 32
+    p.batch_sz = 8
     p.task_batch_sz = 8
     p.num_inner_loops = 3
     return p
@@ -176,7 +176,8 @@ class MAMLUpdater(Updater):
                 sent_a, sent_b, char_a, char_b, label = self.read_model_input(support_batch)
                 model.zero_grad()
 
-                loss_step = F.cross_entropy(model(sent_a, char_a, sent_b, char_b), label)
+                # loss_step = F.cross_entropy(model(sent_a, char_a, sent_b, char_b), label)
+                loss_step = model(sent_a, sent_b, char_a, char_b, label)
                 grad_params = dict(model.named_parameters())
                 grads = torch.autograd.grad(loss_step, grad_params.values())
                 torch.nn.utils.clip_grad_value_(grads, self._grad_clip_val)
@@ -185,11 +186,12 @@ class MAMLUpdater(Updater):
                 new_weights = inner_opt.update_params(names_weights_dict=grad_params,
                                                       names_grads_wrt_params_dict=names_grads_wrt_params,
                                                       num_step=step)
-                model.load_state_dict(new_weights)
+                model.load_state_dict(new_weights, strict=False)
                 model.zero_grad()
                 query_batch = next(task_iter)
                 sent_a, sent_b, char_a, char_b, label = self.read_model_input(query_batch)
-                loss_eval_step = F.cross_entropy(model(sent_a, char_a, sent_b, char_b), label)
+                # loss_eval_step = F.cross_entropy(model(sent_a, char_a, sent_b, char_b), label)
+                loss_eval_step = model(sent_a, sent_b, char_a, char_b, label)
                 task_losses.append(loss_eval_step)
 
         model.load_state_dict(init_params)
@@ -208,6 +210,7 @@ class MAMLUpdater(Updater):
 
         init_params = copy.deepcopy(model.state_dict())
         task_logits = []
+        task_scores = []
         for query_example, task_data in zip(batch['_raw'], self.pseudo_task_data_generator(batch, "test")):
             model.load_state_dict(init_params)
             task_iter: RandomIterator = self._get_data_iter(task_data)
@@ -218,7 +221,7 @@ class MAMLUpdater(Updater):
                 with torch.enable_grad():
                     model.train()
                     model.zero_grad()
-                    loss_step = F.cross_entropy(model(sent_a, char_a, sent_b, char_b), label)
+                    loss_step = model(sent_a, sent_b, char_a, char_b, label)
                     grad_params = dict(model.named_parameters())
                     grads = torch.autograd.grad(loss_step, grad_params.values())
 
@@ -228,17 +231,21 @@ class MAMLUpdater(Updater):
                 new_weights = inner_opt.update_params(names_weights_dict=grad_params,
                                                       names_grads_wrt_params_dict=names_grads_wrt_params,
                                                       num_step=step)
-                model.load_state_dict(new_weights)
+                model.load_state_dict(new_weights, strict=False)
 
             translator: Translator = task_iter.translator
             query_batch = translator.batch_tensor([translator.to_tensor(query_example)])
             sent_a, sent_b, char_a, char_b, label = self.read_model_input(query_batch)
-            task_logits.append(model(sent_a, char_a, sent_b, char_b))
+            rankings = model.inference(sent_a, sent_b, char_a, char_b)
+            # task_logits.append(model.inference(sent_a, sent_b, char_a, char_b))
+            scores = model.forward_loss_weight(*rankings)
+            task_scores.append(scores)
 
-        output = torch.cat(task_logits, dim=0).log_softmax(dim=-1)
-        correct_score = output[:, 1]
+        output = torch.cat(task_scores, dim=0)
+        # output = torch.cat(task_logits, dim=0).log_softmax(dim=-1)
+        # correct_score = output[:, 1]
 
-        return {"prediction": output, "ranking_score": correct_score,
+        return {"prediction": output, "ranking_score": output,
                 "ex_id": batch["ex_id"], "hyp_rank": batch["hyp_rank"]}
 
 
@@ -266,6 +273,8 @@ class MAMLUpdater(Updater):
 
         support_set_iter_fn = partial(RandomIterator, shuffle=True, repeat=True,
                                       batch_size=hparams.task_batch_sz, translator=bot.translator,)
+        if hasattr(model, 'loss_weighting'):
+            del model.loss_weighting
 
         # NL similarity uses only example id as key, LF similarity requires hyp id to denote a concrete example
         retriever_cls = IDCacheRetriever if '_nl_' in args.hparamset else HypIDCacheRetriever
@@ -302,6 +311,7 @@ def main():
 
     bot = TrialBot(trial_name="meta_ranker", get_model_func=get_aux_model, args=args)
     bot.updater = MAMLUpdater.from_bot(bot)
+    bot.translator.turn_special_token(on=True)
     if args.test:
         import trialbot
         new_engine = trialbot.training.trial_bot.Engine()
