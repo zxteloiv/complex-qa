@@ -90,7 +90,7 @@ def get_aux_model(hparams, vocab):
                             total_num_inner_loop_steps=hparams.num_inner_loops,
                             use_learnable_learning_rates=True,)
     lslrgd.initialise(dict(model.named_parameters()))
-    return model, lslrgd
+    return [model, lslrgd]
     # return torch.nn.ModuleDict({"model": model, "inner_optim": lslrgd})
 
 class MAMLUpdater(Updater):
