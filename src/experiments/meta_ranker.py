@@ -93,6 +93,12 @@ def get_aux_model(hparams, vocab):
     return [model, lslrgd]
     # return torch.nn.ModuleDict({"model": model, "inner_optim": lslrgd})
 
+def get_clean_model(hparams, vocab):
+    model, lslrgd = get_aux_model(hparams, vocab)
+    if hasattr(model, 'loss_weighting'):
+        del model.loss_weighting
+    return [model, lslrgd]
+
 class MAMLUpdater(Updater):
     def __init__(self, models, iterators, optims,
                  retriever,
@@ -309,11 +315,12 @@ def main():
         logging.info(f"set seed={args.seed}")
         fix_seed(args.seed)
 
-    bot = TrialBot(trial_name="meta_ranker", get_model_func=get_aux_model, args=args)
-    bot.updater = MAMLUpdater.from_bot(bot)
-    bot.translator.turn_special_token(on=True)
     if args.test:
         import trialbot
+        bot = TrialBot(trial_name="meta_ranker", get_model_func=get_clean_model, args=args)
+        bot.updater = MAMLUpdater.from_bot(bot)
+        bot.translator.turn_special_token(on=True)
+
         new_engine = trialbot.training.trial_bot.Engine()
         new_engine.register_events(*Events)
         bot._engine = new_engine
@@ -331,6 +338,9 @@ def main():
 
     else:
         from utils.trial_bot_extensions import save_multiple_models_every_num_iters, save_multiple_models_per_epoch
+        bot = TrialBot(trial_name="meta_ranker", get_model_func=get_aux_model, args=args)
+        bot.updater = MAMLUpdater.from_bot(bot)
+        bot.translator.turn_special_token(on=True)
 
         @bot.attach_extension(Events.ITERATION_COMPLETED)
         def end_with_nan_loss(bot: TrialBot):
