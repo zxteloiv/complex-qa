@@ -33,30 +33,28 @@ def _atis_base():
     p.num_classes = 2     # either 0 (true) or 1 (false), only 2 classes
     p.emb_sz = 256
     p.hidden_size = 256
-    p.num_stacked_block = 2
-    p.num_stacked_encoder = 2
-    p.TRAINING_LIMIT = 200
+    p.num_stacked_block = 4
+    p.num_stacked_encoder = 1
     p.weight_decay = 0.2
-    p.batch_sz = 64
     p.char_emb_sz = 128
     p.char_hid_sz = 128
     p.dropout = .2
     p.discrete_dropout = .1
 
+    p.TRAINING_LIMIT = 20
+    p.batch_sz = 32
     p.task_batch_sz = 8
     p.num_inner_loops = 3
     return p
 
 def _django_base():
     p = _atis_base()
-    p.TRAINING_LIMIT = 60
+    p.TRAINING_LIMIT = 5
     return p
 
 @Registry.hparamset()
 def atis_nl_ngram():
     p = _atis_base()
-    p.TRAINING_LIMIT = 20
-    p.batch_sz = 16
     p.retriever_index_path = os.path.join(_ROOT, 'data', '_similarity_index', 'atis_nl_ngram.bin')
     return p
 
@@ -84,8 +82,8 @@ import datasets.django_rank
 import datasets.django_rank_translator
 
 def get_aux_model(hparams, vocab):
-    from experiments.build_model import get_re2_char_model
-    model: torch.nn.Module = get_re2_char_model(hparams, vocab)
+    from experiments.build_model import get_re2_char_model, get_char_giant
+    model: torch.nn.Module = get_char_giant(hparams, vocab)
     dev = torch.device('cpu') if hparams.DEVICE < 0 else torch.device(hparams.DEVICE)
     LSLRGD = LSLRGradientDescentLearningRule
     lslrgd: LSLRGD = LSLRGD(device=dev,
