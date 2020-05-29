@@ -42,6 +42,9 @@ def _atis_base():
     p.char_hid_sz = 128
     p.dropout = .2
     p.discrete_dropout = .1
+
+    p.task_batch_sz = 8
+    p.num_inner_loops = 3
     return p
 
 def _django_base():
@@ -54,8 +57,6 @@ def atis_nl_ngram():
     p = _atis_base()
     p.TRAINING_LIMIT = 20
     p.batch_sz = 16
-    p.num_inner_loops = 3
-    p.task_batch_sz = 8
     p.retriever_index_path = os.path.join(_ROOT, 'data', '_similarity_index', 'atis_nl_ngram.bin')
     return p
 
@@ -230,7 +231,7 @@ class MAMLUpdater(Updater):
             translator: Translator = task_iter.translator
             query_batch = translator.batch_tensor([translator.to_tensor(query_example)])
             sent_a, sent_b, char_a, char_b, label = self.read_model_input(query_batch)
-            task_logits.append(model(sent_a, sent_b, char_a, char_b))
+            task_logits.append(model(sent_a, char_a, sent_b, char_b))
 
         output = torch.cat(task_logits, dim=0).log_softmax(dim=-1)
         correct_score = output[:, 1]
