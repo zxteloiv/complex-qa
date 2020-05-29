@@ -92,7 +92,8 @@ def get_aux_model(hparams, vocab):
                             total_num_inner_loop_steps=hparams.num_inner_loops,
                             use_learnable_learning_rates=True,)
     lslrgd.initialise(dict(model.named_parameters()))
-    return torch.nn.ModuleDict({"model": model, "inner_optim": lslrgd})
+    return model, lslrgd
+    # return torch.nn.ModuleDict({"model": model, "inner_optim": lslrgd})
 
 class MAMLUpdater(Updater):
     def __init__(self, models, iterators, optims,
@@ -145,26 +146,25 @@ class MAMLUpdater(Updater):
         return sent_a, sent_b, sent_char_a, sent_char_b, label
 
     def update_epoch(self):
-        model_closure, iterator = self._models[0], self._iterators[0]
+        iterator = self._iterators[0]
         if iterator.is_new_epoch:
             self.stop_epoch()
 
-        device = self._device
-        model_closure.train()
+        model, lslrgd = self._models
         if self.training:
-            model_closure.train()
+            model.train()
+            lslrgd.train()
         else:
-            model_closure.eval()
+            model.eval()
+            lslrgd.eval()
 
-        model, inner_opt = model_closure['model'], model_closure['inner_optim']
-        outer_opt = self._optims[0]
         batch = next(iterator)
         if self.training:
-            return self._trainer_update(batch, model, inner_opt, outer_opt)
+            return self._trainer_update(batch, model, lslrgd)
         else:
-            return self._evaluation_updater(batch, model, inner_opt, outer_opt)
+            return self._evaluation_updater(batch, model, lslrgd)
 
-    def _trainer_update(self, batch, model, inner_opt, outer_opt):
+    def _trainer_update(self, batch, model, inner_opt):
 
         init_params = copy.deepcopy(model.state_dict())
         task_losses = []
@@ -195,14 +195,18 @@ class MAMLUpdater(Updater):
                 task_losses.append(loss_eval_step)
 
         model.load_state_dict(init_params)
-        outer_opt.zero_grad()
+        outer_opts = self._optims   # two optims for model and lslrgd respectively
+        for opt in outer_opts:
+            opt.zero_grad()
+
         loss_total = sum(task_losses) / len(task_losses)
         loss_total.backward()
-        outer_opt.step()
+        for opt in outer_opts:
+            opt.step()
 
         return {"loss": loss_total, "task_loss_count": len(task_losses)}
 
-    def _evaluation_updater(self, batch, model, inner_opt, outer_opt):
+    def _evaluation_updater(self, batch, model, inner_opt):
 
         init_params = copy.deepcopy(model.state_dict())
         task_logits = []
@@ -242,12 +246,15 @@ class MAMLUpdater(Updater):
 
     @classmethod
     def from_bot(cls, bot: TrialBot):
-        args, hparams, model_closure = bot.args, bot.hparams, bot.model
+        args, hparams, model_closure = bot.args, bot.hparams, bot.models
+        model, lslrgd = model_closure
         device = args.device
 
         # We treat inner loop and outer loop different and choose different optimizers for each.
-        outer_optim = Adafactor(model_closure.parameters(), weight_decay=hparams.weight_decay)
+        outer_optim = Adafactor(model.parameters(), weight_decay=hparams.weight_decay)
         bot.logger.info("Use Adafactor as outer optimizer: " + str(outer_optim))
+        outer_optim_for_inner_optim = Adafactor(lslrgd.parameters(), weight_decay=hparams.weight_decay)
+        bot.logger.info("Use Adafactor as outer optimizer: " + str(outer_optim_for_inner_optim))
 
         from functools import partial
 
@@ -265,7 +272,9 @@ class MAMLUpdater(Updater):
         # NL similarity uses only example id as key, LF similarity requires hyp id to denote a concrete example
         retriever_cls = IDCacheRetriever if '_nl_' in args.hparamset else HypIDCacheRetriever
         retriever = retriever_cls(filename=hparams.retriever_index_path, dataset=bot.train_set)
-        updater = cls(model_closure, iterator, outer_optim, retriever, device, hparams.GRAD_CLIPPING,
+        updater = cls(model_closure, iterator,
+                      [outer_optim, outer_optim_for_inner_optim],
+                      retriever, device, hparams.GRAD_CLIPPING,
                       support_set_iter_fn, hparams.num_inner_loops, is_training=(not args.test))
         return updater
 
@@ -313,8 +322,7 @@ def main():
                 print(json.dumps(dict(zip(output_keys, (eid, hyp_rank, score.item())))))
 
     else:
-        from trialbot.training.extensions import every_epoch_model_saver
-        from utils.trial_bot_extensions import save_model_every_num_iters
+        from utils.trial_bot_extensions import save_multiple_models_every_num_iters, save_multiple_models_per_epoch
 
         @bot.attach_extension(Events.ITERATION_COMPLETED)
         def end_with_nan_loss(bot: TrialBot):
@@ -343,8 +351,8 @@ def main():
                 return
             bot.logger.info(", ".join(f"{k}={v}" for k, v in zip(keys, map(output.get, keys))))
 
-        bot.add_event_handler(Events.EPOCH_COMPLETED, every_epoch_model_saver, 100)
-        bot.add_event_handler(Events.ITERATION_COMPLETED, save_model_every_num_iters, 100, interval=25)
+        bot.add_event_handler(Events.EPOCH_COMPLETED, save_multiple_models_per_epoch, 100)
+        bot.add_event_handler(Events.ITERATION_COMPLETED, save_multiple_models_every_num_iters, 100, interval=25)
         bot.add_event_handler(Events.ITERATION_COMPLETED, output_inspect, 100, keys=["loss", "task_loss_count"])
     bot.run()
 

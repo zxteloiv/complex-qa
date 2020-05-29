@@ -9,6 +9,22 @@ def save_model_every_num_iters(bot: TrialBot, interval: int = 100):
         torch.save(model.state_dict(), filename)
         bot.logger.info(f"model saved to {filename}")
 
+def save_multiple_models_every_num_iters(bot: TrialBot, interval: int = 100):
+    if bot.state.iteration % interval == 0:
+        savedir, models = bot.savepath, bot.models
+        for model_id, model in enumerate(models):
+            filename = os.path.join(savedir, f"model_{model_id}_state_{bot.state.epoch}-{bot.state.iteration}.th")
+            torch.save(model.state_dict(), filename)
+            bot.logger.info(f"model {model_id} saved to {filename}")
+
+def save_multiple_models_per_epoch(bot: TrialBot, interval: int == 1):
+    if bot.state.epoch % interval == 0:
+        savedir, models = bot.savepath, bot.models
+        for model_id, model in enumerate(models):
+            filename = os.path.join(savedir, f"model_{model_id}_state_{bot.state.epoch}.th")
+            torch.save(model.state_dict(), filename)
+            bot.logger.info(f"model {model_id} saved to {filename}")
+
 def debug_models(bot: TrialBot):
     bot.logger.debug(str(bot.models))
 
