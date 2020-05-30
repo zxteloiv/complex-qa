@@ -201,8 +201,10 @@ class MAMLUpdater(Updater):
             model.load_state_dict(init_params)
             task_iter = self._get_data_iter(task_data)
             # run multi-step
-            for step in range(self._num_inner_loop):
-                support_batch = next(task_iter)
+            for step, support_batch in enumerate(task_iter):
+                if step >= self._num_inner_loop:
+                    break
+
                 sent_a, sent_b, char_a, char_b, label = self.read_model_input(support_batch)
                 model.zero_grad()
 
@@ -228,6 +230,9 @@ class MAMLUpdater(Updater):
         outer_opts = self._optims   # two optims for model and lslrgd respectively
         for opt in outer_opts:
             opt.zero_grad()
+
+        if len(task_losses) == 0:
+            return {"loss": 0, "task_loss_count": len(task_losses), "msg": "all task has empty support"}
 
         loss_total = sum(task_losses) / len(task_losses)
         loss_total.backward()
