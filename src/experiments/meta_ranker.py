@@ -76,6 +76,30 @@ def atis_lf_ted():
     p.retriever_index_path = os.path.join(_ROOT, 'data', '_similarity_index', 'atis_lf_ted.bin')
     return p
 
+@Registry.hparamset()
+def django_nl_ngram():
+    p = _django_base()
+    p.retriever_index_path = os.path.join(_ROOT, 'data', '_similarity_index', 'django_nl_ngram.bin')
+    return p
+
+@Registry.hparamset()
+def django_nl_bert():
+    p = _django_base()
+    p.retriever_index_path = os.path.join(_ROOT, 'data', '_similarity_index', 'django_bert_nl.bin')
+    return p
+
+@Registry.hparamset()
+def django_lf_ngram():
+    p = _django_base()
+    p.retriever_index_path = os.path.join(_ROOT, 'data', '_similarity_index', 'django_lf_ngram.bin')
+    return p
+
+@Registry.hparamset()
+def django_lf_ted():
+    p = _django_base()
+    p.retriever_index_path = os.path.join(_ROOT, 'data', '_similarity_index', 'django_lf_ted.bin')
+    return p
+
 import datasets.atis_rank
 import datasets.atis_rank_translator
 import datasets.django_rank
