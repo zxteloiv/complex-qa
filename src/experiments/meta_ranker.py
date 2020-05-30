@@ -303,7 +303,8 @@ class MAMLUpdater(Updater):
         # either testing or debugging training, iter should be static, otherwise iterator returns data dynamically.
         # a dynamic iterator enables data shuffling and repeats several epochs.
         is_dynamic_iter = not (args.test or args.debug)
-        iterator = RandomIterator(bot.train_set, bot.hparams.batch_sz, bot.translator,
+        dataset = bot.test_set if args.test else bot.train_set
+        iterator = RandomIterator(dataset, bot.hparams.batch_sz, bot.translator,
                                   shuffle=is_dynamic_iter, repeat=is_dynamic_iter)
         if args.debug and args.skip:
             iterator.reset(args.skip)
