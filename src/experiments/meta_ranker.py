@@ -250,8 +250,10 @@ class MAMLUpdater(Updater):
             model.load_state_dict(init_params)
             task_iter: RandomIterator = self._get_data_iter(task_data)
             # run multi-step
-            for step in range(self._num_inner_loop):
-                support_batch = next(task_iter)
+            for step, support_batch in enumerate(task_iter):
+                if step >= self._num_inner_loop:
+                    break
+
                 sent_a, sent_b, char_a, char_b, label = self.read_model_input(support_batch)
                 with torch.enable_grad():
                     model.train()
