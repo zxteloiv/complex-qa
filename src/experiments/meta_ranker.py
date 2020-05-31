@@ -43,8 +43,8 @@ def _atis_base():
     p.discrete_dropout = .1
 
     p.TRAINING_LIMIT = 20
-    p.batch_sz = 8
-    p.task_batch_sz = 8
+    p.batch_sz = 64
+    # p.task_batch_sz = 8
     p.num_inner_loops = 3
     return p
 
@@ -310,7 +310,7 @@ class MAMLUpdater(Updater):
             iterator.reset(args.skip)
 
         support_set_iter_fn = partial(RandomIterator, shuffle=True, repeat=True,
-                                      batch_size=hparams.task_batch_sz, translator=bot.translator,)
+                                      batch_size=hparams.batch_sz, translator=bot.translator,)
         if hasattr(model, 'loss_weighting'):
             del model.loss_weighting
 
