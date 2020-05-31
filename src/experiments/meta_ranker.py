@@ -5,6 +5,8 @@ import logging
 import os.path
 import torch.nn
 from torch.nn import functional as F
+import itertools
+import functools
 import numpy as np
 import random
 import re
@@ -154,8 +156,11 @@ class MAMLUpdater(Updater):
         # each element is a list of similar examples,
         # corresponding to an example which indicates a different pseudotask
         # the None or empty lists (i.e., no similar examples found for some pseudotask) are filtered.
-        all_similar_examples = list(filter(None, map(lambda e: self._retriever.search(e, batch_source), batch['_raw'])))
-        support_sets = zip_cycle(*all_similar_examples)
+        all_similar_examples = filter(None, map(lambda e: self._retriever.search(e, batch_source), batch['_raw']))
+
+        # the support set is a concatenated list of all the pseudo-tasks.
+        #
+        support_sets = functools.reduce(lambda x, y: list(x) + list(y), zip_cycle(*all_similar_examples), [])
         return support_sets
 
     def read_model_input(self, batch):
