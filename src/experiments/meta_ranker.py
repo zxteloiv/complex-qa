@@ -20,6 +20,7 @@ from datasets.cached_retriever import IDCacheRetriever, HypIDCacheRetriever
 from fairseq.optim.adafactor import Adafactor
 
 from utils.root_finder import find_root
+from utils.itertools import zip_cycle
 _ROOT = find_root()
 
 def _atis_base():
@@ -140,21 +141,22 @@ class MAMLUpdater(Updater):
 
         self.training = is_training
 
-    def pseudo_task_data_generator(self, batch, batch_source: Optional[str] = None):
+    def get_pseudo_task_batch(self, batch, batch_source: Optional[str] = None):
         """
         Use a batch of data
         :param batch: a batch of data
-        :param batch_source:
+        :param batch_source: "train", "test", "dev", indicating the dataset from which the current batch comes
         :return:
         """
         if batch_source is None:
             batch_source = "train" if self.training else "test"
 
-        # every example is a pseudo task
-        for raw_example in batch['_raw']:
-            # list of similar examples
-            similar_examples: list = self._retriever.search(raw_example, batch_source)
-            yield similar_examples
+        # each element is a list of similar examples,
+        # corresponding to an example which indicates a different pseudotask
+        # the None or empty lists (i.e., no similar examples found for some pseudotask) are filtered.
+        all_similar_examples = list(filter(None, map(lambda e: self._retriever.search(e, batch_source), batch['_raw'])))
+        support_sets = zip_cycle(*all_similar_examples)
+        return support_sets
 
     def read_model_input(self, batch):
         sent_a = batch['source_tokens']
@@ -196,35 +198,33 @@ class MAMLUpdater(Updater):
 
         init_params = copy.deepcopy(model.state_dict())
         task_losses = []
-        for task_data in self.pseudo_task_data_generator(batch, "train"):
 
-            model.load_state_dict(init_params)
-            task_iter = self._get_data_iter(task_data)
-            # run multi-step
-            for step, support_batch in enumerate(task_iter):
-                if step >= self._num_inner_loop:
-                    break
+        all_task_data = self.get_pseudo_task_batch(batch, "train")
+        task_iter = self._get_data_iter(all_task_data)
 
-                sent_a, sent_b, char_a, char_b, label = self.read_model_input(support_batch)
-                model.zero_grad()
+        for step in range(self._num_inner_loop):
+            # each batch contains one example of every pseudo-tasks
+            support_batch = next(task_iter)
 
-                # loss_step = F.cross_entropy(model(sent_a, char_a, sent_b, char_b), label)
-                loss_step = model(sent_a, sent_b, char_a, char_b, label)
-                grad_params = dict(model.named_parameters())
-                grads = torch.autograd.grad(loss_step, grad_params.values())
-                torch.nn.utils.clip_grad_value_(grads, self._grad_clip_val)
-                names_grads_wrt_params = dict(zip(grad_params.keys(), grads))
+            sent_a, sent_b, char_a, char_b, label = self.read_model_input(support_batch)
+            model.zero_grad()
 
-                new_weights = inner_opt.update_params(names_weights_dict=grad_params,
-                                                      names_grads_wrt_params_dict=names_grads_wrt_params,
-                                                      num_step=step)
-                model.load_state_dict(new_weights, strict=False)
-                model.zero_grad()
-                query_batch = next(task_iter)
-                sent_a, sent_b, char_a, char_b, label = self.read_model_input(query_batch)
-                # loss_eval_step = F.cross_entropy(model(sent_a, char_a, sent_b, char_b), label)
-                loss_eval_step = model(sent_a, sent_b, char_a, char_b, label)
-                task_losses.append(loss_eval_step)
+            loss_step = model(sent_a, sent_b, char_a, char_b, label)
+            grad_params = dict(model.named_parameters())
+            grads = torch.autograd.grad(loss_step, grad_params.values())
+            torch.nn.utils.clip_grad_value_(grads, self._grad_clip_val)
+            names_grads_wrt_params = dict(zip(grad_params.keys(), grads))
+
+            new_weights = inner_opt.update_params(names_weights_dict=grad_params,
+                                                  names_grads_wrt_params_dict=names_grads_wrt_params,
+                                                  num_step=step)
+
+            model.load_state_dict(new_weights, strict=False)
+            model.zero_grad()
+            query_batch = next(task_iter)
+            sent_a, sent_b, char_a, char_b, label = self.read_model_input(query_batch)
+            loss_eval_step = model(sent_a, sent_b, char_a, char_b, label)
+            task_losses.append(loss_eval_step)
 
         model.load_state_dict(init_params)
         outer_opts = self._optims   # two optims for model and lslrgd respectively
