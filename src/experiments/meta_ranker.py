@@ -402,7 +402,6 @@ def main():
             bot.logger.info(", ".join(f"{k}={v}" for k, v in zip(keys, map(output.get, keys))))
 
         bot.add_event_handler(Events.EPOCH_COMPLETED, save_multiple_models_per_epoch, 100)
-        bot.add_event_handler(Events.ITERATION_COMPLETED, save_multiple_models_every_num_iters, 100, interval=25)
         bot.add_event_handler(Events.ITERATION_COMPLETED, output_inspect, 100, keys=["loss", "task_loss_count"])
     bot.run()
 

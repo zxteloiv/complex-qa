@@ -241,7 +241,9 @@ def get_char_giant(hparams, vocab: NSVocabulary):
     emb_sz, hid_sz, dropout = hparams.emb_sz, hparams.hidden_size, hparams.dropout
     RNNWrapper = PytorchSeq2SeqWrapper
     get_rnn = lambda stateful: RNNWrapper(nn.LSTM(emb_sz, hid_sz, num_layers=hparams.num_stacked_encoder,
-                                                  batch_first=True, dropout=hparams.dropout), stateful=stateful)
+                                                  dropout=hparams.dropout if hparams.num_stacked_block > 1 else 0.,
+                                                  batch_first=True,
+                                                  ), stateful=stateful)
 
     a2b = Seq2SeqModeling(a_embedding=re2.a_emb.word_emb,
                           b_embedding=re2.b_emb.word_emb,
