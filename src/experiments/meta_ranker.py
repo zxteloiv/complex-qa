@@ -248,42 +248,37 @@ class MAMLUpdater(Updater):
 
     def _evaluation_updater(self, batch, model, inner_opt):
 
-        init_params = copy.deepcopy(model.state_dict())
-        task_logits = []
-        task_scores = []
-        for query_example, task_data in zip(batch['_raw'], self.pseudo_task_data_generator(batch, "test")):
-            model.load_state_dict(init_params)
-            task_iter: RandomIterator = self._get_data_iter(task_data)
-            # run multi-step
-            for step, support_batch in enumerate(task_iter):
-                if step >= self._num_inner_loop:
-                    break
+        all_task_data = self.get_pseudo_task_batch(batch, "train")
+        task_iter = self._get_data_iter(all_task_data)
 
-                sent_a, sent_b, char_a, char_b, label = self.read_model_input(support_batch)
-                with torch.enable_grad():
-                    model.train()
-                    model.zero_grad()
-                    loss_step = model(sent_a, sent_b, char_a, char_b, label)
-                    grad_params = dict(model.named_parameters())
-                    grads = torch.autograd.grad(loss_step, grad_params.values())
+        for step in range(self._num_inner_loop):
+            # each batch contains one example of every pseudo-tasks
+            support_batch = next(task_iter)
 
-                model.eval()
-                torch.nn.utils.clip_grad_value_(grads, self._grad_clip_val)
-                names_grads_wrt_params = dict(zip(grad_params.keys(), grads))
-                new_weights = inner_opt.update_params(names_weights_dict=grad_params,
-                                                      names_grads_wrt_params_dict=names_grads_wrt_params,
-                                                      num_step=step)
-                model.load_state_dict(new_weights, strict=False)
+            sent_a, sent_b, char_a, char_b, label = self.read_model_input(support_batch)
+            with torch.enable_grad():
+                model.train()
+                model.zero_grad()
+                loss_step = model(sent_a, sent_b, char_a, char_b, label)
+                grad_params = dict(model.named_parameters())
+                grads = torch.autograd.grad(loss_step, grad_params.values())
 
-            translator: Translator = task_iter.translator
-            query_batch = translator.batch_tensor([translator.to_tensor(query_example)])
-            sent_a, sent_b, char_a, char_b, label = self.read_model_input(query_batch)
-            rankings = model.inference(sent_a, sent_b, char_a, char_b)
-            # task_logits.append(model.inference(sent_a, sent_b, char_a, char_b))
-            scores = model.forward_loss_weight(*rankings)
-            task_scores.append(scores)
+            torch.nn.utils.clip_grad_value_(grads, self._grad_clip_val)
+            names_grads_wrt_params = dict(zip(grad_params.keys(), grads))
 
-        output = torch.cat(task_scores, dim=0)
+            new_weights = inner_opt.update_params(names_weights_dict=grad_params,
+                                                  names_grads_wrt_params_dict=names_grads_wrt_params,
+                                                  num_step=step)
+
+            model.load_state_dict(new_weights, strict=False)
+
+        model.eval()
+        sent_a, sent_b, char_a, char_b, label = self.read_model_input(batch)
+        rankings = model.inference(sent_a, sent_b, char_a, char_b)
+        # task_logits.append(model.inference(sent_a, sent_b, char_a, char_b))
+        output = model.forward_loss_weight(*rankings)
+
+        # output = torch.cat(scores, dim=0)
         # output = torch.cat(task_logits, dim=0).log_softmax(dim=-1)
         # correct_score = output[:, 1]
 
