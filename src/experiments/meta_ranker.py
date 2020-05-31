@@ -286,6 +286,7 @@ class MAMLUpdater(Updater):
                 "rank_match": rankings[0],
                 "rank_a2b": rankings[1],
                 "rank_b2a": rankings[2],
+                "label": label,
                 "ex_id": batch["ex_id"], "hyp_rank": batch["hyp_rank"]}
 
 
@@ -337,6 +338,7 @@ def main():
         args += ['--translator', 'atis_rank']
 
     parser = TrialBot.get_default_parser()
+    parser.add_argument('--dev', action='store_true', help="use dev data for testing mode, only works with --test opt")
     args = parser.parse_args(args)
     if args.debug:
         logging.getLogger().setLevel(logging.DEBUG)
@@ -367,10 +369,10 @@ def main():
             if output is None:
                 return
 
-            output_keys = ("ex_id", "hyp_rank", "ranking_score", "rank_match", "rank_a2b", "rank_b2a")
-            for eid, hyp_rank, score, r1, r2, r3 in zip(*map(output.get, output_keys)):
+            output_keys = ("ex_id", "hyp_rank", "label", "ranking_score", "rank_match", "rank_a2b", "rank_b2a")
+            for eid, hyp_rank, lbl, score, r1, r2, r3 in zip(*map(output.get, output_keys)):
                 print(json.dumps(dict(zip(output_keys,
-                                          (eid, hyp_rank, score.item(), r1.item(), r2.item(), r3.item())))))
+                                          (eid, hyp_rank, lbl, score.item(), r1.item(), r2.item(), r3.item())))))
 
     else:
         from utils.trial_bot_extensions import save_multiple_models_every_num_iters, save_multiple_models_per_epoch
