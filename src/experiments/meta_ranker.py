@@ -283,6 +283,9 @@ class MAMLUpdater(Updater):
         # correct_score = output[:, 1]
 
         return {"prediction": output, "ranking_score": output,
+                "rank_match": rankings[0],
+                "rank_a2b": rankings[1],
+                "rank_b2a": rankings[2],
                 "ex_id": batch["ex_id"], "hyp_rank": batch["hyp_rank"]}
 
 
@@ -364,9 +367,10 @@ def main():
             if output is None:
                 return
 
-            output_keys = ("ex_id", "hyp_rank", "ranking_score")
-            for eid, hyp_rank, score in zip(*map(output.get, output_keys)):
-                print(json.dumps(dict(zip(output_keys, (eid, hyp_rank, score.item())))))
+            output_keys = ("ex_id", "hyp_rank", "ranking_score", "rank_match", "rank_a2b", "rank_b2a")
+            for eid, hyp_rank, score, r1, r2, r3 in zip(*map(output.get, output_keys)):
+                print(json.dumps(dict(zip(output_keys,
+                                          (eid, hyp_rank, score.item(), r1.item(), r2.item(), r3.item())))))
 
     else:
         from utils.trial_bot_extensions import save_multiple_models_every_num_iters, save_multiple_models_per_epoch
