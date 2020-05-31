@@ -250,6 +250,7 @@ class MAMLUpdater(Updater):
 
         all_task_data = self.get_pseudo_task_batch(batch, "train")
         task_iter = self._get_data_iter(all_task_data)
+        init_params = copy.deepcopy(model.state_dict())
 
         for step in range(self._num_inner_loop):
             # each batch contains one example of every pseudo-tasks
@@ -277,6 +278,8 @@ class MAMLUpdater(Updater):
         rankings = model.inference(sent_a, sent_b, char_a, char_b)
         # task_logits.append(model.inference(sent_a, sent_b, char_a, char_b))
         output = model.forward_loss_weight(*rankings)
+
+        model.load_state_dict(init_params)  # reset the original model
 
         # output = torch.cat(scores, dim=0)
         # output = torch.cat(task_logits, dim=0).log_softmax(dim=-1)

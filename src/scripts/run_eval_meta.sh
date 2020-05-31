@@ -26,7 +26,7 @@ function eval_template () {
         if [ ! -f "$MODEL_PREFIX/model_0_state_$i.th" ]; then
             continue
         fi
-        CUDA_VISIBLE_DEVICES=0 nohup python -u $EXECUTABLE \
+        CUDA_VISIBLE_DEVICES=1 nohup python -u $EXECUTABLE \
             -p $HPARAM_SET \
             --translator ${DATASET_TYPE}_rank_char \
             --dataset ${DATASET_TYPE}_five_hyp \
@@ -46,23 +46,25 @@ function eval_template () {
 }
 
 snapshot=../../snapshots/atis_five_hyp/meta_ranker/20200531-202803-qmaml-lfngram
-eval_template atis 09quick-maml-deep-chgiant lfngram "$snapshot" atis_lf_ngram meta_ranker.py
+eval_template atis 08qmaml-deep-chgiant-fixed-eval lfngram "$snapshot" atis_lf_ngram meta_ranker.py
 
 snapshot=../../snapshots/atis_five_hyp/meta_ranker/20200531-202803-qmaml-lfted
-eval_template atis 09quick-maml-deep-chgiant lfted "$snapshot" atis_lf_ted meta_ranker.py
+eval_template atis 08qmaml-deep-chgiant-fixed-eval lfted "$snapshot" atis_lf_ted meta_ranker.py
 
 snapshot=../../snapshots/atis_five_hyp/meta_ranker/20200531-202803-qmaml-nlbert
-eval_template atis 09quick-maml-deep-chgiant nlbert "$snapshot" atis_nl_bert meta_ranker.py
+eval_template atis 08qmaml-deep-chgiant-fixed-eval nlbert "$snapshot" atis_nl_bert meta_ranker.py
 
 snapshot=../../snapshots/atis_five_hyp/meta_ranker/20200531-202803-qmaml-nlngram
-eval_template atis 09quick-maml-deep-chgiant nlngram "$snapshot" atis_nl_ngram meta_ranker.py
+eval_template atis 08qmaml-deep-chgiant-fixed-eval nlngram "$snapshot" atis_nl_ngram meta_ranker.py
 
 snapshot=../../snapshots/django_five_hyp/meta_ranker/20200531-202849-qmaml-lfngram
-eval_template django 09quick-maml-deep-chgiant lfngram "$snapshot" django_lf_ngram meta_ranker.py
+eval_template django 08qmaml-deep-chgiant-fixed-eval lfngram "$snapshot" django_lf_ngram meta_ranker.py
 
 snapshot=../../snapshots/django_five_hyp/meta_ranker/20200531-202803-qmaml-nlbert
-eval_template django 09quick-maml-deep-chgiant nlbert "$snapshot" django_nl_bert meta_ranker.py
+eval_template django 08qmaml-deep-chgiant-fixed-eval nlbert "$snapshot" django_nl_bert meta_ranker.py
 
 snapshot=../../snapshots/django_five_hyp/meta_ranker/20200531-202804-qmaml-nlngram
-eval_template django 09quick-maml-deep-chgiant nlngram "$snapshot" django_nl_ngram meta_ranker.py
+eval_template django 08qmaml-deep-chgiant-fixed-eval nlngram "$snapshot" django_nl_ngram meta_ranker.py
 
+snapshot=../../snapshots/django_five_hyp/meta_ranker/20200531-144815-qmaml-lfted
+eval_template django 08qmaml-deep-chgiant-fixed-eval lfted "$snapshot" django_lf_ted meta_ranker.py
