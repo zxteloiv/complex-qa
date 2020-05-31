@@ -372,7 +372,7 @@ def main():
             output_keys = ("ex_id", "hyp_rank", "label", "ranking_score", "rank_match", "rank_a2b", "rank_b2a")
             for eid, hyp_rank, lbl, score, r1, r2, r3 in zip(*map(output.get, output_keys)):
                 print(json.dumps(dict(zip(output_keys,
-                                          (eid, hyp_rank, lbl, score.item(), r1.item(), r2.item(), r3.item())))))
+                                          (eid, hyp_rank, lbl.item(), score.item(), r1.item(), r2.item(), r3.item())))))
 
     else:
         from utils.trial_bot_extensions import save_multiple_models_every_num_iters, save_multiple_models_per_epoch
