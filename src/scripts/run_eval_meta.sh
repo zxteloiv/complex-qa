@@ -45,8 +45,24 @@ function eval_template () {
     done;
 }
 
-snapshot=../../snapshots/django_five_hyp/meta_ranker/20200531-144815-quick-maml
-eval_template django 07quickmaml-deep-chgiant lfted "$snapshot" django_lf_ted meta_ranker.py
+snapshot=../../snapshots/atis_five_hyp/meta_ranker/20200531-202803-qmaml-lfngram
+eval_template atis 09quick-maml-deep-chgiant lfngram "$snapshot" atis_lf_ngram meta_ranker.py
 
-snapshot=../../snapshots/atis_five_hyp/meta_ranker/20200531-144859
-eval_template atis 07quickmaml-deep-chgiant lfted "$snapshot" atis_lf_ted meta_ranker.py
+snapshot=../../snapshots/atis_five_hyp/meta_ranker/20200531-202803-qmaml-lfted
+eval_template atis 09quick-maml-deep-chgiant lfted "$snapshot" atis_lf_ted meta_ranker.py
+
+snapshot=../../snapshots/atis_five_hyp/meta_ranker/20200531-202803-qmaml-nlbert
+eval_template atis 09quick-maml-deep-chgiant nlbert "$snapshot" atis_nl_bert meta_ranker.py
+
+snapshot=../../snapshots/atis_five_hyp/meta_ranker/20200531-202803-qmaml-nlngram
+eval_template atis 09quick-maml-deep-chgiant nlngram "$snapshot" atis_nl_ngram meta_ranker.py
+
+snapshot=../../snapshots/django_five_hyp/meta_ranker/20200531-202849-qmaml-lfngram
+eval_template django 09quick-maml-deep-chgiant lfngram "$snapshot" django_lf_ngram meta_ranker.py
+
+snapshot=../../snapshots/django_five_hyp/meta_ranker/20200531-202803-qmaml-nlbert
+eval_template django 09quick-maml-deep-chgiant nlbert "$snapshot" django_nl_bert meta_ranker.py
+
+snapshot=../../snapshots/django_five_hyp/meta_ranker/20200531-202804-qmaml-nlngram
+eval_template django 09quick-maml-deep-chgiant nlngram "$snapshot" django_nl_ngram meta_ranker.py
+
