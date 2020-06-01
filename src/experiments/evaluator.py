@@ -37,7 +37,7 @@ def _print_stat(data, rank_weights: Optional[list] = None):
     if rank_weights is None:
         keyfunc = lambda x: x['ranking_score']
     else:
-        keyfunc = lambda x: np.dot(rank_weights, x['subrankings']).item()
+        keyfunc = lambda x: np.dot(rank_weights, x['subrankings']).item() if 'subrankings' in x else -999999.
 
     if rank_weights is not None:
         print(f"using given weights: {rank_weights}")
@@ -78,13 +78,13 @@ def dump_rerank(test_file, ranking_file, max_rank_filter):
 
 def _normalize_subrankings(data, rkey='subrankings'):
     # shape: (hyp_num, #subrankings=3)
-    subranking_vecs = np.array(list(score[rkey] for v in data.values() for score in v))
+    subranking_vecs = np.array(list(filter(None, (score.get(rkey) for v in data.values() for score in v))))
     mean = subranking_vecs.mean(axis=0).tolist()
     std = subranking_vecs.std(axis=0).tolist()
 
     for k, v in data.items():           # key: ex_id
         for ith, item in enumerate(v):  # item: ex_id, hyp
-            subranks = item[rkey]
+            subranks = item[rkey] if rkey in item else [-99999, -99999, -99999]
             norm_ranks = list(map(lambda r, m, s: (r - m) / s, subranks, mean, std))
             data[k][ith][rkey]  = norm_ranks
 
