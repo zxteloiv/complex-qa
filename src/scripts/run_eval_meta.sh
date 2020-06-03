@@ -45,26 +45,26 @@ function eval_template () {
     done;
 }
 
-snapshot=../../snapshots/atis_five_hyp/meta_ranker/20200531-202803-qmaml-lfngram
-eval_template atis 08qmaml-deep-chgiant-fixed-eval lfngram "$snapshot" atis_lf_ngram meta_ranker.py
+#snapshot=../../snapshots/atis_five_hyp/meta_ranker/20200531-202803-qmaml-lfngram
+#eval_template atis 08qmaml-deep-chgiant-fixed-eval lfngram "$snapshot" atis_lf_ngram meta_ranker.py
+#
+#snapshot=../../snapshots/atis_five_hyp/meta_ranker/20200531-202803-qmaml-lfted
+#eval_template atis 08qmaml-deep-chgiant-fixed-eval lfted "$snapshot" atis_lf_ted meta_ranker.py
+#
+#snapshot=../../snapshots/atis_five_hyp/meta_ranker/20200531-202803-qmaml-nlbert
+#eval_template atis 08qmaml-deep-chgiant-fixed-eval nlbert "$snapshot" atis_nl_bert meta_ranker.py
+#
+#snapshot=../../snapshots/atis_five_hyp/meta_ranker/20200531-202803-qmaml-nlngram
+#eval_template atis 08qmaml-deep-chgiant-fixed-eval nlngram "$snapshot" atis_nl_ngram meta_ranker.py
 
-snapshot=../../snapshots/atis_five_hyp/meta_ranker/20200531-202803-qmaml-lfted
-eval_template atis 08qmaml-deep-chgiant-fixed-eval lfted "$snapshot" atis_lf_ted meta_ranker.py
+snapshot=../../snapshots/django_five_hyp/meta_ranker/20200603-172343-esim-lfngram
+eval_template django 11qmaml-esim lfngram "$snapshot" django_lf_ngram meta_ranker_esim.py
 
-snapshot=../../snapshots/atis_five_hyp/meta_ranker/20200531-202803-qmaml-nlbert
-eval_template atis 08qmaml-deep-chgiant-fixed-eval nlbert "$snapshot" atis_nl_bert meta_ranker.py
+snapshot=../../snapshots/django_five_hyp/meta_ranker/20200603-172343-esim-lfted
+eval_template django 11qmaml-esim lfted "$snapshot" django_lf_ted meta_ranker_esim.py
 
-snapshot=../../snapshots/atis_five_hyp/meta_ranker/20200531-202803-qmaml-nlngram
-eval_template atis 08qmaml-deep-chgiant-fixed-eval nlngram "$snapshot" atis_nl_ngram meta_ranker.py
+snapshot=../../snapshots/django_five_hyp/meta_ranker/20200603-172343-esim-nlbert
+eval_template django 11qmaml-esim nlbert "$snapshot" django_nl_bert meta_ranker_esim.py
 
-snapshot=../../snapshots/django_five_hyp/meta_ranker/20200531-202849-qmaml-lfngram
-eval_template django 08qmaml-deep-chgiant-fixed-eval lfngram "$snapshot" django_lf_ngram meta_ranker.py
-
-snapshot=../../snapshots/django_five_hyp/meta_ranker/20200531-202803-qmaml-nlbert
-eval_template django 08qmaml-deep-chgiant-fixed-eval nlbert "$snapshot" django_nl_bert meta_ranker.py
-
-snapshot=../../snapshots/django_five_hyp/meta_ranker/20200531-202804-qmaml-nlngram
-eval_template django 08qmaml-deep-chgiant-fixed-eval nlngram "$snapshot" django_nl_ngram meta_ranker.py
-
-snapshot=../../snapshots/django_five_hyp/meta_ranker/20200531-144815-qmaml-lfted
-eval_template django 08qmaml-deep-chgiant-fixed-eval lfted "$snapshot" django_lf_ted meta_ranker.py
+snapshot=../../snapshots/django_five_hyp/meta_ranker/20200603-172342-esim-nlngram
+eval_template django 11qmaml-esim nlngram "$snapshot" django_nl_ngram meta_ranker_esim.py
