@@ -39,14 +39,14 @@ def _atis_base():
     p.dropout = .2
     p.discrete_dropout = .1
 
-    p.TRAINING_LIMIT = 20
+    p.TRAINING_LIMIT = 40
     p.batch_sz = 64
-    p.num_inner_loops = 3
+    p.num_inner_loops = 4
     return p
 
 def _django_base():
     p = _atis_base()
-    p.TRAINING_LIMIT = 5
+    p.TRAINING_LIMIT = 10
     return p
 
 @Registry.hparamset()
@@ -395,7 +395,7 @@ def main():
 
         bot.add_event_handler(Events.EPOCH_COMPLETED, save_multiple_models_per_epoch, 100)
         bot.add_event_handler(Events.EPOCH_COMPLETED, gc_collect, 100)
-        bot.add_event_handler(Events.ITERATION_COMPLETED, save_multiple_models_every_num_iters, 100, interval=2000)
+        bot.add_event_handler(Events.ITERATION_COMPLETED, save_multiple_models_every_num_iters, 100, interval=1000)
         bot.add_event_handler(Events.ITERATION_COMPLETED, output_inspect, 100, keys=["loss", "task_loss_count"])
     bot.run()
 
