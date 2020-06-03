@@ -284,3 +284,74 @@ def get_char_giant(hparams, vocab: NSVocabulary):
                             re2.padding_val_a, re2.padding_val_b, re2.padding_char_a, re2.padding_char_b)
     return model
 
+def get_esim(hparams, vocab: NSVocabulary):
+    from models.matching.esim_seq import SeqESIM
+    from models.matching.re2_modules import Re2Alignment, NeoRe2Pooling, Re2Dense, Re2Prediction
+    from models.modules.embedding_dropout import SeqEmbeddingDropoutWrapper
+    from models.modules.word_char_embedding import WordCharEmbedding
+    from allennlp.modules.seq2seq_encoders import PytorchSeq2SeqWrapper
+
+    word_emb_sz, hid_sz, dropout = hparams.emb_sz, hparams.hidden_size, hparams.dropout
+    char_emb_sz, char_hid_sz = hparams.char_emb_sz, hparams.char_hid_sz
+
+    d_dropout = hparams.discrete_dropout if hasattr(hparams, "discrete_dropout") else 0.
+    i_dropout = hparams.dropout if hasattr(hparams, "dropout") else 0.
+
+    embedding_a = nn.Embedding(vocab.get_vocab_size('nl'), word_emb_sz)
+    embedding_char_a = nn.Embedding(vocab.get_vocab_size('nlch'), char_emb_sz)
+    embedding_b = nn.Embedding(vocab.get_vocab_size('lf'), word_emb_sz)
+    embedding_char_b = nn.Embedding(vocab.get_vocab_size('lfch'), char_emb_sz)
+
+    embedding_a = SeqEmbeddingDropoutWrapper(embedding_a, d_dropout, i_dropout)
+    embedding_char_a = SeqEmbeddingDropoutWrapper(embedding_char_a, d_dropout, i_dropout)
+    embedding_b = SeqEmbeddingDropoutWrapper(embedding_b, d_dropout, i_dropout)
+    embedding_char_b = SeqEmbeddingDropoutWrapper(embedding_char_b, d_dropout, i_dropout)
+
+    wc_emb_a = WordCharEmbedding(embedding_a, embedding_char_a,
+                                 PytorchSeq2SeqWrapper(
+                                     nn.LSTM(char_emb_sz, char_emb_sz, batch_first=True),
+                                 ))
+    wc_emb_b = WordCharEmbedding(embedding_b, embedding_char_b,
+                                 PytorchSeq2SeqWrapper(
+                                     nn.LSTM(char_emb_sz, char_emb_sz, batch_first=True),
+                                 ))
+    emb_sz = word_emb_sz + char_emb_sz
+
+    model = SeqESIM(
+        a_embedding=wc_emb_a,
+        b_embedding=wc_emb_b,
+        a_encoder=PytorchSeq2SeqWrapper(
+            nn.LSTM(emb_sz, hid_sz // 2, batch_first=True,
+                    num_layers=hparams.num_encoder_layer,
+                    dropout=dropout if hparams.num_encoder_layer > 0 else 0.,)
+        ),
+        b_encoder=PytorchSeq2SeqWrapper(
+            nn.LSTM(emb_sz, hid_sz // 2, batch_first=True,
+                    num_layers=hparams.num_encoder_layer,
+                    dropout=dropout if hparams.num_encoder_layer > 0 else 0.,
+                    bidirectional=True)
+        ),
+        alignment=Re2Alignment(hid_sz, hid_sz, "bilinear", activation=nn.SELU(), passthrough=True),
+        a_precomp_trans=Re2Dense(hid_sz * 5, # heuristic features: a, align, a - align, align - a, a * align
+                                 out_size=hid_sz, activation=nn.SELU(), ),
+        b_precomp_trans=Re2Dense(hid_sz * 5, # heuristic features: a, align, a - align, align - a, a * align
+                                 out_size=hid_sz, activation=nn.SELU(), ),
+        a_composition=PytorchSeq2SeqWrapper(
+            nn.LSTM(emb_sz, hid_sz, batch_first=True,
+                    num_layers=hparams.num_composition_layer,
+                    dropout=dropout if hparams.num_composition_layer > 0 else 0.,)
+        ),
+        b_composition=PytorchSeq2SeqWrapper(
+            nn.LSTM(emb_sz, hid_sz, batch_first=True,
+                    num_layers=hparams.num_composition_layer,
+                    dropout=dropout if hparams.num_composition_layer > 0 else 0.,)
+        ),
+        a_pooling=NeoRe2Pooling(),
+        b_pooling=NeoRe2Pooling(),
+        prediction=Re2Prediction(mode="full", inp_sz=hid_sz, hid_sz=hid_sz, num_classes=hparams.num_classes,
+                                 dropout=dropout, activation=nn.SELU()),
+        dropout=dropout,
+        use_char_emb=True,
+    )
+    return model
+

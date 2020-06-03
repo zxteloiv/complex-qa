@@ -6,7 +6,8 @@ import math
 from allennlp.nn.util import masked_softmax
 
 class Re2Alignment(nn.Module):
-    def __init__(self, inp_sz: int, hid_sz: int, mode: str, activation=nn.ReLU()):
+    def __init__(self, inp_sz: int, hid_sz: int, mode: str, activation=nn.ReLU(),
+                 passthrough: bool = False):
         super().__init__()
         tau = nn.Parameter(torch.randn(size=(), ), requires_grad=True)
         nn.init.constant_(tau, val=math.sqrt(1 / hid_sz))
@@ -21,6 +22,14 @@ class Re2Alignment(nn.Module):
             self.a_linear = Re2Dense(inp_sz, hid_sz, activation=activation)
             self.b_linear = Re2Dense(inp_sz, hid_sz, activation=activation)
             self.bilinear = BilinearMatrixAttention(hid_sz, hid_sz, activation=activation, use_input_biases=True)
+        else:
+            pass
+
+        if inp_sz == hid_sz and passthrough:
+            self.a_linear = lambda x: x
+            self.b_linear = lambda x: x
+
+
 
     def forward(self, a: torch.Tensor, b: torch.Tensor,
                 mask_a: torch.LongTensor, mask_b: torch.LongTensor
