@@ -12,22 +12,21 @@ class Re2Alignment(nn.Module):
         tau = nn.Parameter(torch.randn(size=(), ), requires_grad=True)
         nn.init.constant_(tau, val=math.sqrt(1 / hid_sz))
         self.tau = tau
+        self.passthrough = passthrough
 
         self.mode = mode
         if mode == "linear":
-            self.a_linear = Re2Dense(inp_sz, hid_sz, activation=activation)
-            self.b_linear = Re2Dense(inp_sz, hid_sz, activation=activation)
+            if not passthrough:
+                self.a_linear = Re2Dense(inp_sz, hid_sz, activation=activation)
+                self.b_linear = Re2Dense(inp_sz, hid_sz, activation=activation)
         elif mode == "bilinear":
             from allennlp.modules.matrix_attention import BilinearMatrixAttention
-            self.a_linear = Re2Dense(inp_sz, hid_sz, activation=activation)
-            self.b_linear = Re2Dense(inp_sz, hid_sz, activation=activation)
+            if not passthrough:
+                self.a_linear = Re2Dense(inp_sz, hid_sz, activation=activation)
+                self.b_linear = Re2Dense(inp_sz, hid_sz, activation=activation)
             self.bilinear = BilinearMatrixAttention(hid_sz, hid_sz, activation=activation, use_input_biases=True)
         else:
             pass
-
-        if inp_sz == hid_sz and passthrough:
-            self.a_linear = lambda x: x
-            self.b_linear = lambda x: x
 
 
 
@@ -63,12 +62,14 @@ class Re2Alignment(nn.Module):
         return torch.bmm(a, b.transpose(1, 2)) * self.tau
 
     def _linear_attn(self, a: torch.Tensor, b: torch.Tensor):
-        a = self.a_linear(a)
-        b = self.b_linear(b)
+        if not self.passthrough:
+            a = self.a_linear(a)
+            b = self.b_linear(b)
         return self._identity_attn(a, b)
 
     def _bilinear_attn(self, a, b):
-        a = self.a_linear(a)
-        b = self.b_linear(b)
+        if not self.passthrough:
+            a = self.a_linear(a)
+            b = self.b_linear(b)
         return self.bilinear(a, b) * self.tau
 

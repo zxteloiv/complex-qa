@@ -323,7 +323,8 @@ def get_esim(hparams, vocab: NSVocabulary):
         a_encoder=PytorchSeq2SeqWrapper(
             nn.LSTM(emb_sz, hid_sz // 2, batch_first=True,
                     num_layers=hparams.num_encoder_layer,
-                    dropout=dropout if hparams.num_encoder_layer > 0 else 0.,)
+                    dropout=dropout if hparams.num_encoder_layer > 0 else 0.,
+                    bidirectional=True)
         ),
         b_encoder=PytorchSeq2SeqWrapper(
             nn.LSTM(emb_sz, hid_sz // 2, batch_first=True,
@@ -337,18 +338,18 @@ def get_esim(hparams, vocab: NSVocabulary):
         b_precomp_trans=Re2Dense(hid_sz * 5, # heuristic features: a, align, a - align, align - a, a * align
                                  out_size=hid_sz, activation=nn.SELU(), ),
         a_composition=PytorchSeq2SeqWrapper(
-            nn.LSTM(emb_sz, hid_sz, batch_first=True,
+            nn.LSTM(hid_sz, hid_sz, batch_first=True,
                     num_layers=hparams.num_composition_layer,
                     dropout=dropout if hparams.num_composition_layer > 0 else 0.,)
         ),
         b_composition=PytorchSeq2SeqWrapper(
-            nn.LSTM(emb_sz, hid_sz, batch_first=True,
+            nn.LSTM(hid_sz, hid_sz, batch_first=True,
                     num_layers=hparams.num_composition_layer,
                     dropout=dropout if hparams.num_composition_layer > 0 else 0.,)
         ),
         a_pooling=NeoRe2Pooling(),
         b_pooling=NeoRe2Pooling(),
-        prediction=Re2Prediction(mode="full", inp_sz=hid_sz, hid_sz=hid_sz, num_classes=hparams.num_classes,
+        prediction=Re2Prediction(mode="full", inp_sz=hid_sz * 3, hid_sz=hid_sz, num_classes=hparams.num_classes,
                                  dropout=dropout, activation=nn.SELU()),
         dropout=dropout,
         use_char_emb=True,

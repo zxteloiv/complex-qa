@@ -72,13 +72,13 @@ class SeqESIM(nn.Module):
         align_a, align_b = self.alignment(a, b, a_mask, b_mask)
 
         a = torch.cat([a, align_a, a - align_a, align_a - a, a * align_a], dim=-1)
-        b = torch.cat([b, align_b, b - align_b, align_b - b, a * align_b], dim=-1)
+        b = torch.cat([b, align_b, b - align_b, align_b - b, b * align_b], dim=-1)
 
         a = self.a_precomp_trans(a)
         b = self.b_precomp_trans(b)
 
-        a = self.a_composition(a)
-        b = self.b_composition(b)
+        a = self.a_composition(a, a_mask)
+        b = self.b_composition(b, b_mask)
 
         a = self.a_pooling(a, a_mask)
         b = self.b_pooling(b, b_mask)
