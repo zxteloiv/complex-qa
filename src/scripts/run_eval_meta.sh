@@ -57,14 +57,14 @@ function eval_template () {
 #snapshot=../../snapshots/atis_five_hyp/meta_ranker/20200531-202803-qmaml-nlngram
 #eval_template atis 08qmaml-deep-chgiant-fixed-eval nlngram "$snapshot" atis_nl_ngram meta_ranker.py
 
-snapshot=../../snapshots/django_five_hyp/meta_ranker/20200604-025056-esim-lfngram-cont10
-eval_template django 11qmaml-esim-cont10 lfngram "$snapshot" django_lf_ngram meta_ranker_esim.py
+snapshot=../../snapshots/django_five_hyp/meta_ranker/20200612-144940-esim-lfngram-rank
+eval_template django 12qmaml-esim-rank lfngram "$snapshot" django_lf_ngram meta_ranker_esim.py
 
-snapshot=../../snapshots/django_five_hyp/meta_ranker/20200604-024929-esim-lfted-cont10
-eval_template django 11qmaml-esim-cont10 lfted "$snapshot" django_lf_ted meta_ranker_esim.py
+snapshot=../../snapshots/django_five_hyp/meta_ranker/20200612-144940-esim-lfted-rank
+eval_template django 12qmaml-esim-rank lfted "$snapshot" django_lf_ted meta_ranker_esim.py
 
-snapshot=../../snapshots/django_five_hyp/meta_ranker/20200604-025112-esim-nlbert-cont10
-eval_template django 11qmaml-esim-cont10 nlbert "$snapshot" django_nl_bert meta_ranker_esim.py
+snapshot=../../snapshots/django_five_hyp/meta_ranker/20200612-144941-esim-nlbert-rank
+eval_template django 12qmaml-esim-rank nlbert "$snapshot" django_nl_bert meta_ranker_esim.py
 
-snapshot=../../snapshots/django_five_hyp/meta_ranker/20200604-024929-esim-nlngram-cont10
-eval_template django 11qmaml-esim-cont10 nlngram "$snapshot" django_nl_ngram meta_ranker_esim.py
+snapshot=../../snapshots/django_five_hyp/meta_ranker/20200612-144941-esim-nlngram-rank
+eval_template django 12qmaml-esim-rank nlngram "$snapshot" django_nl_ngram meta_ranker_esim.py
