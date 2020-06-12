@@ -46,7 +46,7 @@ def _atis_base():
 
 def _django_base():
     p = _atis_base()
-    p.TRAINING_LIMIT = 10
+    p.TRAINING_LIMIT = 20
     return p
 
 @Registry.hparamset()
@@ -204,7 +204,7 @@ class MAMLUpdater(Updater):
             sent_a, sent_b, char_a, char_b, label, rank = self.read_model_input(support_batch)
             model.zero_grad()
 
-            loss_step = F.cross_entropy(model(sent_a, sent_b, char_a, char_b), label)
+            loss_step = F.cross_entropy(model(sent_a, sent_b, char_a, char_b, rank), label)
             grad_params = dict(model.named_parameters())
             grads = torch.autograd.grad(loss_step, grad_params.values())
             torch.nn.utils.clip_grad_value_(grads, self._grad_clip_val)
@@ -218,7 +218,7 @@ class MAMLUpdater(Updater):
             model.zero_grad()
             query_batch = next(task_iter)
             sent_a, sent_b, char_a, char_b, label, rank = self.read_model_input(query_batch)
-            loss_eval_step = F.cross_entropy(model(sent_a, sent_b, char_a, char_b), label)
+            loss_eval_step = F.cross_entropy(model(sent_a, sent_b, char_a, char_b, rank), label)
             task_losses.append(loss_eval_step)
 
         model.load_state_dict(init_params)
@@ -250,7 +250,7 @@ class MAMLUpdater(Updater):
             with torch.enable_grad():
                 model.train()
                 model.zero_grad()
-                loss_step = F.cross_entropy(model(sent_a, sent_b, char_a, char_b), label)
+                loss_step = F.cross_entropy(model(sent_a, sent_b, char_a, char_b, rank), label)
                 grad_params = dict(model.named_parameters())
                 grads = torch.autograd.grad(loss_step, grad_params.values())
 
@@ -265,7 +265,7 @@ class MAMLUpdater(Updater):
 
         model.eval()
         sent_a, sent_b, char_a, char_b, label, rank = self.read_model_input(batch)
-        task_logits = model(sent_a, sent_b, char_a, char_b)
+        task_logits = model(sent_a, sent_b, char_a, char_b, rank)
 
         model.load_state_dict(init_params)  # reset the original model
 
@@ -396,7 +396,7 @@ def main():
 
         bot.add_event_handler(Events.EPOCH_COMPLETED, save_multiple_models_per_epoch, 100)
         bot.add_event_handler(Events.EPOCH_COMPLETED, gc_collect, 100)
-        bot.add_event_handler(Events.ITERATION_COMPLETED, save_multiple_models_every_num_iters, 100, interval=1000)
+        # bot.add_event_handler(Events.ITERATION_COMPLETED, save_multiple_models_every_num_iters, 100, interval=1000)
         bot.add_event_handler(Events.ITERATION_COMPLETED, output_inspect, 100, keys=["loss", "task_loss_count"])
     bot.run()
 

@@ -349,7 +349,9 @@ def get_esim(hparams, vocab: NSVocabulary):
         ),
         a_pooling=NeoRe2Pooling(),
         b_pooling=NeoRe2Pooling(),
-        prediction=Re2Prediction(mode="full", inp_sz=hid_sz * 3, hid_sz=hid_sz, num_classes=hparams.num_classes,
+        prediction=Re2Prediction(mode="full", inp_sz=hid_sz * 3, hid_sz=hid_sz,
+                                 num_classes=hparams.num_classes,
+                                 aux_feature_sz=1,  # add the hyp_rank as an extra feature
                                  dropout=dropout, activation=nn.SELU()),
         dropout=dropout,
         use_char_emb=True,

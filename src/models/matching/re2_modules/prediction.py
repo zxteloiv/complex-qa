@@ -38,7 +38,7 @@ class Re2Prediction(nn.Module):
         feature = self._get_features(a, b)
 
         if aux_features is not None and len(aux_features) > 0:
-            feature = torch.cat([feature] + aux_features, dim=-1)
+            feature = torch.cat([feature] + list(aux_features), dim=-1)
 
         feature = self.dropout(feature)
         feature = self.dense1(feature)

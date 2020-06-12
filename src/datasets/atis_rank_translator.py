@@ -67,6 +67,7 @@ class AtisRankTranslator(Translator):
         tgt_toks = torch.tensor([self.vocab.get_token_index(tok, ns_lf) for tok in tgt]) if tgt else None
         hyp_toks = torch.tensor([self.vocab.get_token_index(tok, ns_lf) for tok in hyp]) if hyp else None
         label = torch.tensor(int(is_correct))   # 1 for True, 0 for False
+        hyp_rank = torch.tensor(hyp_rank)
         instance = {"source_tokens": src_toks, "target_tokens": tgt_toks, "hyp_tokens": hyp_toks,
                     "ex_id": eid, "hyp_rank": hyp_rank, "hyp_label": label, "_raw": example}
         return instance
@@ -244,7 +245,7 @@ class AtisRankChTranslator(AtisRankTranslator):
 
         batched_tensor = {"hyp_label": torch.stack(list_by_keys["hyp_label"], dim=0),
                           "ex_id": list_by_keys["ex_id"],
-                          "hyp_rank": torch.stack(list_by_keys["hyp_rank"], dim=0),
+                          "hyp_rank": torch.stack(list_by_keys["hyp_rank"], dim=0).unsqueeze(-1),
 
                           "source_tokens": pad_words("source_tokens", nl_pad),
                           "target_tokens": pad_words("target_tokens", lf_pad),

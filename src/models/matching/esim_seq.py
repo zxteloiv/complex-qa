@@ -84,7 +84,7 @@ class SeqESIM(nn.Module):
         b = self.b_pooling(b, b_mask)
 
         if rank is not None:
-            rank = (rank + 1).reciprocal_()     # to transform ranks such that greater ranker is better
+            rank = (rank + 1).float().reciprocal_()     # to transform ranks such that greater ranker is better
 
         logits = self.prediction(a, b, rank)
         return logits
