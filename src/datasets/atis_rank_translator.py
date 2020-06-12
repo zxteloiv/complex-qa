@@ -91,7 +91,7 @@ class AtisRankTranslator(Translator):
         batched_tensor = {"hyp_label": torch.stack(list_by_keys["hyp_label"], dim=0),
                           "source_tokens": pad_tensors("source_tokens", nl_padding),
                           "ex_id": list_by_keys["ex_id"],
-                          "hyp_rank": list_by_keys["hyp_rank"],
+                          "hyp_rank": torch.stack(list_by_keys["hyp_rank"], dim=0),
                           "target_tokens": pad_tensors("target_tokens", lf_padding),
                           "hyp_tokens": pad_tensors("hyp_tokens", lf_padding),
                           "_raw": list_by_keys["_raw"],
@@ -243,7 +243,7 @@ class AtisRankChTranslator(AtisRankTranslator):
 
         batched_tensor = {"hyp_label": torch.stack(list_by_keys["hyp_label"], dim=0),
                           "ex_id": list_by_keys["ex_id"],
-                          "hyp_rank": list_by_keys["hyp_rank"],
+                          "hyp_rank": torch.stack(list_by_keys["hyp_rank"], dim=0),
 
                           "source_tokens": pad_words("source_tokens", nl_pad),
                           "target_tokens": pad_words("target_tokens", lf_pad),

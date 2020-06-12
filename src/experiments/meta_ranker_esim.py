@@ -157,6 +157,7 @@ class MAMLUpdater(Updater):
         sent_char_a = batch['src_char_ids']
         sent_char_b = batch['hyp_char_ids']
         label = batch['hyp_label']
+        rank = batch['hyp_rank']
 
         device = self._device
         if device >= 0:
@@ -165,8 +166,9 @@ class MAMLUpdater(Updater):
             sent_char_a = move_to_device(sent_char_a, device)
             sent_char_b = move_to_device(sent_char_b, device)
             label = move_to_device(label, device)
+            rank = move_to_device(rank, device)
 
-        return sent_a, sent_b, sent_char_a, sent_char_b, label
+        return sent_a, sent_b, sent_char_a, sent_char_b, label, rank
 
     def update_epoch(self):
         iterator = self._iterators[0]
@@ -199,7 +201,7 @@ class MAMLUpdater(Updater):
             # each batch contains one example of every pseudo-tasks
             support_batch = next(task_iter)
 
-            sent_a, sent_b, char_a, char_b, label = self.read_model_input(support_batch)
+            sent_a, sent_b, char_a, char_b, label, rank = self.read_model_input(support_batch)
             model.zero_grad()
 
             loss_step = F.cross_entropy(model(sent_a, sent_b, char_a, char_b), label)
@@ -215,7 +217,7 @@ class MAMLUpdater(Updater):
             model.load_state_dict(new_weights, strict=False)
             model.zero_grad()
             query_batch = next(task_iter)
-            sent_a, sent_b, char_a, char_b, label = self.read_model_input(query_batch)
+            sent_a, sent_b, char_a, char_b, label, rank = self.read_model_input(query_batch)
             loss_eval_step = F.cross_entropy(model(sent_a, sent_b, char_a, char_b), label)
             task_losses.append(loss_eval_step)
 
@@ -244,7 +246,7 @@ class MAMLUpdater(Updater):
             # each batch contains one example of every pseudo-tasks
             support_batch = next(task_iter)
 
-            sent_a, sent_b, char_a, char_b, label = self.read_model_input(support_batch)
+            sent_a, sent_b, char_a, char_b, label, rank = self.read_model_input(support_batch)
             with torch.enable_grad():
                 model.train()
                 model.zero_grad()
@@ -262,7 +264,7 @@ class MAMLUpdater(Updater):
             model.load_state_dict(new_weights, strict=False)
 
         model.eval()
-        sent_a, sent_b, char_a, char_b, label = self.read_model_input(batch)
+        sent_a, sent_b, char_a, char_b, label, rank = self.read_model_input(batch)
         task_logits = model(sent_a, sent_b, char_a, char_b)
 
         model.load_state_dict(init_params)  # reset the original model

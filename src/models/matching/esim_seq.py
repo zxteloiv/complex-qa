@@ -1,4 +1,4 @@
-from typing import Union, Any
+from typing import Union, Any, Optional
 import torch
 from torch import nn
 from ..modules.word_char_embedding import WordCharEmbedding
@@ -47,14 +47,14 @@ class SeqESIM(nn.Module):
         else:
             return self.forward_word_tokens(*input, **kwargs)
 
-    def forward_word_tokens(self, word_a: torch.Tensor, word_b: torch.Tensor):
+    def forward_word_tokens(self, word_a: torch.Tensor, word_b: torch.Tensor, rank: torch.Tensor = None):
         a_emb = self.a_embedding(word_a)
         b_emb = self.b_embedding(word_b)
         mask_a, mask_b = list(map(lambda x, y: (x != y).long(),
                                   (word_a, word_b), (self.padding_a, self.padding_a)))
-        return self.forward_embs(a_emb, b_emb, mask_a, mask_b)
+        return self.forward_embs(a_emb, b_emb, mask_a, mask_b, rank)
 
-    def forward_word_char_tokens(self, word_a, word_b, char_a, char_b):
+    def forward_word_char_tokens(self, word_a, word_b, char_a, char_b, rank: torch.Tensor = None):
         get_mask_fn = lambda x, pad: (x != pad).long()
 
         masks = list(map(get_mask_fn, (word_a, word_b, char_a, char_b), self.paddings))
@@ -63,9 +63,9 @@ class SeqESIM(nn.Module):
 
         a = self.a_embedding(word_a, char_a, mask_a_char)
         b = self.b_embedding(word_b, char_b, mask_b_char)
-        return self.forward_embs(a, b, mask_a, mask_b)
+        return self.forward_embs(a, b, mask_a, mask_b, rank)
 
-    def forward_embs(self, a, b, a_mask, b_mask):
+    def forward_embs(self, a, b, a_mask: torch.Tensor, b_mask: torch.Tensor, rank: Optional[torch.Tensor]):
         a = self.a_encoder(a, a_mask)
         b = self.b_encoder(b, b_mask)
 
@@ -83,6 +83,9 @@ class SeqESIM(nn.Module):
         a = self.a_pooling(a, a_mask)
         b = self.b_pooling(b, b_mask)
 
-        logits = self.prediction(a, b)
+        if rank is not None:
+            rank = (rank + 1).reciprocal_()     # to transform ranks such that greater ranker is better
+
+        logits = self.prediction(a, b, rank)
         return logits
 
