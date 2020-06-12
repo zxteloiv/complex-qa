@@ -155,6 +155,7 @@ class AtisRankChTranslator(AtisRankTranslator):
         hyp_toks = self._seq_word_vec(hyp, ns_lf)
 
         label = torch.tensor(int(is_correct))   # 1 for True, 0 for False
+        hyp_rank = torch.tensor(hyp_rank)
 
         instance = {"source_tokens": src_toks,
                     "target_tokens": tgt_toks,
