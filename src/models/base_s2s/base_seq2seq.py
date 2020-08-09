@@ -289,7 +289,7 @@ class BaseSeq2Seq(allennlp.models.Model):
             forward = forward_by_layer
             backward = None
 
-        return self._decoder.init_hidden_states_by_layer(forward, backward)
+        return self._decoder.init_hidden_states(forward)
 
     def _compute_metric(self, predictions, labels):
         if self._bleu:

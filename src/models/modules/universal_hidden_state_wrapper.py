@@ -80,16 +80,6 @@ class UniversalHiddenStateWrapper(torch.nn.Module):
         else:
             return initial_hidden, initial_hidden
 
-    def init_hidden_states_by_layer(self, layer_forward: List, layer_backward: Optional[List]):
-        initial_hidden = layer_forward[-1]
-        initial_context = torch.zeros_like(initial_hidden)
-
-        # returns (hidden, output) or ((hidden, context), output)
-        if type(self._rnn_cell) == RNNType.LSTM:
-            return (initial_hidden, initial_context), initial_hidden
-        else:
-            return initial_hidden, initial_hidden
-
     @staticmethod
     def weighted_sum_single_var(var_list, weight):
         # var_list: [var]

@@ -55,20 +55,6 @@ class StackedRNNCell(torch.nn.Module):
                   for i, layer_hidden in enumerate(layered_list) ]
         return merged
 
-    def init_hidden_states_by_layer(self, layer_forward: List, layer_backward: Optional[List]):
-        """
-        deprecated api only for old s2s functions
-        :param layer_forward:
-        :param layer_backward:
-        :return:
-        """
-        layer_hidden = []
-        for i, rnn in enumerate(self.layer_rnns):
-            h, _ = rnn.init_hidden_states(layer_forward[i])
-            layer_hidden.append(h)
-
-        return layer_hidden, self.get_output_state(layer_hidden)
-
     def init_hidden_states(self, layer_hidden: List[torch.Tensor]):
         assert len(layer_hidden) == self.get_layer_num()
         hiddens = []
@@ -80,20 +66,21 @@ class StackedRNNCell(torch.nn.Module):
 
 class StackedLSTMCell(StackedRNNCell):
     def __init__(self, input_dim, hidden_dim, n_layers, intermediate_dropout = 0.):
-        super(StackedLSTMCell, self).__init__(RNNType.LSTM, input_dim, hidden_dim, n_layers, intermediate_dropout)
+        super().__init__(RNNType.LSTM, input_dim, hidden_dim, n_layers, intermediate_dropout)
 
 class StackedGRUCell(StackedRNNCell):
     def __init__(self, input_dim, hidden_dim, n_layers, intermediate_dropout = 0.):
-        super(StackedGRUCell, self).__init__(RNNType.GRU, input_dim, hidden_dim, n_layers, intermediate_dropout)
+        super().__init__(RNNType.GRU, input_dim, hidden_dim, n_layers, intermediate_dropout)
 
 
 if __name__ == '__main__':
     batch, dim, L = 5, 10, 2
     cell = StackedLSTMCell(dim, L, L)
-    f_out = torch.randn(batch, dim).float()
-    h, o = cell.init_hidden_states(f_out, None)
+    f0 = torch.randn(batch, L).float()
+    f1 = torch.randn(batch, L).float()
+    h, o = cell.init_hidden_states([f0, f1])
 
-    assert o.size() == (batch, dim)
+    assert o.size() == (batch, L)
     assert len(h) == L
 
     x = torch.randn(batch, dim)
@@ -102,7 +89,7 @@ if __name__ == '__main__':
     T = 5
     for _ in range(T):
         h, o = cell(x, h)
-        assert o.size() == (batch, dim)
+        assert o.size() == (batch, L)
         assert len(h) == L
         hs.append(h)
 
