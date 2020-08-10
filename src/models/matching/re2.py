@@ -37,19 +37,20 @@ class RE2(nn.Module):
         self.padding_val_a = padding_val_a
         self.padding_val_b = padding_val_b
 
-    def forward(self, sent_a: torch.LongTensor, sent_b: torch.LongTensor) -> torch.Tensor:
+    def forward(self, sent_a: torch.LongTensor, sent_b: torch.LongTensor, rank: torch.Tensor = None) -> torch.Tensor:
         """
         :param sent_a: (batch, max_a_len)
         :param sent_b: (batch, max_b_len)
+        :param rank: (batch, 1)
         :return: (batch, num_classes)
         """
         a = self.a_emb(sent_a)
         b = self.b_emb(sent_b)
         mask_a = (sent_a != self.padding_val_a).long()
         mask_b = (sent_b != self.padding_val_b).long()
-        return self.forward_embs(a, b, mask_a, mask_b)
+        return self.forward_embs(a, b, mask_a, mask_b, rank)
 
-    def forward_embs(self, a, b, mask_a, mask_b):
+    def forward_embs(self, a, b, mask_a, mask_b, rank: torch.Tensor = None):
 
         res_a, res_b = a, b
         for i, block in enumerate(self.blocks):
@@ -62,7 +63,10 @@ class RE2(nn.Module):
 
         a = self.a_pooling(a, mask_a)
         b = self.b_pooling(b, mask_b)
-        logits = self.prediction(a, b)
+        if rank is not None:
+            rank = (rank + 1).float().reciprocal_()     # to transform ranks such that greater ranker is better
+
+        logits = self.prediction(a, b, rank)
         return logits
 
     @staticmethod
@@ -126,6 +130,7 @@ class ChRE2(RE2):
                 sent_a_char: torch.LongTensor,
                 sent_b: torch.LongTensor,
                 sent_b_char: torch.LongTensor,
+                rank = None,
                 ):
 
         _, mask_a = prepare_input_mask(sent_a, self.padding_val_a)
@@ -135,6 +140,6 @@ class ChRE2(RE2):
 
         a = self.a_emb(sent_a, sent_a_char, chmask_a)
         b = self.b_emb(sent_b, sent_b_char, chmask_b)
-        return self.forward_embs(a, b, mask_a, mask_b)
+        return self.forward_embs(a, b, mask_a, mask_b, rank)
 
 

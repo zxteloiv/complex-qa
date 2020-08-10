@@ -50,13 +50,13 @@ def atis_giant_five_dropout():
     p = atis_giant_five()
     p.dropout = .2
     p.discrete_dropout = .1
-    p.TRAINING_LIMIT = 300
+    p.TRAINING_LIMIT = 200
     return p
 
 @Registry.hparamset()
 def django_giant_five_dropout():
     p = atis_giant_five_dropout()
-    p.TRAINING_LIMIT = 80
+    p.TRAINING_LIMIT = 60
     return p
 
 @Registry.hparamset()
@@ -100,6 +100,7 @@ class GiantTrainingUpdater(TrainingUpdater):
         sent_char_a = batch['src_char_ids']
         sent_char_b = batch['hyp_char_ids']
         label = batch['hyp_label']
+        rank = batch['hyp_rank']
 
         if device >= 0:
             sent_a = move_to_device(sent_a, device)
@@ -107,8 +108,9 @@ class GiantTrainingUpdater(TrainingUpdater):
             sent_char_a = move_to_device(sent_char_a, device)
             sent_char_b = move_to_device(sent_char_b, device)
             label = move_to_device(label, device)
+            rank = move_to_device(rank, device)
 
-        loss = model(sent_a, sent_b, sent_char_a, sent_char_b, label)
+        loss = model(sent_a, sent_b, sent_char_a, sent_char_b, label, rank)
         loss.backward()
 
         # do some clipping
@@ -138,7 +140,7 @@ class GiantTestingUpdater(TestingUpdater):
             self.stop_epoch()
 
         eid = batch['ex_id']
-        hyp_rank = batch['hyp_rank']
+        rank = batch['hyp_rank']
         sent_a = batch['source_tokens']
         sent_b = batch['hyp_tokens']
         sent_char_a = batch['src_char_ids']
@@ -149,10 +151,11 @@ class GiantTestingUpdater(TestingUpdater):
             sent_b = move_to_device(sent_b, device)
             sent_char_a = move_to_device(sent_char_a, device)
             sent_char_b = move_to_device(sent_char_b, device)
+            rank = move_to_device(rank, device)
 
-        scores = model.inference(sent_a, sent_b, sent_char_a, sent_char_b)
+        scores = model.inference(sent_a, sent_b, sent_char_a, sent_char_b, rank)
         correct_score = model.forward_loss_weight(*scores)
-        return {"ranking_score": correct_score, "ex_id": eid, "hyp_rank": hyp_rank}
+        return {"ranking_score": correct_score, "ex_id": eid, "hyp_rank": rank}
 
 def main():
     import sys

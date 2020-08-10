@@ -42,7 +42,9 @@ class CharGiantRanker(nn.Module):
                 word_b: torch.LongTensor,
                 char_a: torch.LongTensor,
                 char_b: torch.LongTensor,
-                label: torch.LongTensor):
+                label: torch.LongTensor,
+                rank = None
+                ):
         """
         :param word_a: (N, a_len)
         :param word_b: (N, b_len)
@@ -68,7 +70,7 @@ class CharGiantRanker(nn.Module):
 
         # ---- matching ------
         # matching logits: (batch, 2)
-        matching_logits = self.re2(word_a, char_a, word_b, char_b)
+        matching_logits = self.re2(word_a, char_a, word_b, char_b, rank)
         loss_m = F.cross_entropy(matching_logits, label)
 
         # ---- generation ----
@@ -144,6 +146,7 @@ class CharGiantRanker(nn.Module):
                   word_b: torch.LongTensor,
                   char_a: torch.LongTensor,
                   char_b: torch.LongTensor,
+                  rank=None
                   ):
         """
         :param word_a: (N, a_len)
@@ -169,7 +172,7 @@ class CharGiantRanker(nn.Module):
 
         # ---- matching ------
         # matching logits: (batch, 2)
-        matching_logits = self.re2(word_a, char_a, word_b, char_b)
+        matching_logits = self.re2(word_a, char_a, word_b, char_b, rank)
         ranking_m = torch.softmax(matching_logits, dim=-1)[:, 1]
 
         # ---- language model ----

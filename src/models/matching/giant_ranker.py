@@ -1,3 +1,4 @@
+from typing import Optional
 import torch
 from torch import nn
 from torch.nn import functional as F
@@ -33,11 +34,16 @@ class GiantRanker(nn.Module):
 
         self.loss_weighting = nn.Parameter(torch.zeros(5).float(), requires_grad=True)
 
-    def forward(self, sent_a: torch.LongTensor, sent_b: torch.LongTensor, label: torch.LongTensor):
+    def forward(self,
+                sent_a: torch.LongTensor,
+                sent_b: torch.LongTensor,
+                label: torch.LongTensor,
+                rank: Optional[torch.Tensor] = None):
         """
         :param sent_a: (N, a_len)
         :param sent_b: (N, b_len)
         :param label: (N,)
+        :param rank: (N,1)
         :return:
         """
         self.re2: RE2
@@ -58,7 +64,7 @@ class GiantRanker(nn.Module):
         # ---- matching ------
         a_emb, b_emb = self.a_embedding(sent_a), self.b_embedding(sent_b)
         # matching logits: (batch, 2)
-        matching_logits = self.re2.forward_embs(a_emb, b_emb, a_mask, b_mask)
+        matching_logits = self.re2.forward_embs(a_emb, b_emb, a_mask, b_mask, rank)
         loss_m = F.cross_entropy(matching_logits, label)
 
         # ---- generation ----
@@ -128,7 +134,7 @@ class GiantRanker(nn.Module):
 
         return loss_normal + self.dim_training_weight * loss_dim.mean()
 
-    def inference(self, sent_a, sent_b):
+    def inference(self, sent_a, sent_b, rank = None):
         self.re2: RE2
         self.a2b: Seq2SeqModeling
         self.b2a: Seq2SeqModeling
@@ -148,7 +154,7 @@ class GiantRanker(nn.Module):
         a_emb = self.a_embedding(sent_a)
         b_emb = self.b_embedding(sent_b)
         # matching logits: (batch, 2)
-        matching_logits = self.re2.forward_embs(a_emb, b_emb, a_mask, b_mask)
+        matching_logits = self.re2.forward_embs(a_emb, b_emb, a_mask, b_mask, rank)
         ranking_m = torch.softmax(matching_logits, dim=-1)[:, 1]
 
         # ---- language model ----
