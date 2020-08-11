@@ -197,7 +197,7 @@ def main():
 
             output_keys = ("ex_id", "hyp_rank", "ranking_score")
             for eid, hyp_rank, score in zip(*map(output.get, output_keys)):
-                print(json.dumps(dict(zip(output_keys, (eid, hyp_rank, score.item())))))
+                print(json.dumps(dict(zip(output_keys, (eid, hyp_rank.item(), score.item())))))
 
         bot.updater = GiantTestingUpdater.from_bot(bot)
     else:
