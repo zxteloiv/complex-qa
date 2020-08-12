@@ -53,8 +53,8 @@ function eval_template () {
 # $5 hyperparameter used for tests
 # $6 python executable script name, based on trialbot
 snapshot=../../snapshots/django_five_hyp/baseline2_giant/20200811-135639-giant-chgiant
-eval_template django 20base2-giant-32ee2515 chgiant "$snapshot" django_giant_five_dropout baseline2_five_hyp_giant.py
+eval_template django 21base2-giant-rank-7fb2a999 chgiant "$snapshot" django_giant_five_dropout baseline2_five_hyp_giant.py
 
 snapshot=../../snapshots/atis_five_hyp/baseline2_giant/20200811-135630-chgiant
-eval_template atis 20base2-giant-32ee2515 chgiant "$snapshot" atis_giant_five_dropout baseline2_five_hyp_giant.py
+eval_template atis 21base2-giant-rank-7fb2a999 chgiant "$snapshot" atis_giant_five_dropout baseline2_five_hyp_giant.py
 

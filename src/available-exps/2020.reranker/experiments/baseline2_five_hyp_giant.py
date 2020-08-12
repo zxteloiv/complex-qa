@@ -155,7 +155,9 @@ class GiantTestingUpdater(TestingUpdater):
 
         scores = model.inference(sent_a, sent_b, sent_char_a, sent_char_b, rank)
         correct_score = model.forward_loss_weight(*scores)
-        return {"ranking_score": correct_score, "ex_id": eid, "hyp_rank": rank}
+        return {"ranking_score": correct_score, "ex_id": eid, "hyp_rank": rank,
+                "rank_match": scores[0], "rank_a2b": scores[1], "rank_b2a": scores[2],
+                }
 
 def main():
     import sys
@@ -195,9 +197,10 @@ def main():
             if output is None:
                 return
 
-            output_keys = ("ex_id", "hyp_rank", "ranking_score")
-            for eid, hyp_rank, score in zip(*map(output.get, output_keys)):
-                print(json.dumps(dict(zip(output_keys, (eid, hyp_rank.item(), score.item())))))
+            output_keys = ("ex_id", "hyp_rank", "ranking_score", "rank_match", "rank_a2b", "rank_b2a")
+            for eid, hyp_rank, score, r_m, r_a2b, r_b2a in zip(*map(output.get, output_keys)):
+                print(json.dumps(dict(zip(output_keys, (eid, hyp_rank.item(), score.item(),
+                                                        r_m.item(), r_a2b.item(), r_b2a.item())))))
 
         bot.updater = GiantTestingUpdater.from_bot(bot)
     else:
