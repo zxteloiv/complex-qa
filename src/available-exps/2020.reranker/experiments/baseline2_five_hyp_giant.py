@@ -64,7 +64,7 @@ def atis_deep_giant():
     p = atis_giant_five_dropout()
     p.num_stacked_block = 4
     p.num_stacked_encoder = 1
-    p.TRAINING_LIMIT = 200
+    p.TRAINING_LIMIT = 100
     return p
 
 @Registry.hparamset()
@@ -72,7 +72,7 @@ def django_deep_giant():
     p = django_giant_five_dropout()
     p.num_stacked_block = 4
     p.num_stacked_encoder = 1
-    p.TRAINING_LIMIT = 60
+    p.TRAINING_LIMIT = 30
     return p
 
 import datasets.atis_rank
