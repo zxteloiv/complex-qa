@@ -44,15 +44,15 @@ def _atis_base():
     p.dropout = .2
     p.discrete_dropout = .1
 
-    p.TRAINING_LIMIT = 20
+    p.TRAINING_LIMIT = 40
     p.batch_sz = 64
     # p.task_batch_sz = 8
-    p.num_inner_loops = 3
+    p.num_inner_loops = 4
     return p
 
 def _django_base():
     p = _atis_base()
-    p.TRAINING_LIMIT = 5
+    p.TRAINING_LIMIT = 20
     return p
 
 @Registry.hparamset()
@@ -117,11 +117,6 @@ def get_aux_model(hparams, vocab):
                             total_num_inner_loop_steps=hparams.num_inner_loops,
                             use_learnable_learning_rates=True,)
     lslrgd.initialise(dict(model.named_parameters()))
-    return [model, lslrgd]
-    # return torch.nn.ModuleDict({"model": model, "inner_optim": lslrgd})
-
-def get_clean_model(hparams, vocab):
-    model, lslrgd = get_aux_model(hparams, vocab)
     if hasattr(model, 'loss_weighting'):
         del model.loss_weighting
     return [model, lslrgd]
@@ -216,7 +211,7 @@ class MAMLUpdater(Updater):
             sent_a, sent_b, char_a, char_b, label, rank = self.read_model_input(support_batch)
             model.zero_grad()
 
-            loss_step = model(sent_a, sent_b, char_a, char_b, label)
+            loss_step = model(sent_a, sent_b, char_a, char_b, label, rank)
             grad_params = dict(model.named_parameters())
             grads = torch.autograd.grad(loss_step, grad_params.values())
             torch.nn.utils.clip_grad_value_(grads, self._grad_clip_val)
@@ -230,7 +225,7 @@ class MAMLUpdater(Updater):
             model.zero_grad()
             query_batch = next(task_iter)
             sent_a, sent_b, char_a, char_b, label, rank = self.read_model_input(query_batch)
-            loss_eval_step = model(sent_a, sent_b, char_a, char_b, label)
+            loss_eval_step = model(sent_a, sent_b, char_a, char_b, label, rank)
             task_losses.append(loss_eval_step)
 
         model.load_state_dict(init_params)
@@ -262,7 +257,7 @@ class MAMLUpdater(Updater):
             with torch.enable_grad():
                 model.train()
                 model.zero_grad()
-                loss_step = model(sent_a, sent_b, char_a, char_b, label)
+                loss_step = model(sent_a, sent_b, char_a, char_b, label, rank)
                 grad_params = dict(model.named_parameters())
                 grads = torch.autograd.grad(loss_step, grad_params.values())
 
@@ -277,7 +272,7 @@ class MAMLUpdater(Updater):
 
         model.eval()
         sent_a, sent_b, char_a, char_b, label, rank = self.read_model_input(batch)
-        rankings = model.inference(sent_a, sent_b, char_a, char_b)
+        rankings = model.inference(sent_a, sent_b, char_a, char_b, rank)
         # task_logits.append(model.inference(sent_a, sent_b, char_a, char_b))
         output = model.forward_loss_weight(*rankings)
 
@@ -325,8 +320,6 @@ class MAMLUpdater(Updater):
 
         support_set_iter_fn = partial(RandomIterator, shuffle=True, repeat=True,
                                       batch_size=hparams.batch_sz, translator=bot.translator,)
-        if hasattr(model, 'loss_weighting'):
-            del model.loss_weighting
 
         # NL similarity uses only example id as key, LF similarity requires hyp id to denote a concrete example
         retriever_cls = IDCacheRetriever if '_nl_' in args.hparamset else HypIDCacheRetriever
@@ -364,7 +357,7 @@ def main():
 
     if args.test:
         import trialbot
-        bot = TrialBot(trial_name="meta_ranker", get_model_func=get_clean_model, args=args)
+        bot = TrialBot(trial_name="meta_ranker", get_model_func=get_aux_model, args=args)
         bot.updater = MAMLUpdater.from_bot(bot)
         bot.translator.turn_special_token(on=True)
 

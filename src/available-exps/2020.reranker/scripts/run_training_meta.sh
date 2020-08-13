@@ -6,7 +6,6 @@ CUDA_VISIBLE_DEVICES=0 nohup python -u meta_ranker.py \
     --dataset django_five_hyp \
     --device 0 \
     --vocab-dump django_vocab_15 \
-    ../../snapshots/django_five_hyp/baseline2_giant/20200527-133959-chgiant/model_state_31.th \
     --memo qmaml-nlbert \
     &> log.django.nlbert.qmaml &
 
@@ -16,7 +15,6 @@ CUDA_VISIBLE_DEVICES=1 nohup python -u meta_ranker.py \
     --dataset django_five_hyp \
     --device 0 \
     --vocab-dump django_vocab_15 \
-    ../../snapshots/django_five_hyp/baseline2_giant/20200527-133959-chgiant/model_state_31.th \
     --memo qmaml-nlngram \
     &> log.django.nlngram.qmaml &
 
@@ -26,7 +24,15 @@ CUDA_VISIBLE_DEVICES=2 nohup python -u meta_ranker.py \
     --dataset django_five_hyp \
     --device 0 \
     --vocab-dump django_vocab_15 \
-    ../../snapshots/django_five_hyp/baseline2_giant/20200527-133959-chgiant/model_state_31.th \
+    --memo qmaml-lfngram \
+    &> log.django.lfngram.qmaml &
+
+CUDA_VISIBLE_DEVICES=3 nohup python -u meta_ranker.py \
+    -p django_lf_ted \
+    --translator django_rank_char \
+    --dataset django_five_hyp \
+    --device 0 \
+    --vocab-dump django_vocab_15 \
     --memo qmaml-lfngram \
     &> log.django.lfngram.qmaml &
 
@@ -36,7 +42,6 @@ CUDA_VISIBLE_DEVICES=0 nohup python -u meta_ranker.py \
     --dataset atis_five_hyp \
     --device 0 \
     --vocab-dump atis_vocab \
-    ../../snapshots/atis_five_hyp/baseline2_giant/20200526-211632-chgiant/model_state_165.th \
     --memo qmaml-nlbert \
     &> log.atis.nlbert.qmaml &
 
@@ -46,7 +51,6 @@ CUDA_VISIBLE_DEVICES=1 nohup python -u meta_ranker.py \
     --dataset atis_five_hyp \
     --device 0 \
     --vocab-dump atis_vocab \
-    ../../snapshots/atis_five_hyp/baseline2_giant/20200526-211632-chgiant/model_state_165.th \
     --memo qmaml-nlngram \
     &> log.atis.nlngram.qmaml &
 
@@ -56,7 +60,6 @@ CUDA_VISIBLE_DEVICES=2 nohup python -u meta_ranker.py \
     --dataset atis_five_hyp \
     --device 0 \
     --vocab-dump atis_vocab \
-    ../../snapshots/atis_five_hyp/baseline2_giant/20200526-211632-chgiant/model_state_165.th \
     --memo qmaml-lfngram \
     &> log.atis.lfngram.qmaml &
 
@@ -66,7 +69,6 @@ CUDA_VISIBLE_DEVICES=3 nohup python -u meta_ranker.py \
     --dataset atis_five_hyp \
     --device 0 \
     --vocab-dump atis_vocab \
-    ../../snapshots/atis_five_hyp/baseline2_giant/20200526-211632-chgiant/model_state_165.th \
     --memo qmaml-lfted \
     &> log.atis.lfted.qmaml &
 
