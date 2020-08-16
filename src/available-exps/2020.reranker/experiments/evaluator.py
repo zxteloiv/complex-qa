@@ -76,6 +76,26 @@ def dump_rerank(test_file, ranking_file, max_rank_filter):
             x['rerank'] = rerank
             print(json.dumps(x))
 
+def inspect_error(test_file, ranking_file, max_rank_filter):
+    import json
+    data = _aggregate_data(test_file, ranking_file, max_rank_filter)
+    for k in sorted(data.keys()):
+        xs = data[k]
+        if len(xs) == 0:
+            continue
+
+        xs = sorted(xs, key=lambda x: x['ranking_score'], reverse=True)
+        if not any(x['is_correct'] for x in xs):
+            continue
+
+        if xs[0]['is_correct']:
+            continue
+
+        for rerank, x in enumerate(xs):
+            x['rerank'] = rerank
+            print(json.dumps(x))
+
+
 def _normalize_subrankings(data, rkey='subrankings'):
     # shape: (hyp_num, #subrankings=3)
     subranking_vecs = np.array(list(filter(None, (score.get(rkey) for v in data.values() for score in v))))
@@ -136,7 +156,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('files', nargs=2, metavar=('TEST_FILE', 'SCORE_FILE'))
     parser.add_argument('--max-hyp-rank', default=30, type=int)
-    parser.add_argument('--action', '-a', choices=["min_dev", "dump_rerank", "evaluate"], default="evaluate")
+    parser.add_argument('--action', '-a', choices=["min_dev", "dump_rerank", "evaluate", "inspect_error"], default="evaluate")
     parser.add_argument('--weights', '-w', nargs=3, type=float)
 
     args = parser.parse_args()
