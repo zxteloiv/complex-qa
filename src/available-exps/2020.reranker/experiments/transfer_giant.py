@@ -38,7 +38,7 @@ def _atis_base():
     p.discrete_dropout = .1
     p.TRAINING_LIMIT = 200
     p.weight_decay = 0.2
-    p.batch_sz = 5
+    p.batch_sz = 32
     p.char_emb_sz = 128
     p.char_hid_sz = 128
     p.num_inner_loops = 4
@@ -221,7 +221,7 @@ class TransferUpdater(Updater):
             dataset = bot.train_set
             batch_source = "train"
 
-        iterator = RandomIterator(dataset, 1, bot.translator, shuffle=is_dynamic_iter, repeat=is_dynamic_iter)
+        iterator = RandomIterator(dataset, hparams.batch_sz, bot.translator, shuffle=is_dynamic_iter, repeat=is_dynamic_iter)
         if args.debug and args.skip:
             iterator.reset(args.skip)
 
