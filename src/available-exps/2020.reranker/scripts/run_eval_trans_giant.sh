@@ -59,8 +59,8 @@ eval_template django 25trans-deep-giant nlbert "$snapshot" django_nl_bert transf
 eval_template django 25trans-deep-giant nlngram "$snapshot" django_nl_ngram transfer_giant.py
 
 snapshot=../../snapshots/atis_five_hyp/baseline2_giant/20200813-161848-deep-chgiant-rank
-eval_template atis 22trans-deep-giant lfted "$snapshot" atis_lf_ted transfer_giant.py
-eval_template atis 22trans-deep-giant lfngram "$snapshot" atis_lf_ngram transfer_giant.py
-eval_template atis 22trans-deep-giant nlbert "$snapshot" atis_nl_bert transfer_giant.py
-eval_template atis 22trans-deep-giant nlngram "$snapshot" atis_nl_ngram transfer_giant.py
+eval_template atis 25trans-deep-giant lfted "$snapshot" atis_lf_ted transfer_giant.py
+eval_template atis 25trans-deep-giant lfngram "$snapshot" atis_lf_ngram transfer_giant.py
+eval_template atis 25trans-deep-giant nlbert "$snapshot" atis_nl_bert transfer_giant.py
+eval_template atis 25trans-deep-giant nlngram "$snapshot" atis_nl_ngram transfer_giant.py
 

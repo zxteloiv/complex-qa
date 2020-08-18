@@ -173,10 +173,9 @@ class TransferUpdater(Updater):
 
         with torch.enable_grad():
             model.train()
-            for step in range(self._num_inner_loop):
-                # each batch contains one example of every pseudo-tasks
-                support_batch = next(task_iter)
-
+            for step, support_batch in enumerate(task_iter):
+                if step >= self._num_inner_loop:
+                    break
                 sent_a, sent_b, char_a, char_b, label, rank = self.read_model_input(support_batch)
                 model.zero_grad()
                 loss_step = model(sent_a, sent_b, char_a, char_b, label, rank)
@@ -246,6 +245,7 @@ def main():
         args += ['--translator', 'atis_rank']
 
     parser = TrialBot.get_default_parser()
+    parser.add_argument('--dev', action='store_true', help="use dev data for testing mode, only works with --test opt")
     args = parser.parse_args(args)
     if args.debug:
         logging.getLogger().setLevel(logging.DEBUG)
