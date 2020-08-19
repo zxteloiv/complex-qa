@@ -34,14 +34,16 @@ def _atis_base():
     p.hidden_size = 256
     p.num_stacked_block = 4
     p.num_stacked_encoder = 1
-    p.dropout = .2
-    p.discrete_dropout = .1
-    p.TRAINING_LIMIT = 200
     p.weight_decay = 0.2
-    p.batch_sz = 32
     p.char_emb_sz = 128
     p.char_hid_sz = 128
-    p.num_inner_loops = 4
+    p.TRAINING_LIMIT = 200
+
+    p.dropout = .5
+    p.discrete_dropout = .1
+    p.batch_sz = 128
+    p.support_batch_sz = 30
+    p.num_inner_loops = 8
     return p
 
 def _django_base():
