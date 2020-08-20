@@ -50,13 +50,13 @@ def atis_giant_five_dropout():
     p = atis_giant_five()
     p.dropout = .2
     p.discrete_dropout = .1
-    p.TRAINING_LIMIT = 300
+    p.TRAINING_LIMIT = 200
     return p
 
 @Registry.hparamset()
 def django_giant_five_dropout():
     p = atis_giant_five_dropout()
-    p.TRAINING_LIMIT = 80
+    p.TRAINING_LIMIT = 60
     return p
 
 @Registry.hparamset()
@@ -64,7 +64,7 @@ def atis_deep_giant():
     p = atis_giant_five_dropout()
     p.num_stacked_block = 4
     p.num_stacked_encoder = 1
-    p.TRAINING_LIMIT = 200
+    p.TRAINING_LIMIT = 100
     return p
 
 @Registry.hparamset()
@@ -72,7 +72,7 @@ def django_deep_giant():
     p = django_giant_five_dropout()
     p.num_stacked_block = 4
     p.num_stacked_encoder = 1
-    p.TRAINING_LIMIT = 60
+    p.TRAINING_LIMIT = 30
     return p
 
 import datasets.atis_rank
@@ -100,6 +100,7 @@ class GiantTrainingUpdater(TrainingUpdater):
         sent_char_a = batch['src_char_ids']
         sent_char_b = batch['hyp_char_ids']
         label = batch['hyp_label']
+        rank = batch['hyp_rank']
 
         if device >= 0:
             sent_a = move_to_device(sent_a, device)
@@ -107,8 +108,9 @@ class GiantTrainingUpdater(TrainingUpdater):
             sent_char_a = move_to_device(sent_char_a, device)
             sent_char_b = move_to_device(sent_char_b, device)
             label = move_to_device(label, device)
+            rank = move_to_device(rank, device)
 
-        loss = model(sent_a, sent_b, sent_char_a, sent_char_b, label)
+        loss = model(sent_a, sent_b, sent_char_a, sent_char_b, label, rank)
         loss.backward()
 
         # do some clipping
@@ -138,7 +140,7 @@ class GiantTestingUpdater(TestingUpdater):
             self.stop_epoch()
 
         eid = batch['ex_id']
-        hyp_rank = batch['hyp_rank']
+        rank = batch['hyp_rank']
         sent_a = batch['source_tokens']
         sent_b = batch['hyp_tokens']
         sent_char_a = batch['src_char_ids']
@@ -149,10 +151,13 @@ class GiantTestingUpdater(TestingUpdater):
             sent_b = move_to_device(sent_b, device)
             sent_char_a = move_to_device(sent_char_a, device)
             sent_char_b = move_to_device(sent_char_b, device)
+            rank = move_to_device(rank, device)
 
-        scores = model.inference(sent_a, sent_b, sent_char_a, sent_char_b)
+        scores = model.inference(sent_a, sent_b, sent_char_a, sent_char_b, rank)
         correct_score = model.forward_loss_weight(*scores)
-        return {"ranking_score": correct_score, "ex_id": eid, "hyp_rank": hyp_rank}
+        return {"ranking_score": correct_score, "ex_id": eid, "hyp_rank": rank,
+                "rank_match": scores[0], "rank_a2b": scores[1], "rank_b2a": scores[2],
+                }
 
 def main():
     import sys
@@ -192,9 +197,10 @@ def main():
             if output is None:
                 return
 
-            output_keys = ("ex_id", "hyp_rank", "ranking_score")
-            for eid, hyp_rank, score in zip(*map(output.get, output_keys)):
-                print(json.dumps(dict(zip(output_keys, (eid, hyp_rank, score.item())))))
+            output_keys = ("ex_id", "hyp_rank", "ranking_score", "rank_match", "rank_a2b", "rank_b2a")
+            for eid, hyp_rank, score, r_m, r_a2b, r_b2a in zip(*map(output.get, output_keys)):
+                print(json.dumps(dict(zip(output_keys, (eid, hyp_rank.item(), score.item(),
+                                                        r_m.item(), r_a2b.item(), r_b2a.item())))))
 
         bot.updater = GiantTestingUpdater.from_bot(bot)
     else:

@@ -53,8 +53,14 @@ function eval_template () {
 # $5 hyperparameter used for tests
 # $6 python executable script name, based on trialbot
 snapshot=../../snapshots/django_five_hyp/baseline2_giant/20200813-161848-deep-chgiant-rank
-eval_template django 22base2-deep-giant-rank-d1499b3 chgiant "$snapshot" django_deep_giant baseline2_five_hyp_giant.py
+eval_template django 25trans-deep-giant-boost lfted "$snapshot" django_lf_ted transfer_giant.py
+eval_template django 25trans-deep-giant-boost lfngram "$snapshot" django_lf_ngram transfer_giant.py
+eval_template django 25trans-deep-giant-boost nlbert "$snapshot" django_nl_bert transfer_giant.py
+eval_template django 25trans-deep-giant-boost nlngram "$snapshot" django_nl_ngram transfer_giant.py
 
 snapshot=../../snapshots/atis_five_hyp/baseline2_giant/20200813-161848-deep-chgiant-rank
-eval_template atis 22base2-deep-giant-rank-d1499b3 chgiant "$snapshot" atis_deep_giant baseline2_five_hyp_giant.py
+eval_template atis 25trans-deep-giant-boost lfted "$snapshot" atis_lf_ted transfer_giant.py
+eval_template atis 25trans-deep-giant-boost lfngram "$snapshot" atis_lf_ngram transfer_giant.py
+eval_template atis 25trans-deep-giant-boost nlbert "$snapshot" atis_nl_bert transfer_giant.py
+eval_template atis 25trans-deep-giant-boost nlngram "$snapshot" atis_nl_ngram transfer_giant.py
 

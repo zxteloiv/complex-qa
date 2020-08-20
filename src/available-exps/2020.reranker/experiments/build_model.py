@@ -186,7 +186,7 @@ def get_re2_char_model(hparams, vocab: NSVocabulary):
         pooling = Re2Pooling()
         pred_inp = hid_sz
 
-    pred = Re2Prediction(hparams.prediction, inp_sz=pred_inp, hid_sz=hid_sz,
+    pred = Re2Prediction(hparams.prediction, inp_sz=pred_inp, hid_sz=hid_sz, aux_feature_sz=1,
                          num_classes=hparams.num_classes, dropout=dropout, activation=nn.SELU())
 
     def _encoder(inp_sz):

@@ -44,15 +44,15 @@ def _atis_base():
     p.dropout = .2
     p.discrete_dropout = .1
 
-    p.TRAINING_LIMIT = 20
+    p.TRAINING_LIMIT = 40
     p.batch_sz = 64
     # p.task_batch_sz = 8
-    p.num_inner_loops = 3
+    p.num_inner_loops = 4
     return p
 
 def _django_base():
     p = _atis_base()
-    p.TRAINING_LIMIT = 5
+    p.TRAINING_LIMIT = 20
     return p
 
 @Registry.hparamset()
@@ -117,11 +117,6 @@ def get_aux_model(hparams, vocab):
                             total_num_inner_loop_steps=hparams.num_inner_loops,
                             use_learnable_learning_rates=True,)
     lslrgd.initialise(dict(model.named_parameters()))
-    return [model, lslrgd]
-    # return torch.nn.ModuleDict({"model": model, "inner_optim": lslrgd})
-
-def get_clean_model(hparams, vocab):
-    model, lslrgd = get_aux_model(hparams, vocab)
     if hasattr(model, 'loss_weighting'):
         del model.loss_weighting
     return [model, lslrgd]
@@ -169,6 +164,7 @@ class MAMLUpdater(Updater):
         sent_char_a = batch['src_char_ids']
         sent_char_b = batch['hyp_char_ids']
         label = batch['hyp_label']
+        rank = batch['hyp_rank']
 
         device = self._device
         if device >= 0:
@@ -177,8 +173,9 @@ class MAMLUpdater(Updater):
             sent_char_a = move_to_device(sent_char_a, device)
             sent_char_b = move_to_device(sent_char_b, device)
             label = move_to_device(label, device)
+            rank = move_to_device(rank, device)
 
-        return sent_a, sent_b, sent_char_a, sent_char_b, label
+        return sent_a, sent_b, sent_char_a, sent_char_b, label, rank
 
     def update_epoch(self):
         iterator = self._iterators[0]
@@ -211,10 +208,10 @@ class MAMLUpdater(Updater):
             # each batch contains one example of every pseudo-tasks
             support_batch = next(task_iter)
 
-            sent_a, sent_b, char_a, char_b, label = self.read_model_input(support_batch)
+            sent_a, sent_b, char_a, char_b, label, rank = self.read_model_input(support_batch)
             model.zero_grad()
 
-            loss_step = model(sent_a, sent_b, char_a, char_b, label)
+            loss_step = model(sent_a, sent_b, char_a, char_b, label, rank)
             grad_params = dict(model.named_parameters())
             grads = torch.autograd.grad(loss_step, grad_params.values())
             torch.nn.utils.clip_grad_value_(grads, self._grad_clip_val)
@@ -227,8 +224,8 @@ class MAMLUpdater(Updater):
             model.load_state_dict(new_weights, strict=False)
             model.zero_grad()
             query_batch = next(task_iter)
-            sent_a, sent_b, char_a, char_b, label = self.read_model_input(query_batch)
-            loss_eval_step = model(sent_a, sent_b, char_a, char_b, label)
+            sent_a, sent_b, char_a, char_b, label, rank = self.read_model_input(query_batch)
+            loss_eval_step = model(sent_a, sent_b, char_a, char_b, label, rank)
             task_losses.append(loss_eval_step)
 
         model.load_state_dict(init_params)
@@ -256,11 +253,11 @@ class MAMLUpdater(Updater):
             # each batch contains one example of every pseudo-tasks
             support_batch = next(task_iter)
 
-            sent_a, sent_b, char_a, char_b, label = self.read_model_input(support_batch)
+            sent_a, sent_b, char_a, char_b, label, rank = self.read_model_input(support_batch)
             with torch.enable_grad():
                 model.train()
                 model.zero_grad()
-                loss_step = model(sent_a, sent_b, char_a, char_b, label)
+                loss_step = model(sent_a, sent_b, char_a, char_b, label, rank)
                 grad_params = dict(model.named_parameters())
                 grads = torch.autograd.grad(loss_step, grad_params.values())
 
@@ -274,8 +271,8 @@ class MAMLUpdater(Updater):
             model.load_state_dict(new_weights, strict=False)
 
         model.eval()
-        sent_a, sent_b, char_a, char_b, label = self.read_model_input(batch)
-        rankings = model.inference(sent_a, sent_b, char_a, char_b)
+        sent_a, sent_b, char_a, char_b, label, rank = self.read_model_input(batch)
+        rankings = model.inference(sent_a, sent_b, char_a, char_b, rank)
         # task_logits.append(model.inference(sent_a, sent_b, char_a, char_b))
         output = model.forward_loss_weight(*rankings)
 
@@ -323,8 +320,6 @@ class MAMLUpdater(Updater):
 
         support_set_iter_fn = partial(RandomIterator, shuffle=True, repeat=True,
                                       batch_size=hparams.batch_sz, translator=bot.translator,)
-        if hasattr(model, 'loss_weighting'):
-            del model.loss_weighting
 
         # NL similarity uses only example id as key, LF similarity requires hyp id to denote a concrete example
         retriever_cls = IDCacheRetriever if '_nl_' in args.hparamset else HypIDCacheRetriever
@@ -362,7 +357,7 @@ def main():
 
     if args.test:
         import trialbot
-        bot = TrialBot(trial_name="meta_ranker", get_model_func=get_clean_model, args=args)
+        bot = TrialBot(trial_name="meta_ranker", get_model_func=get_aux_model, args=args)
         bot.updater = MAMLUpdater.from_bot(bot)
         bot.translator.turn_special_token(on=True)
 
@@ -380,7 +375,8 @@ def main():
             output_keys = ("ex_id", "hyp_rank", "label", "ranking_score", "rank_match", "rank_a2b", "rank_b2a")
             for eid, hyp_rank, lbl, score, r1, r2, r3 in zip(*map(output.get, output_keys)):
                 print(json.dumps(dict(zip(output_keys,
-                                          (eid, hyp_rank, lbl.item(), score.item(), r1.item(), r2.item(), r3.item())))))
+                                          (eid, hyp_rank.item(), lbl.item(), score.item(),
+                                           r1.item(), r2.item(), r3.item())))))
 
     else:
         from utils.trial_bot_extensions import save_multiple_models_every_num_iters, save_multiple_models_per_epoch
