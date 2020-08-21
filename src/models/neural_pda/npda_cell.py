@@ -19,7 +19,7 @@ class RNNPDACell(nn.Module):
     def forward(self,
                 token: torch.Tensor,
                 stack: torch.Tensor,
-                hiddens: Optional[Tuple[torch.Tensor, torch.Tensor, torch.Tensor]],
+                hiddens: Optional[Tuple[torch.Tensor, torch.Tensor, torch.Tensor]] = None,
                 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         :param token: (batch, token_dim), input token of the current timestep
@@ -46,11 +46,3 @@ class RNNPDACell(nn.Module):
         h_s = forget * h_s + remember * z_s
 
         return h_t, h_nt, h_s
-
-
-
-
-
-
-
-
