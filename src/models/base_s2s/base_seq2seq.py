@@ -2,19 +2,17 @@ from typing import Union, Optional, Tuple, Dict, Any
 import numpy as np
 import torch
 import torch.nn
-import allennlp.models
-from allennlp.data.vocabulary import Vocabulary
-from torch.nn import Embedding
-from allennlp.nn import util
+from trialbot.data.ns_vocabulary import NSVocabulary
 from models.transformer.multi_head_attention import SingleTokenMHAttentionWrapper
 from models.modules.stacked_rnn_cell import StackedRNNCell
-from utils.nn import AllenNLPAttentionWrapper, filter_cat, filter_sum
+from utils.nn import filter_cat, filter_sum, prepare_input_mask, seq_cross_ent, get_decoder_initial_states
+from utils.nn import AllenNLPAttentionWrapper
 from allennlp.training.metrics import BLEU
 from models.modules.stacked_encoder import StackedEncoder
 
 class BaseSeq2Seq(torch.nn.Module):
     def __init__(self,
-                 vocab: Vocabulary,
+                 vocab: NSVocabulary,
                  encoder: StackedEncoder,
                  decoder: StackedRNNCell,
                  word_projection: torch.nn.Module,
@@ -24,13 +22,14 @@ class BaseSeq2Seq(torch.nn.Module):
                  start_symbol: str = '<GO>',
                  eos_symbol: str = '<EOS>',
                  max_decoding_step: int = 50,
-                 use_bleu: bool = True,
                  label_smoothing: Optional[float] = None,
                  enc_attention: Union[AllenNLPAttentionWrapper, SingleTokenMHAttentionWrapper, None] = None,
                  dec_hist_attn: Union[AllenNLPAttentionWrapper, SingleTokenMHAttentionWrapper, None] = None,
                  scheduled_sampling_ratio: float = 0.,
                  intermediate_dropout: float = .1,
                  concat_attn_to_dec_input: bool = False,
+                 padding_index: int = 0,
+                 decoder_init_strategy: str = "forward_all"
                  ):
         super().__init__()
         self.vocab = vocab
@@ -61,33 +60,32 @@ class BaseSeq2Seq(torch.nn.Module):
         self._concat_attn = concat_attn_to_dec_input
         self._dropout = torch.nn.Dropout(intermediate_dropout)
 
-        if use_bleu:
-            pad_index = self.vocab.get_token_index(self.vocab._padding_token, target_namespace)
-            self._bleu = BLEU(exclude_indices={pad_index, self._eos_id, self._start_id})
-        else:
-            self._bleu = None
-
+        self._padding_index = padding_index
+        self._strategy = decoder_init_strategy
 
     def forward(self,
-                source_tokens: Dict[str, torch.LongTensor],
-                target_tokens: Dict[str, torch.LongTensor] = None) -> Dict[str, torch.Tensor]:
+                source_tokens: torch.LongTensor,
+                target_tokens: torch.LongTensor = None) -> Dict[str, torch.Tensor]:
         """Run the network, and dispatch work to helper functions based on the runtime"""
 
         # source: (batch, source_length), containing the input word IDs
         # target: (batch, target_length), containing the output IDs
 
-        source, source_mask = source_tokens['tokens'], util.get_text_field_mask(source_tokens)
+        source, source_mask = prepare_input_mask(source_tokens, self._padding_index)
         state, layer_states = self._encode(source, source_mask)
         init_hidden, _ = self._init_hidden_states(layer_states, source_mask)
+        layer_initial = get_decoder_initial_states(layer_states, source_mask, self._strategy,
+                                                   self._encoder.is_bidirectional(), self._decoder.get_layer_num())
+        init_hidden, _ = self._decoder.init_hidden_states(layer_initial)
+
 
         if target_tokens is not None:
-            target, target_mask = target_tokens['tokens'], util.get_text_field_mask(target_tokens)
+            target, target_mask = prepare_input_mask(target_tokens, self._padding_index)
 
             # predictions: (batch, seq_len)
             # logits: (batch, seq_len, vocab_size)
             predictions, logits, others = self._forward_loop(state, source_mask, init_hidden, target, target_mask)
-            loss = self._get_loss(target, target_mask.float(), logits, others)
-            self._compute_metric(predictions, target[:, 1:])
+            loss = seq_cross_ent(logits, target, target_mask)
 
         else:
             predictions, logits, _ = self._forward_loop(state, source_mask, init_hidden, None, None)
@@ -258,41 +256,4 @@ class BaseSeq2Seq(torch.nn.Module):
         proj_input = self._dropout(proj_input)
         step_logit = self._output_projection(proj_input)
         return step_logit
-
-
-    def get_metrics(self, reset: bool = False) -> Dict[str, float]:
-        all_metrics: Dict[str, float] = {}
-        if self._bleu: # and not self.training:
-            all_metrics.update(self._bleu.get_metric(reset=reset))
-        return all_metrics
-
-    def _get_loss(self, target, target_mask, logits, other):
-        loss_pred = util.sequence_cross_entropy_with_logits(logits, target[:, 1:].contiguous(), target_mask[:, 1:],
-                                                            label_smoothing=self._label_smoothing)
-        loss = loss_pred
-        return loss
-
-    def _init_hidden_states(self, layer_state, source_mask: torch.LongTensor):
-        batch, _, hidden_dim = layer_state[0].size()
-
-        last_word_indices = source_mask.sum(1).long() - 1
-        expanded_indices = last_word_indices.view(-1, 1, 1).expand(batch, 1, hidden_dim)
-
-        # [(batch, hidden_dim)]
-        forward_by_layer = [state.gather(1, expanded_indices).squeeze(1) for state in layer_state]
-
-        if self._encoder.is_bidirectional():
-            hidden_dim = hidden_dim // 2
-            forward = [state[:, :hidden_dim] for state in forward_by_layer]
-            backward = [layer_state[i][:, 0, hidden_dim:] for i in range(len(forward))]
-
-        else:
-            forward = forward_by_layer
-            backward = None
-
-        return self._decoder.init_hidden_states(forward)
-
-    def _compute_metric(self, predictions, labels):
-        if self._bleu:
-            self._bleu(predictions, labels)
 
