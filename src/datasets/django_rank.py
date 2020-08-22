@@ -1,5 +1,5 @@
 from trialbot.training import Registry
-from .jsonl_dataset import JsonLDataset
+from trialbot.data.datasets.jsonl_dataset import JsonLDataset
 from utils.root_finder import find_root
 
 import os.path
