@@ -7,7 +7,7 @@ from trialbot.data import NSVocabulary, PADDING_TOKEN, DEFAULT_OOV_TOKEN
 from allennlp.modules import TokenEmbedder
 from models.transformer.multi_head_attention import SingleTokenMHAttentionWrapper
 from models.modules.stacked_rnn_cell import StackedRNNCell
-from utils.nn import AllenNLPAttentionWrapper, filter_cat, prepare_input_mask
+from utils.nn import AllenNLPAttentionWrapper, filter_cat, prepare_input_mask, get_decoder_initial_states
 from allennlp.training.metrics import BLEU
 from models.modules.stacked_encoder import StackedEncoder
 
@@ -83,7 +83,9 @@ class Seq2KeywordSeq(torch.nn.Module):
         target, target_mask = prepare_input_mask(target_tokens)
         tgt_keyword, tgt_keyword_mask = prepare_input_mask(tgt_keyword_tokens)
 
-        init_hidden, _ = self._init_hidden_states(layered_hidden, source_mask)
+        initial = get_decoder_initial_states(layered_hidden, source_mask, self._hidden_states_strategy,
+                                             self._encoder.is_bidirectional(), self._decoder.get_layer_num())
+        init_hidden, _ = self._decoder.init_hidden_states(initial)
 
         loss = None
         if target is not None and self.training:
@@ -310,61 +312,6 @@ class Seq2KeywordSeq(torch.nn.Module):
         per_batch_loss = - (pos_log_prob * target_mask.float()).sum(1) / (target_mask.sum(1).float() + 1e-20)
         loss = per_batch_loss.sum() / num_non_empty_sequences
         return loss
-
-    def _init_hidden_states(self, layer_state, source_mask: torch.LongTensor):
-        """
-        Initialize the hidden states for decoder given encoders
-        :param layer_state: [(batch, src_len, hidden_dim)]
-        :param source_mask: (batch, src_len)
-        :return:
-        """
-        # available strategies:
-        # [avg|pooling|last|zero]_[lowest|all|parallel]
-        # which means
-        # 1) to use some aggregation heuristics for the encoder, and
-        # 2) apply to the decoder initial hidden states
-        m = re.match(r"(avg|max|forward_last|zero)_(lowest|all|parallel)", self._hidden_states_strategy)
-        if not m:
-            raise ValueError(f"specified strategy '{str(self._hidden_states_strategy)}' not supported")
-
-        agg_stg, assign_stg = m.group(1), m.group(2)
-        batch, _, hidden_dim = layer_state[0].size()
-        source_mask_expand = source_mask.unsqueeze(-1).float() # (batch, seq_len, hidden)
-        if agg_stg == "avg":
-            src_agg = [
-                (l * source_mask_expand).sum(1) / (source_mask_expand.sum(1) + 1e-30)
-                for l in layer_state
-            ]
-
-        elif agg_stg == "max":
-            src_agg = [
-                ((source_mask_expand + 1e-45).log() + l).max(1)
-                for l in layer_state
-            ]
-        elif agg_stg == "zero":
-            src_agg = [source_mask.new_zeros((batch, hidden_dim), dtype=torch.float32) for _ in layer_state]
-        else: # forward_last
-            # last_word_indices: (batch,)
-            # expanded_indices: (batch, 1, hidden_dim)
-            # forward_by_layer: [(batch, hidden_dim)]
-            last_word_indices = source_mask.sum(1).long() - 1
-            expanded_indices = last_word_indices.view(-1, 1, 1).expand(batch, 1, hidden_dim)
-            forward_by_layer = [state.gather(1, expanded_indices).squeeze(1) for state in layer_state]
-            if self._encoder.is_bidirectional():
-                hidden_dim = hidden_dim // 2
-                src_agg = [state[:, :hidden_dim] for state in forward_by_layer]
-            else:
-                src_agg = forward_by_layer
-
-        if assign_stg == "lowest": # use the top layer aggregated state for the decoder bottom, zero for others
-            decoder_hidden = [src_agg[-1]] + [source_mask.new_zeros((batch, hidden_dim), dtype=torch.float32)
-                                              for _ in range(self._decoder.get_layer_num() - 1)]
-        elif assign_stg == "all": # use the same top layer state for all decoder layers
-            decoder_hidden = [src_agg[-1] for _ in range(self._decoder.get_layer_num())]
-        else: # parallel, each encoder is used for the appropriate decoder layer
-            decoder_hidden = src_agg
-
-        return self._decoder.init_hidden_states(decoder_hidden)
 
     def _compute_metric(self, predictions, labels):
         if self._bleu:

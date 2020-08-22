@@ -1,6 +1,7 @@
 from typing import List, Tuple, Dict, Mapping, Optional
 import torch
 import torch.nn
+import re
 
 from allennlp.modules.matrix_attention import MatrixAttention
 from allennlp.modules.attention import Attention
@@ -323,3 +324,65 @@ def get_final_encoder_states(encoder_outputs: torch.Tensor,
         final_encoder_output = torch.cat([final_forward_output, final_backward_output], dim=-1)
     return final_encoder_output
 
+def get_decoder_initial_states(layer_state: List[torch.Tensor],
+                               source_mask: torch.LongTensor,
+                               strategy: str = "forward_last_all",
+                               is_bidirectional: bool = False,
+                               num_decoder_layers: int = 1,
+                               ) -> List[torch.Tensor]:
+    """
+    Initialize the hidden states for decoder given encoders
+    :param layer_state: [(batch, src_len, hidden_dim)]
+    :param source_mask: (batch, src_len)
+    :param strategy: a string to indicate how to aggregate and assign initial states to the decoder
+                    typically available strategies:
+                    [avg|pooling|last|zero]_[lowest|all|parallel]
+                    which means
+                    1) to use some aggregation heuristics for the encoder, and
+                    2) apply to the decoder initial hidden states
+    :param is_bidirectional: if the encoder output is a concatenated vector of bidirectional outputs
+    :param num_decoder_layers: how many stacked layers does the decoder have
+    :return: a list of selected states of each layer to be assigned to the decoder
+    """
+    m = re.match(r"(avg|max|forward_last|zero)_(lowest|all|parallel)", strategy)
+    if not m:
+        raise ValueError(f"specified strategy '{strategy}' not supported")
+
+    agg_stg, assign_stg = m.group(1), m.group(2)
+    batch, _, hidden_dim = layer_state[0].size()
+    source_mask_expand = source_mask.unsqueeze(-1).float() # (batch, seq_len, hidden)
+    if agg_stg == "avg":
+        src_agg = [
+            (l * source_mask_expand).sum(1) / (source_mask_expand.sum(1) + 1e-30)
+            for l in layer_state
+        ]
+
+    elif agg_stg == "max":
+        src_agg = [
+            ((source_mask_expand + 1e-45).log() + l).max(1)
+            for l in layer_state
+        ]
+    elif agg_stg == "zero":
+        src_agg = [source_mask.new_zeros((batch, hidden_dim), dtype=torch.float32) for _ in layer_state]
+    else: # forward_last
+        # last_word_indices: (batch,)
+        # expanded_indices: (batch, 1, hidden_dim)
+        # forward_by_layer: [(batch, hidden_dim)]
+        last_word_indices = source_mask.sum(1).long() - 1
+        expanded_indices = last_word_indices.view(-1, 1, 1).expand(batch, 1, hidden_dim)
+        forward_by_layer = [state.gather(1, expanded_indices).squeeze(1) for state in layer_state]
+        if is_bidirectional:
+            hidden_dim = hidden_dim // 2
+            src_agg = [state[:, :hidden_dim] for state in forward_by_layer]
+        else:
+            src_agg = forward_by_layer
+
+    if assign_stg == "lowest": # use the top layer aggregated state for the decoder bottom, zero for others
+        decoder_hidden = [src_agg[-1]] + [source_mask.new_zeros((batch, hidden_dim), dtype=torch.float32)
+                                          for _ in range(num_decoder_layers - 1)]
+    elif assign_stg == "all": # use the same top layer state for all decoder layers
+        decoder_hidden = [src_agg[-1] for _ in range(num_decoder_layers)]
+    else: # parallel, each encoder is used for the appropriate decoder layer
+        decoder_hidden = src_agg
+
+    return decoder_hidden

@@ -4,7 +4,7 @@ import torch
 import torch.nn
 import allennlp.models
 from allennlp.data.vocabulary import Vocabulary
-from allennlp.modules import TokenEmbedder
+from torch.nn import Embedding
 from allennlp.nn import util
 from models.transformer.multi_head_attention import SingleTokenMHAttentionWrapper
 from models.modules.stacked_rnn_cell import StackedRNNCell
@@ -12,14 +12,14 @@ from utils.nn import AllenNLPAttentionWrapper, filter_cat, filter_sum
 from allennlp.training.metrics import BLEU
 from models.modules.stacked_encoder import StackedEncoder
 
-class BaseSeq2Seq(allennlp.models.Model):
+class BaseSeq2Seq(torch.nn.Module):
     def __init__(self,
                  vocab: Vocabulary,
                  encoder: StackedEncoder,
                  decoder: StackedRNNCell,
                  word_projection: torch.nn.Module,
-                 source_embedding: TokenEmbedder,
-                 target_embedding: TokenEmbedder,
+                 source_embedding: torch.nn.Embedding,
+                 target_embedding: torch.nn.Embedding,
                  target_namespace: str = "target_tokens",
                  start_symbol: str = '<GO>',
                  eos_symbol: str = '<EOS>',
@@ -32,7 +32,8 @@ class BaseSeq2Seq(allennlp.models.Model):
                  intermediate_dropout: float = .1,
                  concat_attn_to_dec_input: bool = False,
                  ):
-        super(BaseSeq2Seq, self).__init__(vocab)
+        super().__init__()
+        self.vocab = vocab
         self._enc_attn = enc_attention
         self._dec_hist_attn = dec_hist_attn
 
@@ -159,7 +160,7 @@ class BaseSeq2Seq(allennlp.models.Model):
 
         # Initialize target predictions with the start index.
         # batch_start: (batch_size,)
-        batch_start = source_mask.new_full((batch,), value=self._start_id)
+        batch_start = source_mask.new_full((batch,), fill_value=self._start_id)
         step_hidden, step_output = init_hidden, self._decoder.get_output_state(init_hidden)
 
         if self._enc_attn is not None:
