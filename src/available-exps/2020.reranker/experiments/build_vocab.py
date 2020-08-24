@@ -4,19 +4,7 @@ sys.path = ['..'] + sys.path
 from typing import Dict
 from tqdm import tqdm
 from trialbot.data import NSVocabulary
-
-def _get_counter(train_data, translator):
-    counter: Dict[str, Dict[str, int]] = dict()
-    for example in tqdm(iter(train_data)):
-        for namespace, w in translator.generate_namespace_tokens(example):
-            if namespace not in counter:
-                counter[namespace] = dict()
-
-            if w not in counter[namespace]:
-                counter[namespace][w] = 0
-
-            counter[namespace][w] += 1
-    return counter
+from utils.vocab_builder import get_ns_counter
 
 def atis(g):
     from datasets import atis_rank, atis_rank_translator
@@ -26,7 +14,7 @@ def atis(g):
         translator = atis_rank_translator.AtisRankChTranslator(70)
     train_data, _, _ = atis_rank.atis_pure_none()
 
-    counter = _get_counter(train_data, translator)
+    counter = get_ns_counter(train_data, translator)
 
     # same as the TranX settings.
     print('counter basic stats: ' + ",".join(f"{ns}={len(counts)}" for ns, counts in counter.items()))
@@ -46,7 +34,7 @@ def django(g):
         translator = django_rank_translator.DjangoRankChTranslator(70)
     train_data, _, _ = django_rank.django_pure_none()
 
-    counter = _get_counter(train_data, translator)
+    counter = get_ns_counter(train_data, translator)
 
     # same as the TranX settings.
     print('counter basic stats: ' + ",".join(f"{ns}={len(counts)}" for ns, counts in counter.items()))

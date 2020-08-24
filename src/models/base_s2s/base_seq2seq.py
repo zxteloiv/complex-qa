@@ -22,7 +22,6 @@ class BaseSeq2Seq(torch.nn.Module):
                  start_symbol: str = '<GO>',
                  eos_symbol: str = '<EOS>',
                  max_decoding_step: int = 50,
-                 label_smoothing: Optional[float] = None,
                  enc_attention: Union[AllenNLPAttentionWrapper, SingleTokenMHAttentionWrapper, None] = None,
                  dec_hist_attn: Union[AllenNLPAttentionWrapper, SingleTokenMHAttentionWrapper, None] = None,
                  scheduled_sampling_ratio: float = 0.,
@@ -53,7 +52,6 @@ class BaseSeq2Seq(torch.nn.Module):
         self._max_decoding_step = max_decoding_step
 
         self._target_namespace = target_namespace
-        self._label_smoothing = label_smoothing
 
         self._output_projection = word_projection
 
@@ -62,6 +60,8 @@ class BaseSeq2Seq(torch.nn.Module):
 
         self._padding_index = padding_index
         self._strategy = decoder_init_strategy
+
+        self.bleu = BLEU(exclude_indices={padding_index, self._start_id, self._eos_id})
 
     def forward(self,
                 source_tokens: torch.LongTensor,
@@ -98,6 +98,12 @@ class BaseSeq2Seq(torch.nn.Module):
         }
 
         return output
+
+    def compute_metric(self, pred, gold):
+        self.bleu(pred, gold)
+
+    def get_metrics(self, reset=False):
+        return self.bleu.get_metric(reset)
 
     def decode(self, output_dict: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
         """Convert the predicted word ids into discrete tokens"""
