@@ -22,9 +22,29 @@ class CompWebQTranslator(Translator):
         return q.strip().split(" ")
 
     def split_sparql(self, sparql: str):
-        sparql = re.sub(r"PREFIX[^\n]+\n", "", sparql)
-        sparql = re.sub(r"ns:m\.[a-z0-9_]", "?ent", sparql)
-        return sparql.strip().split(" ")
+        sparql = re.sub(r"PREFIX[^\n]+\n", "", sparql)          # remove prefix
+        sparql = re.sub(r"ns:m\.[a-z0-9_]+", "?ent", sparql)    # anonymize entities
+        sparql = re.sub(r"#[^\n]+\n", "", sparql)               # remove comments
+        sparql = re.sub(r"\n|\t", " ", sparql).strip()          # remove newlines and tabs
+
+        inner_structures = re.split(r'("[^"]+")', sparql)
+        for i, s in enumerate(inner_structures):
+            if s.startswith('"') and s.endswith('"'):
+                inner_structures[i] = s.replace(" ", "##space##")
+        sparql = " ".join(inner_structures)
+
+        toks = re.split(r" |([{}()]|\^\^)", sparql)
+        valid_toks = []
+        for t in toks:
+            if t is None or len(t) == 0:
+                continue
+
+            if "##space##" in t:
+                t = t.replace("##space##", " ")
+
+            valid_toks.append(t)
+
+        return valid_toks
 
     def generate_namespace_tokens(self, example) -> Generator[Tuple[str, str], None, None]:
         mq, q, sparql = list(map(example.get, ("machine_question", "question", "sparql")))
