@@ -28,4 +28,4 @@ snapshot=~/deploy/complex_qa/snapshots/CompWebQ/seq2seq/20200825-174225-mq
 eval_template mq $snapshot machine_question_to_answer
 
 snapshot=~/deploy/complex_qa/snapshots/CompWebQ/seq2seq/20200825-162012-q
-eval_template mq $snapshot question_to_answer
+eval_template q $snapshot question_to_answer
