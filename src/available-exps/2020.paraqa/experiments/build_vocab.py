@@ -15,7 +15,7 @@ def main(output_path: str):
 
 if __name__ == '__main__':
     import sys
-    if len(sys.path) > 1:
-        main(sys.path[1])
+    if len(sys.argv) > 1:
+        main(sys.argv[1])
     else:
         main('compwebq_vocab_5')
