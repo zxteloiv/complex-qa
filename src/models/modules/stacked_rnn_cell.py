@@ -25,6 +25,9 @@ class StackedRNNCell(torch.nn.Module):
         # hidden is a list of subhidden
         last_layer_output = inputs
 
+        if input_aux is not None:
+            last_layer_output = filter_cat([last_layer_output] + input_aux, dim=1)
+
         if inputs.size()[1] < self.input_dim and input_aux is None:
             raise ValueError('Dimension not match')
 
@@ -33,12 +36,8 @@ class StackedRNNCell(torch.nn.Module):
             if i > 0:
                 last_layer_output = self._input_dropout(last_layer_output)
 
-            if input_aux is None:
-                rnn_input = last_layer_output
-            else:
-                rnn_input = filter_cat([last_layer_output] + input_aux, dim=1)
+            layer_hidden, last_layer_output = rnn(last_layer_output, hidden[i])
 
-            layer_hidden, last_layer_output = rnn(rnn_input, hidden[i])
             updated_hiddens.append(layer_hidden)
 
         return updated_hiddens, last_layer_output

@@ -7,7 +7,10 @@ from trialbot.training import Registry
 from trialbot.training.updater import TrainingUpdater, TestingUpdater
 from utils.root_finder import find_root
 from trialbot.utils.move_to_device import move_to_device
-from .build_model import get_seq2seq_model
+from build_model import get_seq2seq_model
+
+import datasets.complex_web_q
+import datasets.complex_web_q_translator
 
 ROOT = find_root()
 
@@ -15,11 +18,27 @@ ROOT = find_root()
 def question_to_answer():
     from trialbot.training.hparamset import HyperParamSet
     p = HyperParamSet.common_settings()
+    p.emb_sz = 256
+    p.src_namespace = 'ns_q'
+    p.tgt_namespace = 'ns_lf'
+    p.hidden_sz = 128
+    p.enc_attn = "bilinear"
+    p.dec_hist_attn = "dot_product"
+    p.concat_attn_to_dec_input = True
+    p.encoder = "bilstm"
+    p.num_enc_layers = 2
+    p.dropout = .2
+    p.decoder = "lstm"
+    p.num_dec_layers = 2
+    p.max_decoding_step = 100
+    p.scheduled_sampling = .1
+    p.decoder_init_strategy = "forward_last_parallel"
     return p
 
 @Registry.hparamset()
 def machine_question_to_answer():
     p = question_to_answer()
+    p.src_namespace = 'ns_mq'
     return p
 
 class CompWebQTrainingUpdater(TrainingUpdater):

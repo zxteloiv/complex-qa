@@ -336,7 +336,7 @@ def get_decoder_initial_states(layer_state: List[torch.Tensor],
     :param source_mask: (batch, src_len)
     :param strategy: a string to indicate how to aggregate and assign initial states to the decoder
                     typically available strategies:
-                    [avg|pooling|last|zero]_[lowest|all|parallel]
+                    [avg|max|forward_last|zero]_[lowest|all|parallel]
                     which means
                     1) to use some aggregation heuristics for the encoder, and
                     2) apply to the decoder initial hidden states

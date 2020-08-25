@@ -73,7 +73,6 @@ class BaseSeq2Seq(torch.nn.Module):
 
         source, source_mask = prepare_input_mask(source_tokens, self._padding_index)
         state, layer_states = self._encode(source, source_mask)
-        init_hidden, _ = self._init_hidden_states(layer_states, source_mask)
         layer_initial = get_decoder_initial_states(layer_states, source_mask, self._strategy,
                                                    self._encoder.is_bidirectional(), self._decoder.get_layer_num())
         init_hidden, _ = self._decoder.init_hidden_states(layer_initial)
@@ -85,7 +84,7 @@ class BaseSeq2Seq(torch.nn.Module):
             # predictions: (batch, seq_len)
             # logits: (batch, seq_len, vocab_size)
             predictions, logits, others = self._forward_loop(state, source_mask, init_hidden, target, target_mask)
-            loss = seq_cross_ent(logits, target, target_mask)
+            loss = seq_cross_ent(logits, target[:, 1:].contiguous(), target_mask[:, 1:].contiguous())
 
         else:
             predictions, logits, _ = self._forward_loop(state, source_mask, init_hidden, None, None)
@@ -233,8 +232,9 @@ class BaseSeq2Seq(torch.nn.Module):
         return predictions, logits, others_by_step
 
     def _run_decoder(self, step_target, inputs_embedding, step_hidden, step_output, enc_attn_fn, dec_hist_attn_fn):
-        batch = inputs_embedding.size()[0]
         # compute attention context before the output is updated
+        # actually only the first layer of decoder is using attention,
+        # and only the final output of encoder and decoder history are attended over, not inter-layer states
         enc_context = enc_attn_fn(step_output) if enc_attn_fn else None
         dec_hist_context = dec_hist_attn_fn(step_output) if dec_hist_attn_fn else None
 

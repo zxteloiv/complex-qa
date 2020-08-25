@@ -24,20 +24,14 @@ def get_seq2seq_model(p, vocab: NSVocabulary):
     def sum_attn_dims(attns, dims):
         """Compute the dimension requirements for all attention modules"""
         return sum(dim for attn, dim in zip(attns, dims) if attn is not None)
+    # since attentions are mapped into hidden size, the hidden_dim is used instead of original context size
+    attn_size = sum_attn_dims([enc_attn, dec_hist_attn], [dec_out_dim, dec_out_dim])
 
-    if p.concat_attn_to_dec_input:
-        dec_in_dim = dec_out_dim + sum_attn_dims([enc_attn, dec_hist_attn], [enc_out_dim, dec_out_dim])
-    else:
-        dec_in_dim = dec_out_dim
-
+    dec_in_dim = emb_sz + (attn_size if p.concat_attn_to_dec_input else 0)
     rnn_cls = _get_decoder_type(p)
     decoder = StackedRNNCell(rnn_cls, dec_in_dim, dec_out_dim, p.num_dec_layers, p.dropout)
 
-    if p.concat_attn_to_dec_input:
-        proj_in_dim = dec_out_dim + sum_attn_dims([enc_attn, dec_hist_attn], [enc_out_dim, dec_out_dim])
-    else:
-        proj_in_dim = dec_out_dim
-
+    proj_in_dim = dec_out_dim + (attn_size if p.concat_attn_to_dec_input else 0)
     word_proj = nn.Linear(proj_in_dim, vocab.get_vocab_size(p.tgt_namespace))
 
     model = BaseSeq2Seq(
@@ -65,7 +59,7 @@ def _get_encoder(p):
     from models.modules.stacked_encoder import StackedEncoder
     from allennlp.modules.seq2seq_encoders.pytorch_seq2seq_wrapper import PytorchSeq2SeqWrapper
     from models.transformer.encoder import TransformerEncoder
-    emb_sz, hidden_dim = p.emb_sz, p.hidden_dim
+    emb_sz, hidden_dim = p.emb_sz, p.hidden_sz
 
     if p.encoder == 'lstm':
         encoder = StackedEncoder([
