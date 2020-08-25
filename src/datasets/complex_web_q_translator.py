@@ -108,6 +108,7 @@ class CompWebQTranslator(Translator):
             "mq": pad_seq_b("mq", ns_mq),
             "q": pad_seq_b("q", ns_q),
             "sparql": pad_seq_b("sparql", ns_lf),
+            "_raw": list_by_keys['_raw'],
         }
         return batch
 

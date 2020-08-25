@@ -78,13 +78,12 @@ class CompWebQTrainingUpdater(TrainingUpdater):
 
 class CompWebQTestingUpdater(TestingUpdater):
     def update_epoch(self):
-        model, optim, iterator = self._models[0], self._optims[0], self._iterators[0]
+        model, iterator = self._models[0], self._iterators[0]
         if iterator.is_new_epoch:
             self.stop_epoch()
 
         device = self._device
         model.train()
-        optim.zero_grad()
         batch = next(iterator)
         q = batch['q']
         mq = batch['mq']
@@ -97,6 +96,8 @@ class CompWebQTestingUpdater(TestingUpdater):
 
         output = model(source_tokens=(q if self.src_ns == 'ns_q' else mq))
         output = model.decode(output)
+
+        model.compute_metric(output['predictions'], sparql)
         output["qid"] = batch['qid']
         output["_raw"] = batch["_raw"]
         return output
