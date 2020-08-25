@@ -17,7 +17,10 @@ ROOT = find_root()
 @Registry.hparamset()
 def question_to_answer():
     from trialbot.training.hparamset import HyperParamSet
-    p = HyperParamSet.common_settings()
+    p = HyperParamSet.common_settings(ROOT)
+    p.TRAINING_LIMIT = 50
+    p.batch_sz = 128
+
     p.emb_sz = 256
     p.src_namespace = 'ns_q'
     p.tgt_namespace = 'ns_lf'
