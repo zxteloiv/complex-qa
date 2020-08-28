@@ -2,7 +2,10 @@ from typing import Tuple, Optional, List
 import torch
 from torch import nn
 
+
 class RNNPDACell(nn.Module):
+    hidden_type = Tuple[torch.Tensor, torch.Tensor, torch.Tensor]
+
     def __init__(self,
                  token_dim,
                  stack_dim,
