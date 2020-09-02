@@ -41,8 +41,8 @@ def _atis_base():
 
     p.dropout = .2
     p.discrete_dropout = .1
-    p.batch_sz = 64
-    p.support_batch_sz = 128
+    p.batch_sz = 40
+    p.support_batch_sz = 256
     p.num_inner_loops = 10
     return p
 
