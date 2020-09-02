@@ -20,7 +20,7 @@ function eval_template () {
     mkdir -p ${DECODE_DIR}
     STAT_OUTFILE=${STAT_DIR}/${DATASET_TYPE}.${MODEL_NAME}.top
     DECODE_PREFIX=${DECODE_DIR}/decode.${DATASET_TYPE}.${MODEL_NAME}
-    TEST_FILE=../../data/${DATASET_TYPE}_rank/${DATASET_TYPE}_rank.five_hyp.test.jsonl
+    TEST_FILE=~/deploy/complex_qa/data/${DATASET_TYPE}_rank/${DATASET_TYPE}_rank.five_hyp.test.jsonl
     for ((i=1; i<501; i++));
     do
         if [ ! -f "$MODEL_PREFIX/model_state_$i.th" ]; then
@@ -52,15 +52,15 @@ function eval_template () {
 # $4 snapshot prefix, where the trained model are saved
 # $5 hyperparameter used for tests
 # $6 python executable script name, based on trialbot
-snapshot=../../snapshots/django_five_hyp/baseline2_giant/20200813-161848-deep-chgiant-rank
-eval_template django 25trans-deep-giant-boost lfted "$snapshot" django_lf_ted transfer_giant.py
-eval_template django 25trans-deep-giant-boost lfngram "$snapshot" django_lf_ngram transfer_giant.py
-eval_template django 25trans-deep-giant-boost nlbert "$snapshot" django_nl_bert transfer_giant.py
-eval_template django 25trans-deep-giant-boost nlngram "$snapshot" django_nl_ngram transfer_giant.py
+snapshot=~/deploy/complex_qa/snapshots/django_five_hyp/trans_giant_base
+#eval_template django 25trans-giant-group lfted "$snapshot" django_lf_ted transfer_giant.py
+#eval_template django 25trans-giant-group lfngram "$snapshot" django_lf_ngram transfer_giant.py
+eval_template django 25trans-giant-group nlbert "$snapshot" django_nl_bert transfer_giant.py
+#eval_template django 25trans-giant-group nlngram "$snapshot" django_nl_ngram transfer_giant.py
 
-snapshot=../../snapshots/atis_five_hyp/baseline2_giant/20200813-161848-deep-chgiant-rank
-eval_template atis 25trans-deep-giant-boost lfted "$snapshot" atis_lf_ted transfer_giant.py
-eval_template atis 25trans-deep-giant-boost lfngram "$snapshot" atis_lf_ngram transfer_giant.py
-eval_template atis 25trans-deep-giant-boost nlbert "$snapshot" atis_nl_bert transfer_giant.py
-eval_template atis 25trans-deep-giant-boost nlngram "$snapshot" atis_nl_ngram transfer_giant.py
+snapshot=~/deploy/complex_qa/snapshots/atis_five_hyp/trans_giant_base
+#eval_template atis 25trans-giant-group lfted "$snapshot" atis_lf_ted transfer_giant.py
+#eval_template atis 25trans-giant-group lfngram "$snapshot" atis_lf_ngram transfer_giant.py
+eval_template atis 25trans-giant-group nlbert "$snapshot" atis_nl_bert transfer_giant.py
+#eval_template atis 25trans-giant-group nlngram "$snapshot" atis_nl_ngram transfer_giant.py
 

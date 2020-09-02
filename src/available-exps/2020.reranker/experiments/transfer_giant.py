@@ -39,11 +39,11 @@ def _atis_base():
     p.char_hid_sz = 128
     p.TRAINING_LIMIT = 200
 
-    p.dropout = .5
+    p.dropout = .2
     p.discrete_dropout = .1
-    p.batch_sz = 128
-    p.support_batch_sz = 30
-    p.num_inner_loops = 8
+    p.batch_sz = 64
+    p.support_batch_sz = 64
+    p.num_inner_loops = 5
     return p
 
 def _django_base():
@@ -134,7 +134,7 @@ class TransferUpdater(Updater):
         # each element is a list of similar examples,
         # corresponding to an example which indicates a different pseudotask
         # the None or empty lists (i.e., no similar examples found for some pseudotask) are filtered.
-        all_similar_examples = filter(None, map(lambda e: self._retriever.search(e, batch_source), batch['_raw']))
+        all_similar_examples = filter(None, map(lambda e: self._retriever.search_group(e, batch_source), batch['_raw']))
 
         # the support set is a concatenated list of all the pseudo-tasks.
         #
@@ -238,29 +238,8 @@ class TransferUpdater(Updater):
         return updater
 
 def main():
-    import sys
-    args = sys.argv[1:]
-    args += ['--seed', '2020']
-    if '--dataset' not in sys.argv:
-        args += ['--dataset', 'atis_five_hyp']
-    if '--translator' not in sys.argv:
-        args += ['--translator', 'atis_rank']
-
-    parser = TrialBot.get_default_parser()
-    parser.add_argument('--dev', action='store_true', help="use dev data for testing mode, only works with --test opt")
-    args = parser.parse_args(args)
-    if args.debug:
-        logging.getLogger().setLevel(logging.DEBUG)
-    elif args.quiet:
-        logging.getLogger().setLevel(logging.WARNING)
-    else:
-        logging.getLogger().setLevel(logging.INFO)
-
-    if hasattr(args, "seed") and args.seed:
-        from utils.fix_seed import fix_seed
-        logging.info(f"set seed={args.seed}")
-        fix_seed(args.seed)
-
+    from utils.trialbot_setup import setup
+    args = setup(seed='2020')
     bot = TrialBot(trial_name="transfer_giant", get_model_func=get_model, args=args)
 
     bot.translator.turn_special_token(on=True)
