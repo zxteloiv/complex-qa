@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-RESULT_ROOT=../../result_evaluation
+RESULT_ROOT=~/deploy/complex_qa/result_evaluation
 
 function eval_template () {
     if [ "$1" == "" ]; then
@@ -53,14 +53,14 @@ function eval_template () {
 # $5 hyperparameter used for tests
 # $6 python executable script name, based on trialbot
 snapshot=~/deploy/complex_qa/snapshots/django_five_hyp/trans_giant_base
-#eval_template django 25trans-giant-group lfted "$snapshot" django_lf_ted transfer_giant.py
-#eval_template django 25trans-giant-group lfngram "$snapshot" django_lf_ngram transfer_giant.py
-eval_template django 25trans-giant-group nlbert "$snapshot" django_nl_bert transfer_giant.py
-#eval_template django 25trans-giant-group nlngram "$snapshot" django_nl_ngram transfer_giant.py
+eval_template django 25tgiant-group-v2 lfted "$snapshot" django_lf_ted transfer_giant.py
+eval_template django 25tgiant-group-v2 lfngram "$snapshot" django_lf_ngram transfer_giant.py
+eval_template django 25tgiant-group-v2 nlbert "$snapshot" django_nl_bert transfer_giant.py
+eval_template django 25tgiant-group-v2 nlngram "$snapshot" django_nl_ngram transfer_giant.py
 
 snapshot=~/deploy/complex_qa/snapshots/atis_five_hyp/trans_giant_base
-#eval_template atis 25trans-giant-group lfted "$snapshot" atis_lf_ted transfer_giant.py
-#eval_template atis 25trans-giant-group lfngram "$snapshot" atis_lf_ngram transfer_giant.py
-eval_template atis 25trans-giant-group nlbert "$snapshot" atis_nl_bert transfer_giant.py
-#eval_template atis 25trans-giant-group nlngram "$snapshot" atis_nl_ngram transfer_giant.py
+eval_template atis 25tgiant-group-v2 lfted "$snapshot" atis_lf_ted transfer_giant.py
+eval_template atis 25tgiant-group-v2 lfngram "$snapshot" atis_lf_ngram transfer_giant.py
+eval_template atis 25tgiant-group-v2 nlbert "$snapshot" atis_nl_bert transfer_giant.py
+eval_template atis 25tgiant-group-v2 nlngram "$snapshot" atis_nl_ngram transfer_giant.py
 

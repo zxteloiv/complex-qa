@@ -42,8 +42,8 @@ def _atis_base():
     p.dropout = .2
     p.discrete_dropout = .1
     p.batch_sz = 64
-    p.support_batch_sz = 64
-    p.num_inner_loops = 5
+    p.support_batch_sz = 128
+    p.num_inner_loops = 10
     return p
 
 def _django_base():
@@ -175,9 +175,7 @@ class TransferUpdater(Updater):
 
         with torch.enable_grad():
             model.train()
-            for step, support_batch in enumerate(task_iter):
-                if step >= self._num_inner_loop:
-                    break
+            for step, support_batch in zip(range(self._num_inner_loop), task_iter):
                 sent_a, sent_b, char_a, char_b, label, rank = self.read_model_input(support_batch)
                 model.zero_grad()
                 loss_step = model(sent_a, sent_b, char_a, char_b, label, rank)
