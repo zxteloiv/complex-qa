@@ -4,6 +4,7 @@ import os.path
 
 import datasets.cached_retriever as libretriever
 from datasets.atis_rank import atis_five
+from datasets.django_rank import django_five
 
 from utils.root_finder import find_root
 
@@ -27,7 +28,7 @@ example = dev_set[17]
 print(example)
 print('=' * 64)
 for ret in (nl_ret, lf_ret, ted_ret):
-    all_res = ret.search(example, "dev")
+    all_res = ret.search_group(example, "dev")
     for res in all_res[:10]:
         print(f" id: {res['ex_id']}-{res['hyp_rank']},\n"
               f"src: {' '.join(res['src'])},\n"

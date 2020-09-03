@@ -4,7 +4,7 @@ from functools import partial
 from itertools import chain
 import pickle
 import logging
-from collections import defaultdict
+from collections import defaultdict, Counter
 from trialbot.data.dataset import Dataset
 
 ExampleType = Any
@@ -18,7 +18,7 @@ class KVCacheRetriever(Retriever):
                  key: KeyFuncType,
                  dataset: Dataset,
                  similarity_cache: SimilarityCacheType,
-                 group_expansion: Optional[GroupExpansionFuncType] = None):
+                 grouper: Optional['Grouper'] = None):
         """
         a key value store, key=keyfunc(example), val=dataset.index(example)
         :param key: example -> key_string
@@ -30,7 +30,7 @@ class KVCacheRetriever(Retriever):
         self.logger = logging.getLogger(__name__)
         self.get_example_key = key
         self._sim_cache = similarity_cache
-        self.group_expansion = group_expansion
+        self.grouper = grouper
 
     def build_key_value_store(self):
         """build the KV store with key=intepretable keys, val=dataset list index"""
@@ -52,9 +52,7 @@ class KVCacheRetriever(Retriever):
     def search_group(self, example, example_source: str = "train") -> List[ExampleType]:
         """example -> key_string -> similar key_strings -> more key_strings -> dataset indices -> examples"""
         similar_keys = self._get_similar_keys(example, example_source)
-        if self.group_expansion is not None:
-            expanded_keys = chain.from_iterable(map(self.group_expansion, similar_keys))
-            similar_keys = set(expanded_keys)
+        similar_keys = self.grouper(similar_keys)
         similar_ids = list(chain(*map(self._kvstore.get, similar_keys)))
         return self.dataset[similar_ids]
 
@@ -73,27 +71,57 @@ class KVCacheRetriever(Retriever):
         return similar_keys
 
 
-IDCacheRetriever = lambda filename, dataset: KVCacheRetriever(
-    key=lambda example: example.get('ex_id'),
-    dataset=dataset,
-    similarity_cache=pickle.load(open(filename, 'rb')),
-)
-
 def get_hyp_key(example: ExampleType) -> Optional[str]:
     ex_id, hyp_rank = list(map(example.get, ('ex_id', 'hyp_rank')))
     if ex_id is None or hyp_rank is None:
         return None
     return f"{ex_id}-{hyp_rank}"
 
-def get_hyp_group(key: str, topk=5) -> List[str]:
-    ex_id = key.split('-')[0]
-    group_keys = [f"{ex_id}-{str(x)}" for x in range(topk)]
-    return group_keys
+class Grouper:
+    def __init__(self,
+                 ex2group_func: Callable[[str], str] = None,
+                 group_expansion_func: Callable[[str], List[str]] = None,
+                 ):
+        self._ex2group = ex2group_func
+        self._group_exp = group_expansion_func
+
+    def get_group_id_from_example_key(self, example_key: str) -> str:
+        if self._ex2group is not None:
+            return self._ex2group(example_key)
+
+        raise NotImplementedError
+
+    def expand_group(self, group_key: str) -> List[str]:
+        if self._group_exp is not None:
+            return self._group_exp(group_key)
+
+        raise NotImplementedError
+
+    def __call__(self, keys: List[str]) -> List[str]:
+        group_ids = map(self.get_group_id_from_example_key, filter(None, keys))
+        # voting and sorting
+        counter = Counter(group_ids)
+        groups_desc: List[str] = sorted(counter.keys(), key=lambda k: counter[k], reverse=True)
+        expanded_keys = list(chain.from_iterable(self.expand_group(g) for g in groups_desc))
+
+        return expanded_keys
+
+hyp_grouper = Grouper(ex2group_func=(lambda exkey: exkey.split('-')[0]),
+                      group_expansion_func=lambda gkey: [f"{gkey}-{i}" for i in range(5)])
+
+id_grouper = Grouper(ex2group_func=lambda k: k, group_expansion_func=lambda k: [k])
+
+IDCacheRetriever = lambda filename, dataset: KVCacheRetriever(
+    key=lambda example: example.get('ex_id'),
+    dataset=dataset,
+    similarity_cache=pickle.load(open(filename, 'rb')),
+    grouper=id_grouper,
+)
 
 HypIDCacheRetriever = lambda filename, dataset: KVCacheRetriever(
     key=get_hyp_key,
     dataset=dataset,
     similarity_cache=pickle.load(open(filename, 'rb')),
-    group_expansion=partial(get_hyp_group, topk=5),
+    grouper=hyp_grouper,
 )
 
