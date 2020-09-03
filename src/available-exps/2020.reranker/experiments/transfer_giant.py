@@ -42,7 +42,7 @@ def _atis_base():
     p.dropout = .2
     p.discrete_dropout = .1
     p.batch_sz = 40
-    p.support_batch_sz = 256
+    p.support_batch_sz = 300
     p.num_inner_loops = 10
     return p
 
@@ -225,7 +225,7 @@ class TransferUpdater(Updater):
         if args.debug and args.skip:
             iterator.reset(args.skip)
 
-        support_set_iter_fn = partial(RandomIterator, shuffle=True, repeat=True,
+        support_set_iter_fn = partial(RandomIterator, shuffle=False, repeat=True,
                                       batch_size=hparams.batch_sz, translator=bot.translator,)
 
         # NL similarity uses only example id as key, LF similarity requires hyp id to denote a concrete example
