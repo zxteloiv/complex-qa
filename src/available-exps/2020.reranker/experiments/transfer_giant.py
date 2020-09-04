@@ -41,9 +41,10 @@ def _atis_base():
 
     p.dropout = .2
     p.discrete_dropout = .1
+
+    p.num_inner_loops = 4
     p.batch_sz = 40
-    p.support_batch_sz = 300
-    p.num_inner_loops = 10
+    p.support_batch_sz = 200
     return p
 
 def _django_base():
@@ -178,7 +179,7 @@ class TransferUpdater(Updater):
             for step, support_batch in zip(range(self._num_inner_loop), task_iter):
                 sent_a, sent_b, char_a, char_b, label, rank = self.read_model_input(support_batch)
                 model.zero_grad()
-                loss_step = model(sent_a, sent_b, char_a, char_b, label, rank)
+                loss_step = model.transfer_forward(sent_a, sent_b, char_a, char_b, label, rank)
                 loss_step.backward()
                 optim.step()
 

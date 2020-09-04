@@ -43,7 +43,7 @@ class CharGiantRanker(nn.Module):
                 char_a: torch.LongTensor,
                 char_b: torch.LongTensor,
                 label: torch.LongTensor,
-                rank = None
+                rank = None,
                 ):
         """
         :param word_a: (N, a_len)
@@ -51,15 +51,25 @@ class CharGiantRanker(nn.Module):
         :param char_a: (N, a_len, a_char)
         :param char_b: (N, b_len, b_char)
         :param label: (N,)
+        :param rank: (N, 1)
         :return:
         """
-        self.re2: ChRE2
-        self.a2b: Seq2SeqModeling
-        self.b2a: Seq2SeqModeling
-        self.a_seq: SeqModeling
-        self.b_seq: SeqModeling
+        # ---- matching ------
+        # matching logits: (batch, 2)
+        matching_logits = self.re2(word_a, char_a, word_b, char_b, rank)
+        loss_m = F.cross_entropy(matching_logits, label)
 
-        # word/char_a/b[_mask]: all the same shape
+        return loss_m + self._model_reg_loss(word_a, word_b, char_a, char_b, label)
+
+    def transfer_forward(self, word_a, word_b, char_a, char_b, label, rank, eta: float = .6):
+        # label: (batch,)
+        # logits: (batch, 2)
+        logits = self.re2(word_a, char_a, word_b, char_b, rank)
+        loss_m = (eta - (1 + eta) * label) * logits.log_softmax(dim=-1)[:, 1]    # 0-1 classification
+        return loss_m.mean() + self._model_reg_loss(word_a, word_b, char_a, char_b, label)
+
+    def _model_reg_loss(self, word_a, word_b, char_a, char_b, label):
+
         input_masks = list(map(lambda x: (x != 0).long(), (word_a, word_b, char_a, char_b)))
         word_a_mask, word_b_mask, char_a_mask, char_b_mask = input_masks
 
@@ -68,11 +78,7 @@ class CharGiantRanker(nn.Module):
         a_tgt, b_tgt, a_tgt_mask, b_tgt_mask = list(map(lambda t: t[:, 1:].contiguous(),
                                                         (word_a, word_b, word_a_mask, word_b_mask)))
 
-        # ---- matching ------
-        # matching logits: (batch, 2)
-        matching_logits = self.re2(word_a, char_a, word_b, char_b, rank)
-        loss_m = F.cross_entropy(matching_logits, label)
-
+        # ------------------------
         # ---- generation ----
         # a2b
         a_emb, b_emb = self.a_embedding(word_a), self.b_embedding(word_b)
@@ -85,6 +91,9 @@ class CharGiantRanker(nn.Module):
         logits_b2a = self.b2a.forward_emb(b_emb, a_inp_emb, word_b_mask, a_inp_mask)
         loss_b2a = F.mse_loss(seq_likelihood(logits_b2a, a_tgt, a_tgt_mask), label.float())
 
+        loss_gen = loss_b2a.mean() + loss_a2b.mean()
+
+        # ------------------------
         # ---- language model ----
         logits_a = self.a_seq.forward_emb(a_inp_emb, a_inp_mask)
         loss_a = seq_cross_ent(logits_a, a_tgt, a_tgt_mask, average=None)
@@ -92,9 +101,9 @@ class CharGiantRanker(nn.Module):
         logits_b = self.b_seq.forward_emb(b_inp_emb, b_inp_mask)
         loss_b = seq_cross_ent(logits_b, b_tgt, b_tgt_mask, average=None)
 
-        loss_normal = loss_m + loss_a.mean() + loss_b.mean() + loss_b2a.mean() + loss_a2b.mean()
-        # return loss_normal
+        loss_lm = loss_a.mean() + loss_b.mean()
 
+        # ------------------------
         # ---- dual model -----
         logprob_b2a = torch.log_softmax(logits_b2a, dim=-1)
         logprob_a2b = torch.log_softmax(logits_a2b, dim=-1)
@@ -139,7 +148,7 @@ class CharGiantRanker(nn.Module):
 
         loss_dim = loss_dim_a + loss_dim_b  # without using an EM-analogous opt.
 
-        return loss_normal + self.dim_training_weight * loss_dim.mean()
+        return loss_lm + loss_gen + self.dim_training_weight * loss_dim.mean()
 
     def inference(self,
                   word_a: torch.LongTensor,

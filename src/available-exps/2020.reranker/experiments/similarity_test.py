@@ -29,8 +29,9 @@ print(example)
 print('=' * 64)
 for ret in (nl_ret, lf_ret, ted_ret):
     all_res = ret.search_group(example, "dev")
-    for res in all_res[:10]:
-        print(f" id: {res['ex_id']}-{res['hyp_rank']},\n"
+    print(f"similar_examples count: {len(all_res)}")
+    for i, res in enumerate(all_res):
+        print(f" id: {res['ex_id']}-{res['hyp_rank']}\n"
               f"src: {' '.join(res['src'])},\n"
               f"tgt: {res['tgt']},\n"
               f"hyp: {res['hyp']},\n"
