@@ -53,7 +53,7 @@ function eval_template () {
 # $5 hyperparameter used for tests
 # $6 python executable script name, based on trialbot
 snapshot=~/deploy/complex_qa/snapshots/django_five_hyp/trans_giant_base
-eval_template django 25tgiant-group-rloss lfted-4-40-200 "$snapshot" django_lf_ted transfer_giant.py
+eval_template django 25tgiant-group-rloss lfted-1-40-200-e02 "$snapshot" django_lf_ted transfer_giant.py
 #eval_template django 25tgiant-group-v5 lfngram "$snapshot" django_lf_ngram transfer_giant.py
 #eval_template django 25tgiant-group-v5 nlbert "$snapshot" django_nl_bert transfer_giant.py
 #eval_template django 25tgiant-group-v5 nlngram "$snapshot" django_nl_ngram transfer_giant.py

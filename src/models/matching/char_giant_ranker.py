@@ -61,7 +61,7 @@ class CharGiantRanker(nn.Module):
 
         return loss_m + self._model_reg_loss(word_a, word_b, char_a, char_b, label)
 
-    def transfer_forward(self, word_a, word_b, char_a, char_b, label, rank, eta: float = .6):
+    def transfer_forward(self, word_a, word_b, char_a, char_b, label, rank, eta: float = .2):
         # label: (batch,)
         # logits: (batch, 2)
         logits = self.re2(word_a, char_a, word_b, char_b, rank)

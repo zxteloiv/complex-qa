@@ -42,7 +42,7 @@ def _atis_base():
     p.dropout = .2
     p.discrete_dropout = .1
 
-    p.num_inner_loops = 4
+    p.num_inner_loops = 1
     p.batch_sz = 40
     p.support_batch_sz = 200
     return p
@@ -99,6 +99,9 @@ def django_lf_ted():
     p = _django_base()
     p.retriever_index_path = os.path.join(_ROOT, 'data', '_similarity_index', 'django_lf_ted.bin')
     return p
+
+
+import grid
 
 import datasets.atis_rank
 import datasets.atis_rank_translator
