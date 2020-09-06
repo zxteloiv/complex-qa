@@ -101,8 +101,6 @@ def django_lf_ted():
     return p
 
 
-import grid
-
 import datasets.atis_rank
 import datasets.atis_rank_translator
 import datasets.django_rank
