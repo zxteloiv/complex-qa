@@ -198,7 +198,7 @@ class TransferUpdater(Updater):
                 _, batch_features = model.re2(sent_a, char_a, sent_b, char_b, rank, return_repr=True)
 
                 # attn: (outer_batch, inner_batch)
-                attn = torch.matmul(batch_features, support_features.transpose(0, 1))
+                attn = torch.matmul(batch_features, support_features.transpose(0, 1)).softmax(dim=-1)
 
                 # attn_batch_loss: (outer_batch, 1)
                 attended_batch_loss = attn.matmul(batch_loss.unsqueeze(1))
