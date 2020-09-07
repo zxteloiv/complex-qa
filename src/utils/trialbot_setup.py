@@ -10,8 +10,8 @@ def setup(**default_args):
     import sys, logging
     args = sys.argv[1:]
     for argname, argval in default_args.items():
-        if argname not in args:
-            args += [argname, str(argval)]
+        if f'--{argname}' not in args:
+            args += [f'--{argname}', str(argval)]
 
     parser = TrialBot.get_default_parser()
     parser.add_argument('--dev', action='store_true', help="use dev data for testing mode, only works with --test opt")
@@ -29,4 +29,7 @@ def setup(**default_args):
         fix_seed(args.seed)
 
     return args
+
+if __name__ == '__main__':
+    print(setup(seed=2020))
 
