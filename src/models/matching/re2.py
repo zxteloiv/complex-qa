@@ -50,7 +50,7 @@ class RE2(nn.Module):
         mask_b = (sent_b != self.padding_val_b).long()
         return self.forward_embs(a, b, mask_a, mask_b, rank)
 
-    def forward_embs(self, a, b, mask_a, mask_b, rank: torch.Tensor = None):
+    def forward_embs(self, a, b, mask_a, mask_b, rank: torch.Tensor = None, return_repr: bool = False):
 
         res_a, res_b = a, b
         for i, block in enumerate(self.blocks):
@@ -66,8 +66,7 @@ class RE2(nn.Module):
         if rank is not None:
             rank = (rank + 1).float().reciprocal_()     # to transform ranks such that greater ranker is better
 
-        logits = self.prediction(a, b, rank)
-        return logits
+        return self.prediction(a, b, rank, return_repr=return_repr)
 
     @staticmethod
     def get_model(emb_sz: int,
@@ -131,6 +130,7 @@ class ChRE2(RE2):
                 sent_b: torch.LongTensor,
                 sent_b_char: torch.LongTensor,
                 rank = None,
+                return_repr: bool = False,
                 ):
 
         _, mask_a = prepare_input_mask(sent_a, self.padding_val_a)
@@ -140,6 +140,6 @@ class ChRE2(RE2):
 
         a = self.a_emb(sent_a, sent_a_char, chmask_a)
         b = self.b_emb(sent_b, sent_b_char, chmask_b)
-        return self.forward_embs(a, b, mask_a, mask_b, rank)
+        return self.forward_embs(a, b, mask_a, mask_b, rank, return_repr)
 
 

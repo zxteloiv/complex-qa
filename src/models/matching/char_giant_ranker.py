@@ -64,11 +64,17 @@ class CharGiantRanker(nn.Module):
     def transfer_forward(self, word_a, word_b, char_a, char_b, label, rank, eta: float = .2):
         # label: (batch,)
         # logits: (batch, 2)
-        logits = self.re2(word_a, char_a, word_b, char_b, rank)
-        loss_m = (eta - (1 + eta) * label) * logits.log_softmax(dim=-1)[:, 1]    # 0-1 classification
-        return loss_m.mean() + self._model_reg_loss(word_a, word_b, char_a, char_b, label)
+        # features: (batch, hidden_sz)
+        logits, features = self.re2(word_a, char_a, word_b, char_b, rank, return_repr=True)
 
-    def _model_reg_loss(self, word_a, word_b, char_a, char_b, label):
+        # loss_m: (batch,)
+        # batch_loss: (batch,)
+        loss_m = F.cross_entropy(logits, label, reduction="none")
+        batch_loss = loss_m + self._model_reg_loss(word_a, word_b, char_a, char_b, label, no_reduction=True)
+
+        return batch_loss, features
+
+    def _model_reg_loss(self, word_a, word_b, char_a, char_b, label, no_reduction: bool = False):
 
         input_masks = list(map(lambda x: (x != 0).long(), (word_a, word_b, char_a, char_b)))
         word_a_mask, word_b_mask, char_a_mask, char_b_mask = input_masks
@@ -84,14 +90,14 @@ class CharGiantRanker(nn.Module):
         a_emb, b_emb = self.a_embedding(word_a), self.b_embedding(word_b)
         b_inp_emb = self.b_embedding(b_inp)
         logits_a2b = self.a2b.forward_emb(a_emb, b_inp_emb, word_a_mask, b_inp_mask)
-        loss_a2b = F.mse_loss(seq_likelihood(logits_a2b, b_tgt, b_tgt_mask), label.float())
+        loss_a2b = F.mse_loss(seq_likelihood(logits_a2b, b_tgt, b_tgt_mask), label.float(), reduction='none')
 
         # b2a
         a_inp_emb = self.a_embedding(a_inp)
         logits_b2a = self.b2a.forward_emb(b_emb, a_inp_emb, word_b_mask, a_inp_mask)
-        loss_b2a = F.mse_loss(seq_likelihood(logits_b2a, a_tgt, a_tgt_mask), label.float())
+        loss_b2a = F.mse_loss(seq_likelihood(logits_b2a, a_tgt, a_tgt_mask), label.float(), reduction='none')
 
-        loss_gen = loss_b2a.mean() + loss_a2b.mean()
+        loss_gen = loss_b2a + loss_a2b
 
         # ------------------------
         # ---- language model ----
@@ -101,7 +107,7 @@ class CharGiantRanker(nn.Module):
         logits_b = self.b_seq.forward_emb(b_inp_emb, b_inp_mask)
         loss_b = seq_cross_ent(logits_b, b_tgt, b_tgt_mask, average=None)
 
-        loss_lm = loss_a.mean() + loss_b.mean()
+        loss_lm = loss_a + loss_b
 
         # ------------------------
         # ---- dual model -----
@@ -148,7 +154,10 @@ class CharGiantRanker(nn.Module):
 
         loss_dim = loss_dim_a + loss_dim_b  # without using an EM-analogous opt.
 
-        return loss_lm + loss_gen + self.dim_training_weight * loss_dim.mean()
+        batch_loss = loss_lm + loss_gen + self.dim_training_weight * loss_dim
+        if not no_reduction:
+            batch_loss = batch_loss.mean()
+        return batch_loss
 
     def inference(self,
                   word_a: torch.LongTensor,

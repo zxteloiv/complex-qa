@@ -100,6 +100,15 @@ def django_lf_ted():
     p.retriever_index_path = os.path.join(_ROOT, 'data', '_similarity_index', 'django_lf_ted.bin')
     return p
 
+from utils.trialbot_grid_search_helper import import_grid_search_parameters
+import_grid_search_parameters(
+    grid_conf={
+        "num_inner_loops": [1, 2, 3, 5, 10],
+        "batch_sz": [20, 40, 80],
+        "support_batch_sz": [100, 200, 400]
+    },
+    base_param_fn=django_lf_ted,
+)
 
 import datasets.atis_rank
 import datasets.atis_rank_translator
@@ -180,7 +189,21 @@ class TransferUpdater(Updater):
             for step, support_batch in zip(range(self._num_inner_loop), task_iter):
                 sent_a, sent_b, char_a, char_b, label, rank = self.read_model_input(support_batch)
                 model.zero_grad()
-                loss_step = model.transfer_forward(sent_a, sent_b, char_a, char_b, label, rank)
+                # batch_loss: (inner_batch,)
+                # batch_features: (inner_batch, hidden_sz)
+                batch_loss, support_features = model.transfer_forward(sent_a, sent_b, char_a, char_b, label, rank)
+
+                sent_a, sent_b, char_a, char_b, _, rank = self.read_model_input(batch)
+                # batch_features: (outer_batch, hidden_sz)
+                _, batch_features = model.re2(sent_a, char_a, sent_b, char_b, rank, return_repr=True)
+
+                # attn: (outer_batch, inner_batch)
+                attn = torch.matmul(batch_features, support_features.transpose(0, 1))
+
+                # attn_batch_loss: (outer_batch, 1)
+                attended_batch_loss = attn.matmul(batch_loss.unsqueeze(1))
+
+                loss_step = attended_batch_loss.mean()
                 loss_step.backward()
                 optim.step()
 
@@ -259,10 +282,13 @@ def main():
             print(json.dumps(dict(zip(output_keys, (eid, hyp_rank.item(), score.item(),
                                                     r_m.item(), r_a2b.item(), r_b2a.item())))))
 
+    from utils.trial_bot_extensions import print_hyperparameters
+    from trialbot.training.extensions import ext_write_info
+    bot.add_event_handler(Events.STARTED, print_hyperparameters, 100)
+    bot.add_event_handler(Events.STARTED, ext_write_info, 105, msg="-" * 50)
     bot.updater = TransferUpdater.from_bot(bot)
     bot.run()
 
 if __name__ == '__main__':
     main()
-
 

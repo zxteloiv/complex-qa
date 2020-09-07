@@ -47,3 +47,7 @@ def end_with_nan_loss(bot: TrialBot):
         bot.logger.error("NaN loss encountered, training ended")
         bot.state.epoch = bot.hparams.TRAINING_LIMIT + 1
         bot.updater.stop_epoch()
+
+def print_hyperparameters(bot: TrialBot):
+    bot.logger.info(f"Hyperparamset Used: {bot.args.hparamset}")
+    bot.logger.info(str(bot.hparams))
