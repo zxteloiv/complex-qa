@@ -57,7 +57,7 @@ for ((p=0; p<45; p++));
 do
   echo =======================
   echo django_lf_ted_$p
-  eval_template django 26tgiant-group-attn lfted-$p "$snapshot" django_lf_ted_$p transfer_giant.py
+  eval_template django 26tgiant-group-attn-lbfgs lfted-$p "$snapshot" django_lf_ted_$p transfer_giant.py
 done;
 #eval_template django 25tgiant-group-v5 lfngram "$snapshot" django_lf_ngram transfer_giant.py
 #eval_template django 25tgiant-group-v5 nlbert "$snapshot" django_nl_bert transfer_giant.py

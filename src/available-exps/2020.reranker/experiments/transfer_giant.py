@@ -103,7 +103,7 @@ def django_lf_ted():
 from utils.trialbot_grid_search_helper import import_grid_search_parameters
 import_grid_search_parameters(
     grid_conf={
-        "num_inner_loops": [1, 2, 3, 5, 10],
+        "num_inner_loops": [1, 2, 3, 5],
         "batch_sz": [20, 40, 80],
         "support_batch_sz": [100, 200, 400]
     },
@@ -230,7 +230,9 @@ class TransferUpdater(Updater):
 
         # We treat inner loop and outer loop different and choose different optimizers for each.
         optim = Adafactor(model.parameters(), weight_decay=hparams.weight_decay)
-        bot.logger.info("Use Adafactor as outer optimizer: " + str(optim))
+        from torch.optim import LBFGS
+        optim = LBFGS(model.parameters())
+        bot.logger.info("Use LBFGS as outer optimizer: " + str(optim))
         from functools import partial
 
         # either testing or debugging training, iter should be static, otherwise iterator returns data dynamically.
