@@ -38,6 +38,7 @@ def _atis_base():
     p.char_emb_sz = 128
     p.char_hid_sz = 128
     p.TRAINING_LIMIT = 200
+    p.SGD_LR = 1e-3
 
     p.dropout = .2
     p.discrete_dropout = .1
@@ -229,10 +230,10 @@ class TransferUpdater(Updater):
         device = args.device
 
         # We treat inner loop and outer loop different and choose different optimizers for each.
-        optim = Adafactor(model.parameters(), weight_decay=hparams.weight_decay)
-        from torch.optim import LBFGS
-        optim = LBFGS(model.parameters())
-        bot.logger.info("Use LBFGS as outer optimizer: " + str(optim))
+        # optim = Adafactor(model.parameters(), weight_decay=hparams.weight_decay)
+        from torch.optim import SGD
+        optim = SGD(model.parameters(), lr=hparams.SGD_LR, weight_decay=hparams.weight_decay)
+        bot.logger.info("Use SGD as outer optimizer: " + str(optim))
         from functools import partial
 
         # either testing or debugging training, iter should be static, otherwise iterator returns data dynamically.
