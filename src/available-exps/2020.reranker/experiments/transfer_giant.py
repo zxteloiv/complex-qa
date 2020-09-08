@@ -105,10 +105,37 @@ from utils.trialbot_grid_search_helper import import_grid_search_parameters
 import_grid_search_parameters(
     grid_conf={
         "num_inner_loops": [2, 3, 5],
-        "SGD_LR": [1e-2, 1e-4, 1e-3],
+        "SGD_LR": [1e-4, 1e-3],
         "weight_decay": [0, 0.1, 0.5, 1]
     },
     base_param_fn=django_lf_ted,
+)
+
+import_grid_search_parameters(
+    grid_conf={
+        "num_inner_loops": [2, 3, 5],
+        "SGD_LR": [1e-4, 1e-3],
+        "weight_decay": [0, 0.1, 0.5, 1]
+    },
+    base_param_fn=django_lf_ngram,
+)
+
+import_grid_search_parameters(
+    grid_conf={
+        "num_inner_loops": [2, 3, 5],
+        "SGD_LR": [1e-4, 1e-3],
+        "weight_decay": [0, 0.1, 0.5, 1]
+    },
+    base_param_fn=django_nl_bert,
+)
+
+import_grid_search_parameters(
+    grid_conf={
+        "num_inner_loops": [2, 3, 5],
+        "SGD_LR": [1e-4, 1e-3],
+        "weight_decay": [0, 0.1, 0.5, 1]
+    },
+    base_param_fn=django_nl_ngram,
 )
 
 import datasets.atis_rank

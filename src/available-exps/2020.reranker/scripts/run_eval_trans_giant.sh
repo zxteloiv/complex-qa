@@ -59,9 +59,27 @@ snapshot=~/deploy/complex_qa/snapshots/django_five_hyp/trans_giant_base
 #  echo django_lf_ted_$p
 #  eval_template django 26tgiant-group-attn-sgd-gslr lfted-$p "$snapshot" django_lf_ted_$p transfer_giant.py
 #done;
-eval_template django 26tgiant-group-attn-sgd-comp lfngram "$snapshot" django_lf_ngram transfer_giant.py
-eval_template django 26tgiant-group-attn-sgd-comp nlbert "$snapshot" django_nl_bert transfer_giant.py
-eval_template django 26tgiant-group-attn-sgd-comp nlngram "$snapshot" django_nl_ngram transfer_giant.py
+for ((p=0; p<24; p++));
+do
+  echo =======================
+  echo django_lf_ngram_$p
+  eval_template django 26tgiant-group-attn-sgd-gslr lfngram-$p "$snapshot" django_lf_ngram_$p transfer_giant.py
+done;
+for ((p=0; p<24; p++));
+do
+  echo =======================
+  echo django_nl_bert_$p
+  eval_template django 26tgiant-group-attn-sgd-gslr nlbert-$p "$snapshot" django_nl_bert_$p transfer_giant.py
+done;
+for ((p=0; p<24; p++));
+do
+  echo =======================
+  echo django_nl_ngram_$p
+  eval_template django 26tgiant-group-attn-sgd-gslr nlngram-$p "$snapshot" django_nl_ngram_$p transfer_giant.py
+done;
+#eval_template django 26tgiant-group-attn-sgd-comp lfngram "$snapshot" django_lf_ngram transfer_giant.py
+#eval_template django 26tgiant-group-attn-sgd-comp nlbert "$snapshot" django_nl_bert transfer_giant.py
+#eval_template django 26tgiant-group-attn-sgd-comp nlngram "$snapshot" django_nl_ngram transfer_giant.py
 
 snapshot=~/deploy/complex_qa/snapshots/atis_five_hyp/trans_giant_base
 #eval_template atis 25tgiant-group-v5 lfted "$snapshot" atis_lf_ted transfer_giant.py
