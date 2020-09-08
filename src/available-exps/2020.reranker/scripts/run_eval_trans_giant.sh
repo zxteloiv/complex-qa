@@ -53,15 +53,15 @@ function eval_template () {
 # $5 hyperparameter used for tests
 # $6 python executable script name, based on trialbot
 snapshot=~/deploy/complex_qa/snapshots/django_five_hyp/trans_giant_base
-for ((p=0; p<36; p++));
-do
-  echo =======================
-  echo django_lf_ted_$p
-  eval_template django 26tgiant-group-attn-sgd-gslr lfted-$p "$snapshot" django_lf_ted_$p transfer_giant.py
-done;
-#eval_template django 25tgiant-group-v5 lfngram "$snapshot" django_lf_ngram transfer_giant.py
-#eval_template django 25tgiant-group-v5 nlbert "$snapshot" django_nl_bert transfer_giant.py
-#eval_template django 25tgiant-group-v5 nlngram "$snapshot" django_nl_ngram transfer_giant.py
+#for ((p=0; p<36; p++));
+#do
+#  echo =======================
+#  echo django_lf_ted_$p
+#  eval_template django 26tgiant-group-attn-sgd-gslr lfted-$p "$snapshot" django_lf_ted_$p transfer_giant.py
+#done;
+eval_template django 26tgiant-group-attn-sgd-comp lfngram "$snapshot" django_lf_ngram transfer_giant.py
+eval_template django 26tgiant-group-attn-sgd-comp nlbert "$snapshot" django_nl_bert transfer_giant.py
+eval_template django 26tgiant-group-attn-sgd-comp nlngram "$snapshot" django_nl_ngram transfer_giant.py
 
 snapshot=~/deploy/complex_qa/snapshots/atis_five_hyp/trans_giant_base
 #eval_template atis 25tgiant-group-v5 lfted "$snapshot" atis_lf_ted transfer_giant.py

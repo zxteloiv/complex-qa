@@ -34,7 +34,7 @@ def _atis_base():
     p.hidden_size = 256
     p.num_stacked_block = 4
     p.num_stacked_encoder = 1
-    p.weight_decay = 0.2
+    p.weight_decay = 0.05
     p.char_emb_sz = 128
     p.char_hid_sz = 128
     p.TRAINING_LIMIT = 200
@@ -43,7 +43,7 @@ def _atis_base():
     p.dropout = .2
     p.discrete_dropout = .1
 
-    p.num_inner_loops = 1
+    p.num_inner_loops = 3
     p.batch_sz = 40
     p.support_batch_sz = 200
     return p
