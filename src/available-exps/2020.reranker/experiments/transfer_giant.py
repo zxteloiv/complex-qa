@@ -104,9 +104,9 @@ def django_lf_ted():
 from utils.trialbot_grid_search_helper import import_grid_search_parameters
 import_grid_search_parameters(
     grid_conf={
-        "num_inner_loops": [1, 2, 3, 5],
-        "batch_sz": [20, 40, 80],
-        "support_batch_sz": [100, 200, 400]
+        "num_inner_loops": [2, 3, 5],
+        "SGD_LR": [1e-2, 1e-4, 1e-3],
+        "weight_decay": [0, 0.1, 0.5, 1]
     },
     base_param_fn=django_lf_ted,
 )
