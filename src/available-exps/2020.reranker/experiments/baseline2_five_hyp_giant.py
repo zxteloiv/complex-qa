@@ -110,7 +110,7 @@ class GiantTrainingUpdater(TrainingUpdater):
             label = move_to_device(label, device)
             rank = move_to_device(rank, device)
 
-        loss = model(sent_a, sent_b, sent_char_a, sent_char_b, label, rank)
+        loss = model(sent_a, sent_b, sent_char_a, sent_char_b, label=label, rank=rank)
         loss.backward()
 
         # do some clipping
@@ -153,9 +153,8 @@ class GiantTestingUpdater(TestingUpdater):
             sent_char_b = move_to_device(sent_char_b, device)
             rank = move_to_device(rank, device)
 
-        scores = model.inference(sent_a, sent_b, sent_char_a, sent_char_b, rank)
-        correct_score = model.forward_loss_weight(*scores)
-        return {"ranking_score": correct_score, "ex_id": eid, "hyp_rank": rank,
+        scores = model(sent_a, sent_b, sent_char_a, sent_char_b, rank=rank)
+        return {"ranking_score": scores[0], "ex_id": eid, "hyp_rank": rank,
                 "rank_match": scores[0], "rank_a2b": scores[1], "rank_b2a": scores[2],
                 }
 

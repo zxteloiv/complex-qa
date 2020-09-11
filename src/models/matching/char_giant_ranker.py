@@ -1,7 +1,8 @@
+from typing import Optional
 import torch
 from torch import nn
 from torch.nn import functional as F
-from utils.nn import seq_cross_ent, seq_likelihood
+from utils.nn import seq_cross_ent, seq_likelihood, prepare_input_mask
 
 from .re2 import ChRE2
 from .seq2seq_modeling import Seq2SeqModeling
@@ -35,15 +36,13 @@ class CharGiantRanker(nn.Module):
         self.b_ch_pad = b_ch_padding
         self.dim_training_weight = .5
 
-        self.loss_weighting = nn.Parameter(torch.zeros(5).float(), requires_grad=True)
-
     def forward(self,
                 word_a: torch.LongTensor,
                 word_b: torch.LongTensor,
                 char_a: torch.LongTensor,
                 char_b: torch.LongTensor,
-                label: torch.LongTensor,
-                rank = None,
+                label: Optional[torch.LongTensor] = None,
+                rank: Optional[torch.Tensor] = None,
                 ):
         """
         :param word_a: (N, a_len)
@@ -55,13 +54,36 @@ class CharGiantRanker(nn.Module):
         :return:
         """
         # ---- matching ------
+        self.re2: ChRE2
+
+        inp_tensors = self._prepare_input(word_a, word_b, char_a, char_b)
+        word_a_mask, word_b_mask, char_a_mask, char_b_mask = inp_tensors[:4]
+
+        a = self.re2.a_emb(word_a, char_a, char_a_mask)
+        b = self.re2.b_emb(word_b, char_b, char_b_mask)
+
+        a, b = self.re2.forward_encoding(a, b, word_a_mask, word_b_mask)
+
+        if rank is not None:
+            rank = (rank + 1).float().reciprocal_()     # to transform ranks such that greater ranker is better
+
+        _, likelihoods = self._forward_generation_model(word_a, word_b, inp_tensors)
+
+        assert all(map(lambda l: l.dim() > 0, likelihoods))
+        likelihoods_expand = [l.unsqueeze(1) if l.dim() == 1 else l for l in likelihoods]
+
         # matching logits: (batch, 2)
-        matching_logits = self.re2(word_a, char_a, word_b, char_b, rank)
-        loss_m = F.cross_entropy(matching_logits, label)
+        matching_logits = self.re2.prediction(a, b, rank, *likelihoods_expand)
 
-        return loss_m + self._model_reg_loss(word_a, word_b, char_a, char_b, label)
+        if label is None:
+            reranking_score = torch.softmax(matching_logits, dim=-1)[:, 1]
+            return (reranking_score,) + likelihoods
+        else:
+            loss_m = F.cross_entropy(matching_logits, label)
+            loss_reg = self._model_reg_loss(word_a, word_b, inp_tensors, label)
+            return loss_m + loss_reg
 
-    def transfer_forward(self, word_a, word_b, char_a, char_b, label, rank, eta: float = .2):
+    def transfer_forward(self, word_a, word_b, char_a, char_b, label, rank):
         # label: (batch,)
         # logits: (batch, 2)
         # features: (batch, hidden_sz)
@@ -74,30 +96,55 @@ class CharGiantRanker(nn.Module):
 
         return batch_loss, features
 
-    def _model_reg_loss(self, word_a, word_b, char_a, char_b, label, no_reduction: bool = False):
+    def _prepare_input(self, word_a, word_b, char_a, char_b):
+        _, word_a_mask = prepare_input_mask(word_a, self.a_pad)
+        _, char_a_mask = prepare_input_mask(char_a, self.a_ch_pad)
+        _, word_b_mask = prepare_input_mask(word_b, self.b_pad)
+        _, char_b_mask = prepare_input_mask(char_b, self.b_ch_pad)
 
-        input_masks = list(map(lambda x: (x != 0).long(), (word_a, word_b, char_a, char_b)))
-        word_a_mask, word_b_mask, char_a_mask, char_b_mask = input_masks
+        vecs = [word_a_mask, word_b_mask, char_a_mask, char_b_mask]
+        vecs += list(map(lambda t: t[:, :-1].contiguous(), (word_a, word_b, word_a_mask, word_b_mask)))
+        vecs += list(map(lambda t: t[:, 1:].contiguous(), (word_a, word_b, word_a_mask, word_b_mask)))
+        return vecs
 
-        a_inp, b_inp, a_inp_mask, b_inp_mask = list(map(lambda t: t[:, :-1].contiguous(),
-                                                        (word_a, word_b, word_a_mask, word_b_mask)))
-        a_tgt, b_tgt, a_tgt_mask, b_tgt_mask = list(map(lambda t: t[:, 1:].contiguous(),
-                                                        (word_a, word_b, word_a_mask, word_b_mask)))
+    def _forward_generation_model(self, word_a, word_b, inp_tensors, label: Optional[torch.Tensor] = None):
+        """return logits of generation model, if label is not None, append the generation loss"""
+        word_a_mask, word_b_mask, char_a_mask, char_b_mask = inp_tensors[:4]
+        a_inp, b_inp, a_inp_mask, b_inp_mask = inp_tensors[4:8]
+        a_tgt, b_tgt, a_tgt_mask, b_tgt_mask = inp_tensors[8:]
+
+        # generation models are based on only word embedding
+        # otherwise char-embeddings will be required for dual training.
+        a_emb, b_emb = self.a_embedding(word_a), self.b_embedding(word_b)
+
+        # a2b
+        b_inp_emb = self.b_embedding(b_inp)
+        logits_a2b = self.a2b.forward_emb(a_emb, b_inp_emb, word_a_mask, b_inp_mask)
+        likelihood_a2b = seq_likelihood(logits_a2b, b_tgt, b_tgt_mask)
+        # b2a
+        a_inp_emb = self.a_embedding(a_inp)
+        logits_b2a = self.b2a.forward_emb(b_emb, a_inp_emb, word_b_mask, a_inp_mask)
+        likelihood_b2a = seq_likelihood(logits_b2a, a_tgt, a_tgt_mask)
+
+        if label is None:
+            return [logits_a2b, logits_b2a], [likelihood_a2b, likelihood_b2a]
+        else:
+            loss_a2b = F.mse_loss(likelihood_a2b, label.float(), reduction='none')
+            loss_b2a = F.mse_loss(likelihood_b2a, label.float(), reduction='none')
+            loss_gen = loss_b2a + loss_a2b
+            return [logits_a2b, logits_b2a], [likelihood_a2b, likelihood_b2a], loss_gen
+
+    def _model_reg_loss(self, word_a, word_b, inp_tensors, label, no_reduction: bool = False):
+        word_a_mask, word_b_mask, char_a_mask, char_b_mask = inp_tensors[:4]
+        a_inp, b_inp, a_inp_mask, b_inp_mask = inp_tensors[4:8]
+        a_tgt, b_tgt, a_tgt_mask, b_tgt_mask = inp_tensors[8:]
 
         # ------------------------
         # ---- generation ----
         # a2b
-        a_emb, b_emb = self.a_embedding(word_a), self.b_embedding(word_b)
-        b_inp_emb = self.b_embedding(b_inp)
-        logits_a2b = self.a2b.forward_emb(a_emb, b_inp_emb, word_a_mask, b_inp_mask)
-        loss_a2b = F.mse_loss(seq_likelihood(logits_a2b, b_tgt, b_tgt_mask), label.float(), reduction='none')
-
-        # b2a
-        a_inp_emb = self.a_embedding(a_inp)
-        logits_b2a = self.b2a.forward_emb(b_emb, a_inp_emb, word_b_mask, a_inp_mask)
-        loss_b2a = F.mse_loss(seq_likelihood(logits_b2a, a_tgt, a_tgt_mask), label.float(), reduction='none')
-
-        loss_gen = loss_b2a + loss_a2b
+        logits, likelihoods, loss_gen = self._forward_generation_model(word_a, word_b, inp_tensors, label)
+        a_inp_emb, b_inp_emb = list(map(self.a_embedding, (a_inp, b_inp)))
+        logits_a2b, logits_b2a = logits
 
         # ------------------------
         # ---- language model ----
@@ -158,71 +205,4 @@ class CharGiantRanker(nn.Module):
         if not no_reduction:
             batch_loss = batch_loss.mean()
         return batch_loss
-
-    def inference(self,
-                  word_a: torch.LongTensor,
-                  word_b: torch.LongTensor,
-                  char_a: torch.LongTensor,
-                  char_b: torch.LongTensor,
-                  rank=None
-                  ):
-        """
-        :param word_a: (N, a_len)
-        :param word_b: (N, b_len)
-        :param char_a: (N, a_len, a_char)
-        :param char_b: (N, b_len, b_char)
-        :return:
-        """
-        self.re2: ChRE2
-        self.a2b: Seq2SeqModeling
-        self.b2a: Seq2SeqModeling
-        self.a_seq: SeqModeling
-        self.b_seq: SeqModeling
-
-        # word/char_a/b[_mask]: all the same shape
-        input_masks = list(map(lambda x: (x != 0).long(), (word_a, word_b, char_a, char_b)))
-        word_a_mask, word_b_mask, char_a_mask, char_b_mask = input_masks
-
-        a_inp, b_inp, a_inp_mask, b_inp_mask = list(map(lambda t: t[:, :-1].contiguous(),
-                                                        (word_a, word_b, word_a_mask, word_b_mask)))
-        a_tgt, b_tgt, a_tgt_mask, b_tgt_mask = list(map(lambda t: t[:, 1:].contiguous(),
-                                                        (word_a, word_b, word_a_mask, word_b_mask)))
-
-        # ---- matching ------
-        # matching logits: (batch, 2)
-        matching_logits = self.re2(word_a, char_a, word_b, char_b, rank)
-        ranking_m = torch.softmax(matching_logits, dim=-1)[:, 1]
-
-        # ---- language model ----
-
-        a_inp_emb = self.a_embedding(a_inp)
-        # logits_a = self.a_seq.forward_emb(a_inp_emb, a_inp_mask)
-        # ranking_a = seq_likelihood(logits_a, a_tgt, a_tgt_mask)
-
-        b_inp_emb = self.b_embedding(b_inp)
-        # logits_b = self.b_seq.forward_emb(b_inp_emb, b_inp_mask)
-        # ranking_b = seq_likelihood(logits_b, b_tgt, b_tgt_mask)
-
-        # ---- generation ----
-        a_emb = self.a_embedding(word_a)
-        b_emb = self.b_embedding(word_b)
-
-        # a2b
-        logits_a2b = self.a2b.forward_emb(a_emb, b_inp_emb, word_a_mask, b_inp_mask)
-        ranking_a2b = seq_likelihood(logits_a2b, b_tgt, b_tgt_mask)
-
-        # b2a
-        logits_b2a = self.b2a.forward_emb(b_emb, a_inp_emb, word_b_mask, a_inp_mask)
-        ranking_b2a = seq_likelihood(logits_b2a, a_tgt, a_tgt_mask)
-
-        # return ranking_m, ranking_a, ranking_b, ranking_a2b, ranking_b2a
-        return ranking_m, ranking_a2b, ranking_b2a
-
-    def forward_loss_weight(self, *args):
-        x = torch.stack(args, dim=1)
-        loss_weighting = x.new_zeros(5).float()
-        prob = torch.softmax(loss_weighting[:3], dim=0)
-        score = torch.matmul(x, prob)
-        return score.log()
-
 

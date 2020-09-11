@@ -52,6 +52,13 @@ class RE2(nn.Module):
 
     def forward_embs(self, a, b, mask_a, mask_b, rank: torch.Tensor = None, return_repr: bool = False):
 
+        a, b = self.forward_encoding(a, b, mask_a, mask_b)
+        if rank is not None:
+            rank = (rank + 1).float().reciprocal_()     # to transform ranks such that greater ranker is better
+
+        return self.prediction(a, b, rank, return_repr=return_repr)
+
+    def forward_encoding(self, a, b, mask_a, mask_b):
         res_a, res_b = a, b
         for i, block in enumerate(self.blocks):
             if i > 0:
@@ -63,10 +70,7 @@ class RE2(nn.Module):
 
         a = self.a_pooling(a, mask_a)
         b = self.b_pooling(b, mask_b)
-        if rank is not None:
-            rank = (rank + 1).float().reciprocal_()     # to transform ranks such that greater ranker is better
-
-        return self.prediction(a, b, rank, return_repr=return_repr)
+        return a, b
 
     @staticmethod
     def get_model(emb_sz: int,
