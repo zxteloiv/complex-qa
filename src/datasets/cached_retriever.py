@@ -68,6 +68,7 @@ class KVCacheRetriever(Retriever):
         if similar_keys is not None and len(similar_keys) > 0 and isinstance(similar_keys[0], list):
             similar_keys = similar_keys[0]  # flat the list if possible: [[1, 2, 3]] -> [1, 2, 3]
 
+        similar_keys = list(filter(lambda k: k in self._kvstore, similar_keys))
         return similar_keys
 
 
