@@ -77,7 +77,7 @@ class CharGiantRanker(nn.Module):
 
         if label is None:
             reranking_score = torch.softmax(matching_logits, dim=-1)[:, 1]
-            return (reranking_score,) + likelihoods
+            return (reranking_score,) + tuple(likelihoods)
         else:
             loss_m = F.cross_entropy(matching_logits, label)
             loss_reg = self._model_reg_loss(word_a, word_b, inp_tensors, label)
