@@ -126,8 +126,9 @@ class GiantTrainingUpdater(TrainingUpdater):
         del obj._optims
 
         args, hparams, model = bot.args, bot.hparams, bot.model
-        optim = Adafactor(model.parameters(), weight_decay=hparams.weight_decay)
-        bot.logger.info("Use Adafactor optimizer: " + str(optim))
+        from radam import RAdam
+        optim = RAdam(model.parameters(), weight_decay=hparams.weight_decay)
+        bot.logger.info("Use RAdam optimizer: " + str(optim))
         obj._optims = [optim]
         return obj
 
