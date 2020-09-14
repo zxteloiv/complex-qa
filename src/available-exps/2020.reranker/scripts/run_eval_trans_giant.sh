@@ -52,7 +52,7 @@ function eval_template () {
 # $4 snapshot prefix, where the trained model are saved
 # $5 hyperparameter used for tests
 # $6 python executable script name, based on trialbot
-snapshot=~/deploy/complex_qa/snapshots/django_five_hyp/trans_giant_base
+snapshot=~/deploy/complex_qa/snapshots/django_five_hyp/trans_giant_base_v2
 #for ((p=0; p<36; p++));
 #do
 #  echo =======================
@@ -77,37 +77,38 @@ snapshot=~/deploy/complex_qa/snapshots/django_five_hyp/trans_giant_base
 #  echo django_nl_ngram_$p
 #  eval_template django 26tgiant-group-attn-sgd-gslr nlngram-$p "$snapshot" django_nl_ngram_$p transfer_giant.py
 #done;
-#eval_template django 26tgiant-group-attn-sgd-comp lfngram "$snapshot" django_lf_ngram transfer_giant.py
-#eval_template django 26tgiant-group-attn-sgd-comp nlbert "$snapshot" django_nl_bert transfer_giant.py
-#eval_template django 26tgiant-group-attn-sgd-comp nlngram "$snapshot" django_nl_ngram transfer_giant.py
+eval_template django 27tgiant-on-cgiant lfted "$snapshot" django_lf_ted transfer_giant.py
+eval_template django 27tgiant-on-cgiant lfngram "$snapshot" django_lf_ngram transfer_giant.py
+eval_template django 27tgiant-on-cgiant nlbert "$snapshot" django_nl_bert transfer_giant.py
+eval_template django 27tgiant-on-cgiant nlngram "$snapshot" django_nl_ngram transfer_giant.py
 
-snapshot=~/deploy/complex_qa/snapshots/atis_five_hyp/trans_giant_base
-for ((p=0; p<24; p++));
-do
-  echo =======================
-  echo atis_lf_ted_$p
-  eval_template atis 26tgiant-group-attn-sgd-gslr lfted-$p "$snapshot" atis_lf_ted_$p transfer_giant.py
-done;
-for ((p=0; p<24; p++));
-do
-  echo =======================
-  echo atis_lf_ngram_$p
-  eval_template atis 26tgiant-group-attn-sgd-gslr lfngram-$p "$snapshot" atis_lf_ngram_$p transfer_giant.py
-done;
-for ((p=0; p<24; p++));
-do
-  echo =======================
-  echo atis_nl_bert_$p
-  eval_template atis 26tgiant-group-attn-sgd-gslr nlbert-$p "$snapshot" atis_nl_bert_$p transfer_giant.py
-done;
-for ((p=0; p<24; p++));
-do
-  echo =======================
-  echo atis_nl_ngram_$p
-  eval_template atis 26tgiant-group-attn-sgd-gslr nlngram-$p "$snapshot" atis_nl_ngram_$p transfer_giant.py
-done;
-#eval_template atis 25tgiant-group-v5 lfted "$snapshot" atis_lf_ted transfer_giant.py
-#eval_template atis 25tgiant-group-v5 lfngram "$snapshot" atis_lf_ngram transfer_giant.py
-#eval_template atis 25tgiant-group-v5 nlbert "$snapshot" atis_nl_bert transfer_giant.py
-#eval_template atis 25tgiant-group-v5 nlngram "$snapshot" atis_nl_ngram transfer_giant.py
+snapshot=~/deploy/complex_qa/snapshots/atis_five_hyp/trans_giant_base_v2
+#for ((p=0; p<24; p++));
+#do
+#  echo =======================
+#  echo atis_lf_ted_$p
+#  eval_template atis 26tgiant-group-attn-sgd-gslr lfted-$p "$snapshot" atis_lf_ted_$p transfer_giant.py
+#done;
+#for ((p=0; p<24; p++));
+#do
+#  echo =======================
+#  echo atis_lf_ngram_$p
+#  eval_template atis 26tgiant-group-attn-sgd-gslr lfngram-$p "$snapshot" atis_lf_ngram_$p transfer_giant.py
+#done;
+#for ((p=0; p<24; p++));
+#do
+#  echo =======================
+#  echo atis_nl_bert_$p
+#  eval_template atis 26tgiant-group-attn-sgd-gslr nlbert-$p "$snapshot" atis_nl_bert_$p transfer_giant.py
+#done;
+#for ((p=0; p<24; p++));
+#do
+#  echo =======================
+#  echo atis_nl_ngram_$p
+#  eval_template atis 26tgiant-group-attn-sgd-gslr nlngram-$p "$snapshot" atis_nl_ngram_$p transfer_giant.py
+#done;
+eval_template atis 27tgiant-on-cgiant lfted "$snapshot" atis_lf_ted transfer_giant.py
+eval_template atis 27tgiant-on-cgiant lfngram "$snapshot" atis_lf_ngram transfer_giant.py
+eval_template atis 27tgiant-on-cgiant nlbert "$snapshot" atis_nl_bert transfer_giant.py
+eval_template atis 27tgiant-on-cgiant nlngram "$snapshot" atis_nl_ngram transfer_giant.py
 

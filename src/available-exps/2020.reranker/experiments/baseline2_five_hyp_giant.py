@@ -160,30 +160,11 @@ class GiantTestingUpdater(TestingUpdater):
                 }
 
 def main():
-    import sys
-    args = sys.argv[1:]
-    args += ['--seed', '2020']
-    if '--dataset' not in sys.argv:
-        args += ['--dataset', 'atis_five_hyp']
-    if '--translator' not in sys.argv:
-        args += ['--translator', 'atis_rank']
-
-    parser = TrialBot.get_default_parser()
-    args = parser.parse_args(args)
-    if args.debug:
-        logging.getLogger().setLevel(logging.DEBUG)
-    elif args.quiet:
-        logging.getLogger().setLevel(logging.WARNING)
-    else:
-        logging.getLogger().setLevel(logging.INFO)
-
-    if hasattr(args, "seed") and args.seed:
-        from utils.fix_seed import fix_seed
-        logging.info(f"set seed={args.seed}")
-        fix_seed(args.seed)
-
+    from utils.trialbot_setup import setup
+    args = setup(seed=2020)
     bot = TrialBot(trial_name="baseline2_giant", get_model_func=get_model, args=args)
     bot.translator.turn_special_token(on=True)
+
     if args.test:
         import trialbot
         new_engine = trialbot.training.trial_bot.Engine()

@@ -254,12 +254,12 @@ class TransferUpdater(Updater):
                 sent_a, sent_b, char_a, char_b, label, rank = self.read_model_input(support_batch)
                 model.zero_grad()
                 # batch_loss: (inner_batch,)
-                # batch_features: (inner_batch, hidden_sz)
-                batch_loss, support_features = model.transfer_forward(sent_a, sent_b, char_a, char_b, label, rank)
+                # support_features: (inner_batch, hidden_sz)
+                batch_loss, support_features = model(sent_a, sent_b, char_a, char_b, label=label, rank=rank, return_repr=True)
 
                 sent_a, sent_b, char_a, char_b, _, rank = self.read_model_input(batch)
                 # batch_features: (outer_batch, hidden_sz)
-                _, batch_features = model.re2(sent_a, char_a, sent_b, char_b, rank, return_repr=True)
+                _, batch_features = model(sent_a, sent_b, char_a, char_b, rank=rank, return_repr=True)
 
                 # attn: (outer_batch, inner_batch)
                 attn = torch.matmul(batch_features, support_features.transpose(0, 1)).softmax(dim=-1)
@@ -273,13 +273,13 @@ class TransferUpdater(Updater):
 
         model.eval()
         sent_a, sent_b, char_a, char_b, label, rank = self.read_model_input(batch)
-        rankings = model.inference(sent_a, sent_b, char_a, char_b, rank)
+        rankings = model(sent_a, sent_b, char_a, char_b, rank=rank)
         # task_logits.append(model.inference(sent_a, sent_b, char_a, char_b))
-        output = model.forward_loss_weight(*rankings)
+        # output = model.forward_loss_weight(*rankings)
 
         model.load_state_dict(init_params)  # reset the original model
 
-        return {"ranking_score": output,
+        return {"ranking_score": rankings[0],
                 "rank_match": rankings[0],
                 "rank_a2b": rankings[1],
                 "rank_b2a": rankings[2],

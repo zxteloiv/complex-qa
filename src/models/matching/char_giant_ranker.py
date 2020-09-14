@@ -43,6 +43,7 @@ class CharGiantRanker(nn.Module):
                 char_b: torch.LongTensor,
                 label: Optional[torch.LongTensor] = None,
                 rank: Optional[torch.Tensor] = None,
+                return_repr: bool = False,
                 ):
         """
         :param word_a: (N, a_len)
@@ -72,29 +73,26 @@ class CharGiantRanker(nn.Module):
         assert all(map(lambda l: l.dim() > 0, likelihoods))
         likelihoods_expand = [l.unsqueeze(1) if l.dim() == 1 else l for l in likelihoods]
 
-        # matching logits: (batch, 2)
-        matching_logits = self.re2.prediction(a, b, rank, *likelihoods_expand)
-
-        if label is None:
+        if label is None:   # evaluation
+            # matching logits: (batch, 2)
+            matching_logits, features = self.re2.prediction(a, b, rank, *likelihoods_expand, return_repr=True)
             reranking_score = torch.softmax(matching_logits, dim=-1)[:, 1]
-            return (reranking_score,) + tuple(likelihoods)
-        else:
-            loss_m = F.cross_entropy(matching_logits, label)
+            score_tuple = (reranking_score,) + tuple(likelihoods)
+
+            if return_repr:
+                return score_tuple, features
+            else:
+                return score_tuple
+
+        else:   # training
+            matching_logits, features = self.re2.prediction(a, b, rank, *likelihoods_expand, return_repr=True)
+            loss_m = F.cross_entropy(matching_logits, label, reduction="none")
             loss_reg = self._model_reg_loss(word_a, word_b, inp_tensors, label)
-            return loss_m + loss_reg
-
-    def transfer_forward(self, word_a, word_b, char_a, char_b, label, rank):
-        # label: (batch,)
-        # logits: (batch, 2)
-        # features: (batch, hidden_sz)
-        logits, features = self.re2(word_a, char_a, word_b, char_b, rank, return_repr=True)
-
-        # loss_m: (batch,)
-        # batch_loss: (batch,)
-        loss_m = F.cross_entropy(logits, label, reduction="none")
-        batch_loss = loss_m + self._model_reg_loss(word_a, word_b, char_a, char_b, label, no_reduction=True)
-
-        return batch_loss, features
+            batch_loss = loss_m + loss_reg
+            if return_repr:
+                return batch_loss, features
+            else:
+                return batch_loss.mean()
 
     def _prepare_input(self, word_a, word_b, char_a, char_b):
         _, word_a_mask = prepare_input_mask(word_a, self.a_pad)
@@ -134,7 +132,7 @@ class CharGiantRanker(nn.Module):
             loss_gen = loss_b2a + loss_a2b
             return [logits_a2b, logits_b2a], [likelihood_a2b, likelihood_b2a], loss_gen
 
-    def _model_reg_loss(self, word_a, word_b, inp_tensors, label, no_reduction: bool = False):
+    def _model_reg_loss(self, word_a, word_b, inp_tensors, label):
         word_a_mask, word_b_mask, char_a_mask, char_b_mask = inp_tensors[:4]
         a_inp, b_inp, a_inp_mask, b_inp_mask = inp_tensors[4:8]
         a_tgt, b_tgt, a_tgt_mask, b_tgt_mask = inp_tensors[8:]
@@ -202,7 +200,5 @@ class CharGiantRanker(nn.Module):
         loss_dim = loss_dim_a + loss_dim_b  # without using an EM-analogous opt.
 
         batch_loss = loss_lm + loss_gen + self.dim_training_weight * loss_dim
-        if not no_reduction:
-            batch_loss = batch_loss.mean()
         return batch_loss
 
