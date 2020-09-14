@@ -28,11 +28,12 @@ class Re2Prediction(nn.Module):
         self.dense2 = Re2Dense(hid_sz, num_classes, activation=None)
         self.dropout = nn.Dropout(dropout)
 
-    def forward(self, a, b, *aux_features: Optional[List[torch.Tensor]]):
+    def forward(self, a, b, *aux_features: Optional[List[torch.Tensor]], return_repr: bool = False):
         """
         :param a:
         :param b:
         :param aux_features: a list of extra features, all with (batch, feat_dim) structure
+        :param return_repr: if true, return the last hidden vector before performing prediction
         :return:
         """
         feature = self._get_features(a, b)
@@ -44,7 +45,10 @@ class Re2Prediction(nn.Module):
         feature = self.dense1(feature)
         feature = self.dropout(feature)
         prediction = self.dense2(feature)
-        return prediction
+        if return_repr:
+            return prediction, feature
+        else:
+            return prediction
 
     def _get_features(self, a, b) -> torch.Tensor:
         if self.mode == "full":

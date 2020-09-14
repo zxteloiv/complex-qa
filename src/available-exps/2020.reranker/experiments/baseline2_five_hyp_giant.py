@@ -110,7 +110,7 @@ class GiantTrainingUpdater(TrainingUpdater):
             label = move_to_device(label, device)
             rank = move_to_device(rank, device)
 
-        loss = model(sent_a, sent_b, sent_char_a, sent_char_b, label, rank)
+        loss = model(sent_a, sent_b, sent_char_a, sent_char_b, label=label, rank=rank)
         loss.backward()
 
         # do some clipping
@@ -126,8 +126,9 @@ class GiantTrainingUpdater(TrainingUpdater):
         del obj._optims
 
         args, hparams, model = bot.args, bot.hparams, bot.model
-        optim = Adafactor(model.parameters(), weight_decay=hparams.weight_decay)
-        bot.logger.info("Use Adafactor optimizer: " + str(optim))
+        from radam import RAdam
+        optim = RAdam(model.parameters(), weight_decay=hparams.weight_decay)
+        bot.logger.info("Use RAdam optimizer: " + str(optim))
         obj._optims = [optim]
         return obj
 
@@ -153,37 +154,17 @@ class GiantTestingUpdater(TestingUpdater):
             sent_char_b = move_to_device(sent_char_b, device)
             rank = move_to_device(rank, device)
 
-        scores = model.inference(sent_a, sent_b, sent_char_a, sent_char_b, rank)
-        correct_score = model.forward_loss_weight(*scores)
-        return {"ranking_score": correct_score, "ex_id": eid, "hyp_rank": rank,
+        scores = model(sent_a, sent_b, sent_char_a, sent_char_b, rank=rank)
+        return {"ranking_score": scores[0], "ex_id": eid, "hyp_rank": rank,
                 "rank_match": scores[0], "rank_a2b": scores[1], "rank_b2a": scores[2],
                 }
 
 def main():
-    import sys
-    args = sys.argv[1:]
-    args += ['--seed', '2020']
-    if '--dataset' not in sys.argv:
-        args += ['--dataset', 'atis_five_hyp']
-    if '--translator' not in sys.argv:
-        args += ['--translator', 'atis_rank']
-
-    parser = TrialBot.get_default_parser()
-    args = parser.parse_args(args)
-    if args.debug:
-        logging.getLogger().setLevel(logging.DEBUG)
-    elif args.quiet:
-        logging.getLogger().setLevel(logging.WARNING)
-    else:
-        logging.getLogger().setLevel(logging.INFO)
-
-    if hasattr(args, "seed") and args.seed:
-        from utils.fix_seed import fix_seed
-        logging.info(f"set seed={args.seed}")
-        fix_seed(args.seed)
-
+    from utils.trialbot_setup import setup
+    args = setup(seed=2020)
     bot = TrialBot(trial_name="baseline2_giant", get_model_func=get_model, args=args)
     bot.translator.turn_special_token(on=True)
+
     if args.test:
         import trialbot
         new_engine = trialbot.training.trial_bot.Engine()

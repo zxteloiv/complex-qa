@@ -154,7 +154,7 @@ def min_dev(test_file, ranking_file, max_rank_filter):
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument('files', nargs=2, metavar=('TEST_FILE', 'SCORE_FILE'))
+    parser.add_argument('files', nargs=2, metavar=['TEST_FILE', 'SCORE_FILE'])
     parser.add_argument('--max-hyp-rank', default=30, type=int)
     parser.add_argument('--action', '-a', choices=["min_dev", "dump_rerank", "evaluate", "inspect_error"], default="evaluate")
     parser.add_argument('--weights', '-w', nargs=3, type=float)

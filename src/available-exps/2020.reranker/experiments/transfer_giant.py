@@ -34,16 +34,18 @@ def _atis_base():
     p.hidden_size = 256
     p.num_stacked_block = 4
     p.num_stacked_encoder = 1
-    p.weight_decay = 0.2
+    p.weight_decay = 0.05
     p.char_emb_sz = 128
     p.char_hid_sz = 128
     p.TRAINING_LIMIT = 200
+    p.SGD_LR = 1e-3
 
-    p.dropout = .5
+    p.dropout = .2
     p.discrete_dropout = .1
-    p.batch_sz = 128
-    p.support_batch_sz = 30
-    p.num_inner_loops = 8
+
+    p.num_inner_loops = 3
+    p.batch_sz = 40
+    p.support_batch_sz = 200
     return p
 
 def _django_base():
@@ -99,6 +101,79 @@ def django_lf_ted():
     p.retriever_index_path = os.path.join(_ROOT, 'data', '_similarity_index', 'django_lf_ted.bin')
     return p
 
+from utils.trialbot_grid_search_helper import import_grid_search_parameters
+import_grid_search_parameters(
+    grid_conf={
+        "num_inner_loops": [2, 3, 5],
+        "SGD_LR": [1e-4, 1e-3],
+        "weight_decay": [0, 0.1, 0.5, 1]
+    },
+    base_param_fn=django_lf_ted,
+)
+
+import_grid_search_parameters(
+    grid_conf={
+        "num_inner_loops": [2, 3, 5],
+        "SGD_LR": [1e-4, 1e-3],
+        "weight_decay": [0, 0.1, 0.5, 1]
+    },
+    base_param_fn=django_lf_ngram,
+)
+
+import_grid_search_parameters(
+    grid_conf={
+        "num_inner_loops": [2, 3, 5],
+        "SGD_LR": [1e-4, 1e-3],
+        "weight_decay": [0, 0.1, 0.5, 1]
+    },
+    base_param_fn=django_nl_bert,
+)
+
+import_grid_search_parameters(
+    grid_conf={
+        "num_inner_loops": [2, 3, 5],
+        "SGD_LR": [1e-4, 1e-3],
+        "weight_decay": [0, 0.1, 0.5, 1]
+    },
+    base_param_fn=django_nl_ngram,
+)
+
+import_grid_search_parameters(
+    grid_conf={
+        "num_inner_loops": [2, 3, 5],
+        "SGD_LR": [1e-4, 1e-3],
+        "weight_decay": [0, 0.1, 0.5, 1]
+    },
+    base_param_fn=atis_lf_ted,
+)
+
+import_grid_search_parameters(
+    grid_conf={
+        "num_inner_loops": [2, 3, 5],
+        "SGD_LR": [1e-4, 1e-3],
+        "weight_decay": [0, 0.1, 0.5, 1]
+    },
+    base_param_fn=atis_lf_ngram,
+)
+
+import_grid_search_parameters(
+    grid_conf={
+        "num_inner_loops": [2, 3, 5],
+        "SGD_LR": [1e-4, 1e-3],
+        "weight_decay": [0, 0.1, 0.5, 1]
+    },
+    base_param_fn=atis_nl_bert,
+)
+
+import_grid_search_parameters(
+    grid_conf={
+        "num_inner_loops": [2, 3, 5],
+        "SGD_LR": [1e-4, 1e-3],
+        "weight_decay": [0, 0.1, 0.5, 1]
+    },
+    base_param_fn=atis_nl_ngram,
+)
+
 import datasets.atis_rank
 import datasets.atis_rank_translator
 import datasets.django_rank
@@ -134,7 +209,7 @@ class TransferUpdater(Updater):
         # each element is a list of similar examples,
         # corresponding to an example which indicates a different pseudotask
         # the None or empty lists (i.e., no similar examples found for some pseudotask) are filtered.
-        all_similar_examples = filter(None, map(lambda e: self._retriever.search(e, batch_source), batch['_raw']))
+        all_similar_examples = filter(None, map(lambda e: self._retriever.search_group(e, batch_source), batch['_raw']))
 
         # the support set is a concatenated list of all the pseudo-tasks.
         #
@@ -175,24 +250,36 @@ class TransferUpdater(Updater):
 
         with torch.enable_grad():
             model.train()
-            for step, support_batch in enumerate(task_iter):
-                if step >= self._num_inner_loop:
-                    break
+            for step, support_batch in zip(range(self._num_inner_loop), task_iter):
                 sent_a, sent_b, char_a, char_b, label, rank = self.read_model_input(support_batch)
                 model.zero_grad()
-                loss_step = model(sent_a, sent_b, char_a, char_b, label, rank)
+                # batch_loss: (inner_batch,)
+                # support_features: (inner_batch, hidden_sz)
+                batch_loss, support_features = model(sent_a, sent_b, char_a, char_b, label=label, rank=rank, return_repr=True)
+
+                sent_a, sent_b, char_a, char_b, _, rank = self.read_model_input(batch)
+                # batch_features: (outer_batch, hidden_sz)
+                _, batch_features = model(sent_a, sent_b, char_a, char_b, rank=rank, return_repr=True)
+
+                # attn: (outer_batch, inner_batch)
+                attn = torch.matmul(batch_features, support_features.transpose(0, 1)).softmax(dim=-1)
+
+                # attn_batch_loss: (outer_batch, 1)
+                attended_batch_loss = attn.matmul(batch_loss.unsqueeze(1))
+
+                loss_step = attended_batch_loss.mean()
                 loss_step.backward()
                 optim.step()
 
         model.eval()
         sent_a, sent_b, char_a, char_b, label, rank = self.read_model_input(batch)
-        rankings = model.inference(sent_a, sent_b, char_a, char_b, rank)
+        rankings = model(sent_a, sent_b, char_a, char_b, rank=rank)
         # task_logits.append(model.inference(sent_a, sent_b, char_a, char_b))
-        output = model.forward_loss_weight(*rankings)
+        # output = model.forward_loss_weight(*rankings)
 
         model.load_state_dict(init_params)  # reset the original model
 
-        return {"ranking_score": output,
+        return {"ranking_score": rankings[0],
                 "rank_match": rankings[0],
                 "rank_a2b": rankings[1],
                 "rank_b2a": rankings[2],
@@ -206,8 +293,10 @@ class TransferUpdater(Updater):
         device = args.device
 
         # We treat inner loop and outer loop different and choose different optimizers for each.
-        optim = Adafactor(model.parameters(), weight_decay=hparams.weight_decay)
-        bot.logger.info("Use Adafactor as outer optimizer: " + str(optim))
+        # optim = Adafactor(model.parameters(), weight_decay=hparams.weight_decay)
+        from torch.optim import SGD
+        optim = SGD(model.parameters(), lr=hparams.SGD_LR, weight_decay=hparams.weight_decay)
+        bot.logger.info("Use SGD as outer optimizer: " + str(optim))
         from functools import partial
 
         # either testing or debugging training, iter should be static, otherwise iterator returns data dynamically.
@@ -227,7 +316,7 @@ class TransferUpdater(Updater):
         if args.debug and args.skip:
             iterator.reset(args.skip)
 
-        support_set_iter_fn = partial(RandomIterator, shuffle=True, repeat=True,
+        support_set_iter_fn = partial(RandomIterator, shuffle=False, repeat=True,
                                       batch_size=hparams.batch_sz, translator=bot.translator,)
 
         # NL similarity uses only example id as key, LF similarity requires hyp id to denote a concrete example
@@ -238,29 +327,8 @@ class TransferUpdater(Updater):
         return updater
 
 def main():
-    import sys
-    args = sys.argv[1:]
-    args += ['--seed', '2020']
-    if '--dataset' not in sys.argv:
-        args += ['--dataset', 'atis_five_hyp']
-    if '--translator' not in sys.argv:
-        args += ['--translator', 'atis_rank']
-
-    parser = TrialBot.get_default_parser()
-    parser.add_argument('--dev', action='store_true', help="use dev data for testing mode, only works with --test opt")
-    args = parser.parse_args(args)
-    if args.debug:
-        logging.getLogger().setLevel(logging.DEBUG)
-    elif args.quiet:
-        logging.getLogger().setLevel(logging.WARNING)
-    else:
-        logging.getLogger().setLevel(logging.INFO)
-
-    if hasattr(args, "seed") and args.seed:
-        from utils.fix_seed import fix_seed
-        logging.info(f"set seed={args.seed}")
-        fix_seed(args.seed)
-
+    from utils.trialbot_setup import setup
+    args = setup(seed='2020')
     bot = TrialBot(trial_name="transfer_giant", get_model_func=get_model, args=args)
 
     bot.translator.turn_special_token(on=True)
@@ -280,10 +348,13 @@ def main():
             print(json.dumps(dict(zip(output_keys, (eid, hyp_rank.item(), score.item(),
                                                     r_m.item(), r_a2b.item(), r_b2a.item())))))
 
+    from utils.trial_bot_extensions import print_hyperparameters
+    from trialbot.training.extensions import ext_write_info
+    bot.add_event_handler(Events.STARTED, print_hyperparameters, 100)
+    bot.add_event_handler(Events.STARTED, ext_write_info, 105, msg="-" * 50)
     bot.updater = TransferUpdater.from_bot(bot)
     bot.run()
 
 if __name__ == '__main__':
     main()
-
 

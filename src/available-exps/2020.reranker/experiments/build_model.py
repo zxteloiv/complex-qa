@@ -2,25 +2,6 @@ from trialbot.data import NSVocabulary, PADDING_TOKEN
 import torch
 from torch import nn
 
-def get_re2_model(hparams, vocab: NSVocabulary):
-    from models.matching.re2 import RE2
-    model = RE2.get_model(emb_sz=hparams.emb_sz,
-                          num_tokens_a=vocab.get_vocab_size('nl'),
-                          num_tokens_b=vocab.get_vocab_size('lf'),
-                          hid_sz=hparams.hidden_size,
-                          enc_kernel_sz=hparams.encoder_kernel_size,
-                          num_classes=hparams.num_classes,
-                          num_stacked_blocks=hparams.num_stacked_block,
-                          num_encoder_layers=hparams.num_stacked_encoder,
-                          dropout=hparams.dropout,
-                          fusion_mode=hparams.fusion,
-                          alignment_mode=hparams.alignment,
-                          connection_mode=hparams.connection,
-                          prediction_mode=hparams.prediction,
-                          use_shared_embedding=False,
-                          )
-    return model
-
 def get_re2_variant(hparams, vocab: NSVocabulary):
     from models.modules.stacked_encoder import StackedEncoder
     from models.modules.embedding_dropout import SeqEmbeddingDropoutWrapper
@@ -236,9 +217,17 @@ def get_char_giant(hparams, vocab: NSVocabulary):
     from models.matching.seq2seq_modeling import Seq2SeqModeling
     from models.matching.seq_modeling import SeqModeling, PytorchSeq2SeqWrapper
     from allennlp.modules.matrix_attention import BilinearMatrixAttention
+    from models.matching.re2_modules.prediction import Re2Prediction
 
     re2: ChRE2 = get_re2_char_model(hparams, vocab)
     emb_sz, hid_sz, dropout = hparams.emb_sz, hparams.hidden_size, hparams.dropout
+
+    # neo fusion outputs 3times larger embedding, contains max, mean, and std pooling
+    pred_inp = hid_sz * 3 if hasattr(hparams, "pooling") and hparams.pooling == "neo" else hid_sz
+    pred = Re2Prediction(hparams.prediction, inp_sz=pred_inp, hid_sz=hid_sz, aux_feature_sz=3,
+                         num_classes=hparams.num_classes, dropout=dropout, activation=nn.SELU())
+    re2.prediction = pred
+
     RNNWrapper = PytorchSeq2SeqWrapper
     get_rnn = lambda stateful: RNNWrapper(nn.LSTM(emb_sz, hid_sz, num_layers=hparams.num_stacked_encoder,
                                                   dropout=hparams.dropout if hparams.num_stacked_block > 1 else 0.,
