@@ -1,11 +1,13 @@
-from typing import Tuple, Optional, List
+from typing import Tuple, Optional, List, NamedTuple
 import torch
 from torch import nn
 
+class NPDAHidden(NamedTuple):
+    token: torch.Tensor
+    stack: torch.Tensor
+    state: torch.Tensor
 
 class RNNPDACell(nn.Module):
-    hidden_type = Tuple[torch.Tensor, torch.Tensor, torch.Tensor]
-
     def __init__(self,
                  token_dim,
                  stack_dim,
@@ -22,8 +24,8 @@ class RNNPDACell(nn.Module):
     def forward(self,
                 token: torch.Tensor,
                 stack: torch.Tensor,
-                hiddens: Optional[Tuple[torch.Tensor, torch.Tensor, torch.Tensor]] = None,
-                ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+                hiddens: Optional[NPDAHidden] = None,
+                ) -> NPDAHidden:
         """
         :param token: (batch, token_dim), input token of the current timestep
         :param stack: (batch, stack_dim), top item on the stack at the current time
@@ -36,16 +38,16 @@ class RNNPDACell(nn.Module):
         z_t, z_nt, z_s, z_f = total.split(self.hidden_dim, dim=-1)
 
         if hiddens is None:
-            return z_t, z_nt, z_s
+            return NPDAHidden(z_t, z_nt, z_s)
 
         # forget, remember: (batch, hidden_dim)
         forget = torch.sigmoid(z_f)
         remember = 1 - forget
 
-        h_t, h_nt, h_s = hiddens
+        h_t, h_nt, h_s = hiddens.token, hiddens.stack, hiddens.state
 
         h_t = forget * h_t + remember * z_t
         h_nt = forget * h_nt + remember * z_nt
         h_s = forget * h_s + remember * z_s
 
-        return h_t, h_nt, h_s
+        return NPDAHidden(h_t, h_nt, h_s)
