@@ -1,7 +1,7 @@
 from typing import List, Optional
 import torch
 import torch.nn
-from models.modules.universal_hidden_state_wrapper import UniversalHiddenStateWrapper, RNNType
+from models.modules.universal_hidden_state_wrapper import UniversalHiddenStateWrapper as HSWrapper, RNNType
 from utils.nn import filter_cat
 
 class StackedRNNCell(torch.nn.Module):
@@ -10,8 +10,8 @@ class StackedRNNCell(torch.nn.Module):
 
         assert n_layers >= 1
         self.layer_rnns = torch.nn.ModuleList(
-            [UniversalHiddenStateWrapper(RNNType(input_dim, hidden_dim))] +
-            [UniversalHiddenStateWrapper(RNNType(hidden_dim, hidden_dim)) for _ in range(n_layers - 1)]
+            [HSWrapper(RNNType(input_dim, hidden_dim))] +
+            [HSWrapper(RNNType(hidden_dim, hidden_dim)) for _ in range(n_layers - 1)]
         )
 
         self.hidden_dim = hidden_dim
