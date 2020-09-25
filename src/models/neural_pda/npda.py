@@ -12,7 +12,6 @@ class NeuralPDA(torch.nn.Module):
                  nt_decoder: NTDecoder,
                  batch_stack: BatchedStack,
                  num_nonterminals: int,
-                 num_terminals: int,
                  nonterminal_dim: int,
                  token_embedding: nn.Embedding,
                  token_predictor: nn.Module,
@@ -25,7 +24,6 @@ class NeuralPDA(torch.nn.Module):
         self.pda_decoder = pda_decoder
         self.nt_decoder = nt_decoder
 
-        self.num_terminal = num_terminals
         self.num_nt = num_nonterminals
         codebook = F.normalize(torch.randn(num_nonterminals, nonterminal_dim)).detach()
         self.codebook = nn.Parameter(codebook)
@@ -39,8 +37,8 @@ class NeuralPDA(torch.nn.Module):
         self.validator = validator
         self.stack = batch_stack
 
-        self._pad_id = padding_token_id
-        self._start_id = start_token_id
+        self.pad_id = padding_token_id
+        self.start_id = start_token_id
 
     def forward(self,
                 x: Optional[torch.LongTensor] = None,
@@ -69,17 +67,18 @@ class NeuralPDA(torch.nn.Module):
         :return: a tuple of token logits, push records(non-differentiable), raw_nt_codes, validation logits if any
                     logits: (batch, step, vocab)
                     pushes: (batch, step, 2)
+                    raw_codes: (batch, step, 2, hidden_dim)
                     valid_logits: (batch, step, 3), or None if validator is not required
         """
         batch_size = batch_size or x.size()[0]
         decoding_length = x.size()[1] if x is not None else max_generation_len
         device = default_device or (x.device if x is not None else None)
-        x_mask = x_mask or (x != self._pad_id).long()
+        x_mask = x_mask or (x != self.pad_id).long()
 
         # initialize the NPDA model.
         self._init_stack(batch_size, default_device=device)
         logits_by_step, push_by_step, code_by_step, valid_by_step = [], [], [], []
-        last_preds = torch.full((batch_size,), self._start_id, device=device)
+        last_preds = torch.full((batch_size,), self.start_id, device=device)
         acc_m, acc_n = None, None
 
         for step in range(decoding_length):

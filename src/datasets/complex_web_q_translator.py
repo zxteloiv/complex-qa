@@ -2,11 +2,12 @@ from typing import Generator, Tuple, List, Mapping, Optional, Any
 import torch
 from torch.nn.utils.rnn import pad_sequence
 from trialbot.training import Registry
-from trialbot.data import Translator, NSVocabulary, START_SYMBOL, END_SYMBOL, PADDING_TOKEN
+from trialbot.data import Translator, START_SYMBOL, END_SYMBOL, PADDING_TOKEN
 import re
 from itertools import product
 from collections import defaultdict
 from functools import partial
+from utils.sparql_tokenizer import split_sparql
 
 @Registry.translator()
 class CompWebQTranslator(Translator):
@@ -21,36 +22,11 @@ class CompWebQTranslator(Translator):
         q = re.sub(r"[A-Z]\w+( on| de| [A-Z]\w+)* [A-Z]\w+", "<ent>", q)
         return q.strip().split(" ")
 
-    def split_sparql(self, sparql: str):
-        sparql = re.sub(r"PREFIX[^\n]+\n", "", sparql)          # remove prefix
-        sparql = re.sub(r"ns:m\.[a-z0-9_]+", "?ent", sparql)    # anonymize entities
-        sparql = re.sub(r"#[^\n]+\n", "", sparql)               # remove comments
-        sparql = re.sub(r"\n|\t", " ", sparql).strip()          # remove newlines and tabs
-
-        inner_structures = re.split(r'("[^"]+")', sparql)
-        for i, s in enumerate(inner_structures):
-            if s.startswith('"') and s.endswith('"'):
-                inner_structures[i] = s.replace(" ", "##space##")
-        sparql = " ".join(inner_structures)
-
-        toks = re.split(r" |([{}()]|\^\^)", sparql)
-        valid_toks = []
-        for t in toks:
-            if t is None or len(t) == 0:
-                continue
-
-            if "##space##" in t:
-                t = t.replace("##space##", " ")
-
-            valid_toks.append(t)
-
-        return valid_toks
-
     def generate_namespace_tokens(self, example) -> Generator[Tuple[str, str], None, None]:
         mq, q, sparql = list(map(example.get, ("machine_question", "question", "sparql")))
         ns_q, ns_mq, ns_lf = self.ns
         mq_toks, q_toks = list(map(self.split_question, (mq, q)))
-        sparql_toks = self.split_sparql(sparql)
+        sparql_toks = split_sparql(sparql)
 
         yield from [(ns_lf, START_SYMBOL), (ns_lf, END_SYMBOL)]
         yield from product([ns_q], q_toks[:self.max_nl_len])
@@ -63,7 +39,7 @@ class CompWebQTranslator(Translator):
         ns_q, ns_mq, ns_lf = self.ns
         mq_toks = self.split_question(mq)[:self.max_nl_len]
         q_toks = self.split_question(q)[:self.max_nl_len]
-        sparql_toks = [START_SYMBOL] + self.split_sparql(sparql)[:self.max_lf_len] + [END_SYMBOL]
+        sparql_toks = [START_SYMBOL] + split_sparql(sparql)[:self.max_lf_len] + [END_SYMBOL]
 
         instance = {
             "mq": self._seq_word_vec(mq_toks, ns_mq),
