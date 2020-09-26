@@ -8,7 +8,6 @@ from trialbot.training.updater import TrainingUpdater, TestingUpdater
 from utils.root_finder import find_root
 from trialbot.utils.move_to_device import move_to_device
 from utils.trialbot_setup import setup
-from build_model import lm_npda
 
 import datasets.cfq
 import datasets.cfq_translator
@@ -23,16 +22,28 @@ def cfq_pattern():
     p.batch_sz = 128
     p.target_namespace = 'sparqlPattern'
     p.token_dim = 64
-    p.stack_dim = 64
     p.hidden_dim = 64
-    p.ntdec_layer = 1
+    p.num_layers = 2
     p.dropout = .2
-    p.num_nonterminals = 10
-    p.codebook_initial_n = 1
-    p.ntdec_factor = 1.
     p.weight_decay = .2
 
     return p
+
+def get_model(p, vocab):
+    from trialbot.data.ns_vocabulary import NSVocabulary
+    vocab: NSVocabulary
+    import torch.nn as nn
+    from models.modules.mixture_softmax import MoSProjection
+    from models.matching.seq_modeling import SeqModeling, PytorchSeq2SeqWrapper
+    m = SeqModeling(
+        embedding=nn.Embedding(vocab.get_vocab_size(p.target_namespace), p.token_dim),
+        encoder=PytorchSeq2SeqWrapper(nn.LSTM(p.token_dim, p.hidden_dim, p.num_layers, batch_first=True,
+                                              dropout=p.dropout if p.num_layers > 1 else 0.)),
+        padding=0,
+        prediction=MoSProjection(5, p.token_dim, vocab.get_vocab_size(p.target_namespace)),
+        attention=None,
+    )
+    return m
 
 class CFQTrainingUpdater(TrainingUpdater):
     def update_epoch(self):
@@ -54,7 +65,6 @@ class CFQTrainingUpdater(TrainingUpdater):
             loss = output['loss']
             loss.backward()
             optim.step()
-            model.npda.update_codebook()
         return output
 
     @classmethod
@@ -81,23 +91,18 @@ class CFQTestingUpdater(TestingUpdater):
         if device >= 0:
             sp = move_to_device(sp, device)
         output = model(seq=sp)
-        output['_raw'] = batch['_raw']
         return output
 
 def main():
     args = setup(seed="2021", hparamset="cfq_pattern", dataset="cfq_mcd1", translator="cfq")
-    bot = TrialBot(trial_name="npda_lm", get_model_func=lm_npda, args=args)
+    bot = TrialBot(trial_name="lstm_lm", get_model_func=get_model, args=args)
 
     from trialbot.training import Events
-    def training_metrics(bot: TrialBot):
-        print(json.dumps(bot.model.get_metric(reset=True)))
-
     if args.test:
         from trialbot.training.trial_bot import Engine
         new_engine = Engine()
         new_engine.register_events(*Events)
         bot._engine = new_engine
-        bot.add_event_handler(Events.EPOCH_COMPLETED, training_metrics, 90)
 
         @bot.attach_extension(Events.ITERATION_COMPLETED)
         def print_output(bot: TrialBot):
@@ -119,9 +124,12 @@ def main():
         from trialbot.training.extensions import every_epoch_model_saver
         from utils.trial_bot_extensions import debug_models, end_with_nan_loss
 
+        @bot.attach_extension(Events.EPOCH_COMPLETED)
+        def training_metrics(bot: TrialBot):
+            print(json.dumps(bot.model.get_metric(reset=True)))
+
         bot.add_event_handler(Events.ITERATION_COMPLETED, end_with_nan_loss, 100)
         bot.add_event_handler(Events.EPOCH_COMPLETED, every_epoch_model_saver, 100)
-        bot.add_event_handler(Events.EPOCH_COMPLETED, training_metrics, 90)
         bot.add_event_handler(Events.STARTED, debug_models, 100)
         bot.updater = CFQTrainingUpdater.from_bot(bot)
     bot.run()

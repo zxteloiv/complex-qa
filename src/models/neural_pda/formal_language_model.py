@@ -1,6 +1,5 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from utils.nn import seq_cross_ent, seq_likelihood
 from .npda import NeuralPDA
 from allennlp.training.metrics.perplexity import Perplexity
