@@ -19,5 +19,3 @@ sync.sh
 snapshots
 relaysync.sh
 
-src/experiments
-src/scripts

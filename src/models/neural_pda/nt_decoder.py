@@ -18,14 +18,14 @@ class NTDecoder(nn.Module):
         :return: (batch, 2, hidden_dim), the codes to quantize later
         """
         num_layer = self.decoder.get_layer_num()
-        h_t = h_t or torch.zeros_like(h_nt)
+        h_t = torch.zeros_like(h_nt) if h_t is None else h_t
 
         if self.init_lowest:
             init_state = [h_t] + [torch.zeros_like(h_t) for _ in range(num_layer - 1)]
         else:
             init_state = [h_t for _ in range(num_layer)]
 
-        init_state = self.decoder.init_hidden_states(init_state)
+        init_state, _ = self.decoder.init_hidden_states(init_state)
 
         h_nt = F.normalize(h_nt)
         state, o1 = self.decoder(h_nt, init_state)

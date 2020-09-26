@@ -10,7 +10,7 @@ class BatchedStack:
         self.reset(max_batch_size)
 
     def reset(self, batch_size):
-        self._lists = [[] * batch_size]
+        self._lists = [[] for _ in range(batch_size)]
         self.max_batch_size = batch_size
 
     def push(self, data: torch.Tensor, push_mask: Optional[torch.Tensor]) -> torch.Tensor:

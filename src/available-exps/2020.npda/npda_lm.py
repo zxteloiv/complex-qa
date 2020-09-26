@@ -8,7 +8,7 @@ from trialbot.training.updater import TrainingUpdater, TestingUpdater
 from utils.root_finder import find_root
 from trialbot.utils.move_to_device import move_to_device
 from utils.trialbot_setup import setup
-from .build_model import lm_npda
+from build_model import lm_npda
 
 import datasets.cfq
 import datasets.cfq_translator
@@ -30,6 +30,7 @@ def cfq_pattern():
     p.num_nonterminals = 10
     p.codebook_initial_n = 1
     p.ntdec_factor = 1.
+    p.weight_decay = .2
 
     return p
 
@@ -83,7 +84,7 @@ class CFQTestingUpdater(TestingUpdater):
         return output
 
 def main():
-    args = setup(seed="2021", hparamset="cfq_pattern", dataset="cfq", translator="cfq")
+    args = setup(seed="2021", hparamset="cfq_pattern", dataset="cfq_mcd1", translator="cfq")
     bot = TrialBot(trial_name="npda_lm", get_model_func=lm_npda, args=args)
 
     from trialbot.training import Events

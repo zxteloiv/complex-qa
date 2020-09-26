@@ -25,6 +25,7 @@ class NeuralPDA(torch.nn.Module):
         self.nt_decoder = nt_decoder
 
         self.num_nt = num_nonterminals
+        self.nonterminal_dim = nonterminal_dim
         codebook = F.normalize(torch.randn(num_nonterminals, nonterminal_dim)).detach()
         self.codebook = nn.Parameter(codebook)
         self._code_m_acc = nn.Parameter(codebook.clone())
@@ -117,15 +118,15 @@ class NeuralPDA(torch.nn.Module):
         # update the moving average counter, but do not update the codebook which
         if self.training:
             r = self._code_decay
-            self._code_m_acc = r * self._code_m_acc + (1 - r) * acc_m
-            self._code_n_acc = r * self._code_n_acc + (1 - r) * acc_n
+            self._code_m_acc = nn.Parameter(r * self._code_m_acc + (1 - r) * acc_m)
+            self._code_n_acc = nn.Parameter(r * self._code_n_acc + (1 - r) * acc_n)
 
         # logits: (batch, step, vocab)
         # pushes: (batch, step, 2)
         # raw_codes: (batch, step, 2, hidden_dim)
         # valid_logits: (batch, step, 3)
         logits = torch.stack(logits_by_step, dim=1)
-        pushes = torch.stack(push_by_step, dim=1)
+        pushes = torch.stack(push_by_step, dim=1).long()
         raw_codes = torch.stack(code_by_step, dim=1)
         valid_logits = torch.stack(valid_by_step, dim=1) if self.validator is not None else None
         return logits, pushes, raw_codes, valid_logits
@@ -133,7 +134,7 @@ class NeuralPDA(torch.nn.Module):
     def update_codebook(self):
         """Called when the codebook parameters need update, after the optimizer update step perhaps"""
         if self.training:
-            self.codebook.copy_(self._code_m_acc / (self._code_n_acc + 1e-15))
+            self.codebook = nn.Parameter(self._code_m_acc / (self._code_n_acc.unsqueeze(-1) + 1e-15))
 
     def _get_step_moving_averages(self,
                                   codes: torch.Tensor,
@@ -193,11 +194,11 @@ class NeuralPDA(torch.nn.Module):
         diff_vec = code_rs - torch.unsqueeze(self.codebook, dim=0)
 
         # diff_norm: (2B, #NT)
-        # quantized_idx: (2B, 1)
+        # quantized_idx: (2B,)
         diff_norm = torch.norm(diff_vec, dim=2)
-        quantized_idx = torch.argmin(diff_norm, dim=1, keepdim=True)
+        quantized_idx = torch.argmin(diff_norm, dim=1)
 
-        quantized_codes = torch.gather(self.codebook, 1, quantized_idx)
+        quantized_codes = self.codebook[quantized_idx]
         return quantized_codes.reshape(batch_sz, 2, hidden_dim), quantized_idx.reshape(batch_sz, 2)
 
     def _init_stack(self, batch_size: int, default_device: Optional[torch.device] = None):
