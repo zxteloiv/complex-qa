@@ -7,7 +7,21 @@ class NPDAHidden(NamedTuple):
     stack: torch.Tensor
     state: torch.Tensor
 
-class RNNPDACell(nn.Module):
+class PDACellBase(nn.Module):
+    def forward(self,
+                token: torch.Tensor,
+                stack: torch.Tensor,
+                hiddens: Optional[NPDAHidden] = None,
+                ) -> NPDAHidden:
+        """
+        :param token: (batch, token_dim), input token of the current timestep
+        :param stack: (batch, stack_dim), top item on the stack at the current time
+        :param hiddens: Tuple[(batch, hidden_dim)] * 3, hidden states for terminals, non-terminals, and states
+        :return: hidden state of terminals, non-terminals, and states
+        """
+        raise NotImplementedError
+
+class TRNNPDACell(PDACellBase):
     def __init__(self,
                  token_dim,
                  stack_dim,
@@ -51,3 +65,30 @@ class RNNPDACell(nn.Module):
         h_s = forget * h_s + remember * z_s
 
         return NPDAHidden(h_t, h_nt, h_s)
+
+class LSTMPDACell(PDACellBase):
+    def __init__(self, token_dim, stack_dim, hidden_dim):
+        super().__init__()
+        self.cell = nn.LSTMCell(token_dim + stack_dim, hidden_dim)
+
+    def forward(self,
+                token: torch.Tensor,
+                stack: torch.Tensor,
+                hiddens: Optional[NPDAHidden] = None,
+                ) -> NPDAHidden:
+        """
+        :param token: (batch, token_dim), input token of the current timestep
+        :param stack: (batch, stack_dim), top item on the stack at the current time
+        :param hiddens: NPDAHidden instance, each property has (batch, hidden_dim)
+        :return: hidden state of terminals, non-terminals, and states
+        """
+        cell_inp = torch.cat([token, stack], dim=-1)
+
+        hx = None
+        if hiddens is not None:
+            h = hiddens.token   # token and stack share the same hidden repr.
+            c = hiddens.state
+            hx = (h, c)
+
+        h, c = self.cell(cell_inp, hx)
+        return NPDAHidden(h, h, c)

@@ -31,6 +31,7 @@ def cfq_pattern():
     p.codebook_initial_n = 1
     p.ntdec_factor = 1.
     p.weight_decay = .2
+    p.pda_type = 'lstm'
 
     return p
 

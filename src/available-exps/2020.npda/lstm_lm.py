@@ -29,6 +29,12 @@ def cfq_pattern():
 
     return p
 
+@Registry.hparamset()
+def cfq_lstm_one_layer():
+    p = cfq_pattern()
+    p.num_layers = 1
+    return p
+
 def get_model(p, vocab):
     from trialbot.data.ns_vocabulary import NSVocabulary
     vocab: NSVocabulary
@@ -91,6 +97,7 @@ class CFQTestingUpdater(TestingUpdater):
         if device >= 0:
             sp = move_to_device(sp, device)
         output = model(seq=sp)
+        output['_raw'] = batch['_raw']
         return output
 
 def main():
@@ -98,11 +105,15 @@ def main():
     bot = TrialBot(trial_name="lstm_lm", get_model_func=get_model, args=args)
 
     from trialbot.training import Events
+    def training_metrics(bot: TrialBot):
+        print(json.dumps(bot.model.get_metric(reset=True)))
+
     if args.test:
         from trialbot.training.trial_bot import Engine
         new_engine = Engine()
         new_engine.register_events(*Events)
         bot._engine = new_engine
+        bot.add_event_handler(Events.EPOCH_COMPLETED, training_metrics, 90)
 
         @bot.attach_extension(Events.ITERATION_COMPLETED)
         def print_output(bot: TrialBot):
@@ -124,12 +135,9 @@ def main():
         from trialbot.training.extensions import every_epoch_model_saver
         from utils.trial_bot_extensions import debug_models, end_with_nan_loss
 
-        @bot.attach_extension(Events.EPOCH_COMPLETED)
-        def training_metrics(bot: TrialBot):
-            print(json.dumps(bot.model.get_metric(reset=True)))
-
         bot.add_event_handler(Events.ITERATION_COMPLETED, end_with_nan_loss, 100)
         bot.add_event_handler(Events.EPOCH_COMPLETED, every_epoch_model_saver, 100)
+        bot.add_event_handler(Events.EPOCH_COMPLETED, training_metrics, 90)
         bot.add_event_handler(Events.STARTED, debug_models, 100)
         bot.updater = CFQTrainingUpdater.from_bot(bot)
     bot.run()

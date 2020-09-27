@@ -2,13 +2,13 @@ from typing import Optional, Callable, Tuple
 import torch
 from torch import nn
 import torch.nn.functional as F
-from .npda_cell import RNNPDACell, NPDAHidden
+from .npda_cell import PDACellBase, NPDAHidden
 from .batched_stack import BatchedStack
 from .nt_decoder import NTDecoder
 
 class NeuralPDA(torch.nn.Module):
     def __init__(self,
-                 pda_decoder: RNNPDACell,
+                 pda_decoder: PDACellBase,
                  nt_decoder: NTDecoder,
                  batch_stack: BatchedStack,
                  num_nonterminals: int,
