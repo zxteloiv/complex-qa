@@ -101,7 +101,7 @@ class CFQTestingUpdater(TestingUpdater):
         return output
 
 def main():
-    args = setup(seed="2021", hparamset="cfq_pattern", dataset="cfq_mcd1", translator="cfq")
+    args = setup(seed="2021", dataset="cfq_mcd1", translator="cfq")
     bot = TrialBot(trial_name="lstm_lm", get_model_func=get_model, args=args)
 
     from trialbot.training import Events

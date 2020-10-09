@@ -1,6 +1,5 @@
 import sys
 import logging
-sys.path.insert(0, '..')
 
 from trialbot.training import TrialBot
 from trialbot.training import Registry
