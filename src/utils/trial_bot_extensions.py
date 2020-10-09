@@ -51,3 +51,24 @@ def end_with_nan_loss(bot: TrialBot):
 def print_hyperparameters(bot: TrialBot):
     bot.logger.info(f"Hyperparamset Used: {bot.args.hparamset}")
     bot.logger.info(str(bot.hparams))
+
+def track_pytorch_module_forward_time(bot: TrialBot, max_depth: int = -1, timefmt="%H:%M:%S.%f"):
+    models = bot.models
+    from datetime import datetime
+    def print_time_hook(m: torch.nn.Module, inp):
+        dt, micro = datetime.now().strftime(timefmt).split('.')
+        time_str = "%s.%03d" % (dt, int(micro) / 1000)
+        module_name = f"{m.__class__.__module__}.{m.__class__.__name__}"
+        bot.logger.debug(f"module {module_name} called at {time_str}")
+
+    for model in models:
+        if len(list(model.modules())) <= 0:
+            continue
+
+        basename, _ = next(model.named_modules())
+        base_depth = basename.count('.')
+
+        for name, module in model.named_modules():
+            if max_depth < 0 or name.count('.') - base_depth < max_depth:
+                module.register_forward_pre_hook(print_time_hook)
+

@@ -5,6 +5,7 @@ import torch.nn.functional as F
 from .npda_cell import PDACellBase, NPDAHidden
 from .batched_stack import BatchedStack
 from .nt_decoder import NTDecoder
+import logging, datetime
 
 class NeuralPDA(torch.nn.Module):
     def __init__(self,
@@ -41,6 +42,7 @@ class NeuralPDA(torch.nn.Module):
 
         self.pad_id = padding_token_id
         self.start_id = start_token_id
+        self.logger = logging.getLogger(__name__)
 
     def forward(self,
                 x: Optional[torch.LongTensor] = None,
@@ -76,6 +78,8 @@ class NeuralPDA(torch.nn.Module):
         decoding_length = x.size()[1] if x is not None else max_generation_len
         device = default_device or (x.device if x is not None else None)
         x_mask = x_mask or (x != self.pad_id).long()
+        self.logger.debug(f"forward parameters: batch={batch_size}, "
+                          f"length={decoding_length}, device={device}")
 
         # initialize the NPDA model.
         self._init_stack(batch_size, default_device=device)
@@ -83,7 +87,11 @@ class NeuralPDA(torch.nn.Module):
         last_preds = torch.full((batch_size,), self.start_id, device=device)
         acc_m, acc_n = None, None
 
+        self.logger.debug(f'start npda decoding: {datetime.datetime.now().strftime("%M:%S.%f")[:-3]}')
+
         for step in range(decoding_length):
+
+            self.logger.debug(f'--> get input {datetime.datetime.now().strftime("%M:%S.%f")[:-3]}')
             # step_input: (batch, hidden_dim)
             step_tok = last_preds if x is None else x[:, step]
             # top: (batch, hidden_dim)
@@ -93,6 +101,7 @@ class NeuralPDA(torch.nn.Module):
             # either empty stack or padding input of x will lead to a violation of the update.
             step_mask = x_mask[:, step] * top_mask
 
+            self.logger.debug(f'--> forward step {datetime.datetime.now().strftime("%M:%S.%f")[:-3]}')
             # logits: (batch, vocab)
             # codes: (batch, 2, hidden_dim)
             # valid_logits: (batch, 3) or None
@@ -101,10 +110,12 @@ class NeuralPDA(torch.nn.Module):
             last_preds = torch.argmax(logits, dim=-1)
             code_by_step.append(codes)
 
+            self.logger.debug(f'--> quantize {datetime.datetime.now().strftime("%M:%S.%f")[:-3]}')
             # As long as the stack is empty, no more item could be pushed onto it.
             # quantized_code: (batch_size, 2, hidden_dim)
             # quantized_idx, push_mask: (batch_size, 2)
             quantized_code, quantized_idx = self._quantize_code(codes)
+            self.logger.debug(f'--> stack push {datetime.datetime.now().strftime("%M:%S.%f")[:-3]}')
             push_mask = quantized_idx * step_mask.unsqueeze(-1)         # code indices are happened to be push masks
             self.stack.push(quantized_code[:, 0, :], push_mask[:, 0])   # mask>0 is equivalent to mask=1 by convention
             self.stack.push(quantized_code[:, 1, :], push_mask[:, 1])
@@ -112,10 +123,12 @@ class NeuralPDA(torch.nn.Module):
             valid_by_step.append(valid_logits)
 
             if self.training:
+                self.logger.debug(f'--> moving avg {datetime.datetime.now().strftime("%M:%S.%f")[:-3]}')
                 m_t, n_t = self._get_step_moving_averages(codes, quantized_idx, step_mask)
                 acc_m = m_t if acc_m is None else acc_m + m_t
                 acc_n = n_t if acc_n is None else acc_n + n_t
 
+        self.logger.debug(f'end decoding: {datetime.datetime.now().strftime("%M:%S.%f")[:-3]}')
         # update the moving average counter, but do not update the codebook which
         if self.training:
             r = self._code_decay

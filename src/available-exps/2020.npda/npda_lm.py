@@ -65,6 +65,7 @@ class CFQTrainingUpdater(TrainingUpdater):
             sp = move_to_device(sp, device)
 
         output = model(seq=sp)
+
         if not self._dry_run:
             loss = output['loss']
             loss.backward()
@@ -140,10 +141,12 @@ def main():
         from utils.trial_bot_extensions import debug_models, end_with_nan_loss
 
         from utils.trial_bot_extensions import print_hyperparameters
+        from utils.trial_bot_extensions import track_pytorch_module_forward_time
         from trialbot.training.extensions import ext_write_info
         bot.add_event_handler(Events.STARTED, print_hyperparameters, 100)
         bot.add_event_handler(Events.STARTED, ext_write_info, 105, msg="-" * 50)
-
+        bot.add_event_handler(Events.STARTED, track_pytorch_module_forward_time, 105, max_depth=3)
+        bot.add_event_handler(Events.ITERATION_COMPLETED, ext_write_info, 100, msg="-" * 50)
         bot.add_event_handler(Events.ITERATION_COMPLETED, end_with_nan_loss, 100)
         bot.add_event_handler(Events.EPOCH_COMPLETED, every_epoch_model_saver, 100)
         bot.add_event_handler(Events.EPOCH_COMPLETED, get_metrics, 90)
