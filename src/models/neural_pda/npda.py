@@ -18,7 +18,8 @@ class NeuralPDA(torch.nn.Module):
                  start_token_id: int,
                  padding_token_id: Optional[int] = None,
                  validator: Optional[nn.Module] = None,
-                 init_codebook_confidence: int = 1,     # the number of iterations from which the codebook is learnt
+                 init_codebook_confidence: int = 1,  # the number of iterations from which the codebook is learnt
+                 codebook_training_decay: float = 0.99,
                  ):
         super().__init__()
         self.pda_decoder = pda_decoder
@@ -30,7 +31,7 @@ class NeuralPDA(torch.nn.Module):
         self.codebook = nn.Parameter(codebook)
         self._code_m_acc = nn.Parameter(codebook.clone())
         self._code_n_acc = nn.Parameter(torch.full((num_nonterminals,), init_codebook_confidence))
-        self._code_decay = 0.99
+        self._code_decay = codebook_training_decay
 
         self.token_embedding = token_embedding
         self.token_predictor = token_predictor

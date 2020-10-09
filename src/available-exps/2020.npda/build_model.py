@@ -26,6 +26,7 @@ def lm_npda(p, vocab: NSVocabulary):
                 n_layers=p.ntdec_layer,
                 intermediate_dropout=p.dropout
             ),
+            normalize_nt=p.ntdec_normalize,
         ),
 
         batch_stack=BatchedStack(max_batch_size=p.batch_sz),
@@ -39,6 +40,7 @@ def lm_npda(p, vocab: NSVocabulary):
         padding_token_id=vocab.get_token_index(PADDING_TOKEN, tgt_ns),
 
         init_codebook_confidence=p.codebook_initial_n,
+        codebook_training_decay=p.codebook_decay,
     )
 
     model = NPDAFLM(npda, p.ntdec_factor)

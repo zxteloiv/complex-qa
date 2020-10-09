@@ -1,4 +1,6 @@
 import sys
+import os.path
+sys.path.insert(0, os.path.abspath(os.path.join('..', '..')))
 import logging
 import json
 
@@ -31,9 +33,21 @@ def cfq_pattern():
     p.codebook_initial_n = 1
     p.ntdec_factor = 1.
     p.weight_decay = .2
-    p.pda_type = 'lstm'
+    p.pda_type = 'trnn'
+    p.codebook_decay = 0.99
+    p.ntdec_normalize = True
 
     return p
+
+from utils.trialbot_grid_search_helper import import_grid_search_parameters
+import_grid_search_parameters(
+    grid_conf={
+        "ntdec_normalize": [True, False],
+        "num_nonterminals": [20, 30, 50],
+    },
+    base_param_fn=cfq_pattern,
+    name_prefix="ntnorm_ntnum_",
+)
 
 class CFQTrainingUpdater(TrainingUpdater):
     def update_epoch(self):
@@ -86,11 +100,11 @@ class CFQTestingUpdater(TestingUpdater):
         return output
 
 def main():
-    args = setup(seed="2021", hparamset="cfq_pattern", dataset="cfq_mcd1", translator="cfq")
+    args = setup(seed="2021", dataset="cfq_mcd1", translator="cfq")
     bot = TrialBot(trial_name="npda_lm", get_model_func=lm_npda, args=args)
 
     from trialbot.training import Events
-    def training_metrics(bot: TrialBot):
+    def get_metrics(bot: TrialBot):
         print(json.dumps(bot.model.get_metric(reset=True)))
 
     if args.test:
@@ -98,7 +112,12 @@ def main():
         new_engine = Engine()
         new_engine.register_events(*Events)
         bot._engine = new_engine
-        bot.add_event_handler(Events.EPOCH_COMPLETED, training_metrics, 90)
+        bot.add_event_handler(Events.EPOCH_COMPLETED, get_metrics, 90)
+
+        from utils.trial_bot_extensions import print_hyperparameters
+        from trialbot.training.extensions import ext_write_info
+        bot.add_event_handler(Events.STARTED, print_hyperparameters, 100)
+        bot.add_event_handler(Events.STARTED, ext_write_info, 105, msg="-" * 50)
 
         @bot.attach_extension(Events.ITERATION_COMPLETED)
         def print_output(bot: TrialBot):
@@ -120,9 +139,14 @@ def main():
         from trialbot.training.extensions import every_epoch_model_saver
         from utils.trial_bot_extensions import debug_models, end_with_nan_loss
 
+        from utils.trial_bot_extensions import print_hyperparameters
+        from trialbot.training.extensions import ext_write_info
+        bot.add_event_handler(Events.STARTED, print_hyperparameters, 100)
+        bot.add_event_handler(Events.STARTED, ext_write_info, 105, msg="-" * 50)
+
         bot.add_event_handler(Events.ITERATION_COMPLETED, end_with_nan_loss, 100)
         bot.add_event_handler(Events.EPOCH_COMPLETED, every_epoch_model_saver, 100)
-        bot.add_event_handler(Events.EPOCH_COMPLETED, training_metrics, 90)
+        bot.add_event_handler(Events.EPOCH_COMPLETED, get_metrics, 90)
         bot.add_event_handler(Events.STARTED, debug_models, 100)
         bot.updater = CFQTrainingUpdater.from_bot(bot)
     bot.run()
