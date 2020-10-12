@@ -1,7 +1,49 @@
 from typing import Optional, Tuple
 import torch
 
-class BatchedStack:
+class BatchStack:
+    def push(self, data: torch.Tensor, push_mask: Optional[torch.Tensor]) -> torch.Tensor:
+        """
+        :param data: (batch, *) item to push onto the stack
+        :param push_mask: (batch,) indicators to push items
+                (1) onto the stack or not to (0) for each item in the batch
+        :return: the success indicators for the push action,
+                (1) if successful (either pushed or retained), (0) if max_stack_size is exceeded.
+        """
+        raise NotImplementedError
+
+    def pop(self,
+            batch_size: Optional[int] = None,
+            default_item: Optional[torch.Tensor] = None,
+            ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Remove the top item from each stack, and return them.
+        :param batch_size: the required batch to pop
+        :param default_item: the item to fill if the stack is empty.
+        :return: A tuple of the two
+                (batch, *) tuple of data items popped out,
+                (batch,) an errcode for each item, (1) for successful pop, (0) if the appropriate stack is empty.
+        """
+        return self.top(pop_data=True, batch_size=batch_size, default_item=default_item)
+
+    def top(self,
+            pop_data: bool = False,
+            batch_size: Optional[int] = None,
+            default_item: Optional[torch.Tensor] = None,
+            ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Get the top item from each stack.
+        :param pop_data: not only get the top item of each stack, but also remove them from the stack top.
+        :param batch_size: the required batch to pop
+        :param default_item: the item to fill if the stack is empty.
+        :return: A tuple of the two
+                (batch, *) tuple of data items popped out,
+                (batch,) an errcode for each item, (1) for successful pop, (0) if the appropriate stack is empty.
+        """
+        raise NotImplementedError
+
+
+class ListedBatchStack(BatchStack):
     def __init__(self, max_batch_size: int, max_stack_size: int = 0):
         self.max_batch_size = max_batch_size
         self.max_stack_size = max_stack_size
@@ -31,6 +73,7 @@ class BatchedStack:
             else:
                 succ.append(1)
 
+            # even though the push indicator is zero, the success flag is also set 1
             if ind_push > 0:
                 self._lists[item_id].append(data[item_id])
 
@@ -86,11 +129,145 @@ class BatchedStack:
         succ = data.new_tensor(succ)
         return data, succ
 
-    def mixed_action(self, action: torch.Tensor, data: torch.Tensor):
+
+class TensorBatchStack(BatchStack):
+    def __init__(self,
+                 max_batch_size: int,
+                 max_stack_size: int = 0,
+                 item_size: int = 1,
+                 device: int = -1):
+        self.max_batch_size = max_batch_size
+        self.max_stack_size = max_stack_size
+        self.item_size = item_size
+        self._storage: Optional[torch.Tensor] = None
+        self._top_cur: Optional[torch.Tensor] = None
+        self.device = torch.device('cpu') if device < 0 else torch.device('cuda', device)
+
+        self.reset(max_batch_size)
+
+    def reset(self, batch_size):
+        self._storage = torch.zeros(batch_size, self.max_stack_size, self.item_size, device=self.device)
+        self._top_cur = torch.full((batch_size,), fill_value=-1, dtype=torch.long, device=self.device)
+        self.max_batch_size = batch_size
+
+    def push(self, data: torch.Tensor, push_mask: Optional[torch.Tensor]) -> torch.Tensor:
         """
-        Execute actions for different items in a batch.
-        :param action: (batch,), integer indicators for every item in batch, to push (1), pop (-1) or retain (0).
-        :param data: (batch, *), the item to push onto the stack.
-        :return:
+        :param data: (batch, *) item to push onto the stack
+        :param push_mask: (batch,)
+                indicators to push items (1) onto the stack or not to (0) for each item in the batch
+        :return: the success indicators for the push action,
+                (1) if successful (either pushed or retained), (0) if max_stack_size is exceeded.
         """
-        raise NotImplementedError
+        batch_sz = data.size()[0]
+        assert push_mask.size()[0] == batch_sz
+        assert batch_sz <= self.max_batch_size
+
+        # stack error is only triggered when the push action is required but the stack is full.
+        # stack_error: (batch,)
+        stack_error = (self._top_cur[:batch_sz] >= (self.max_stack_size - 1)) * push_mask
+        succ = 1 - stack_error
+
+        batch_range = torch.arange(batch_sz, device=self.device)
+        # increasing the stack top cursor only if the push action is valid
+        self._top_cur[:batch_sz] += 1 * succ.long()
+        val_backup = self._storage[batch_range, self._top_cur[:batch_sz]]
+        push_mask = push_mask.unsqueeze(-1)
+        val_new = val_backup * (1 - push_mask) + data * push_mask
+        self._storage[batch_range, self._top_cur[:batch_sz]] = val_new
+        return succ
+
+    def top(self, pop_data: bool = False, batch_size: Optional[int] = None,
+            default_item: Optional[torch.Tensor] = None) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Get the top item from each stack.
+        :param pop_data: not only get the top item of each stack, but also remove them from the stack top.
+        :param batch_size: the required batch to pop
+        :param default_item: the item to fill if the stack is empty.
+        :return: A tuple of the two
+                (batch, *) tuple of data items popped out,
+                (batch,) an errcode for each item, (1) for successful pop, (0) if the appropriate stack is empty.
+        """
+        batch_size = batch_size or self.max_batch_size
+        assert batch_size <= self.max_batch_size
+
+        if default_item is None:
+            default_item = torch.zeros((batch_size, self.item_size), device=self.device)
+
+        cur_view = self._top_cur[:batch_size]
+
+        # succ, top_idx: (batch,)
+        succ = ((cur_view >= 0) * (cur_view < self.max_stack_size)).long()
+        top_idx = cur_view * succ  # invalid position has the default index 0
+
+        # batch_range: (batch,)
+        # val_mask: (batch, 1)
+        batch_range = torch.arange(batch_size, device=self.device)
+        val_mask = succ.unsqueeze(-1)
+        top_val = self._storage[batch_range, top_idx] * val_mask + (1 - val_mask) * default_item
+
+        if pop_data:
+            cur_view -= 1 * succ
+
+        return top_val, succ
+
+if __name__ == '__main__':
+    stack = TensorBatchStack(10, 3, 5)
+    _, succ = stack.top(batch_size=7)
+    assert (succ == torch.zeros(7)).all()
+    print("empty stack:", stack._top_cur)
+
+    # first push
+    data = torch.randint(100, 200, (7, 5))
+    succ = stack.push(data, torch.ones(7, dtype=torch.long))
+    assert (succ == torch.ones(7)).all()
+    print("after 1st push:", stack._top_cur)
+
+    # read the value from the first push
+    val, succ = stack.top(batch_size=7)
+    assert (val == data).all()
+    assert (succ == torch.ones(7)).all()
+    print("read from the 1st push:", stack._top_cur)
+
+    # second push
+    succ = stack.push(data, torch.ones(7, dtype=torch.long))
+    assert (succ == torch.ones(7)).all()
+    print("2nd push:", stack._top_cur)
+    # third push
+    succ = stack.push(data, torch.ones(7, dtype=torch.long))
+    assert (succ == torch.ones(7)).all()
+    print("3rd push:", stack._top_cur)
+    # forth push must be failed for the entire batch
+    succ = stack.push(data, torch.ones(7, dtype=torch.long))
+    assert (succ == torch.zeros(7)).all()
+    print("4rd push:", stack._top_cur)
+
+    # pop out then, must be successful
+    val, succ = stack.pop(batch_size=7)
+    assert (val == data).all()
+    assert (succ == torch.ones(7)).all()
+    print("pop out:", stack._top_cur)
+
+    # forth push again, which would be successful
+    succ = stack.push(data, torch.ones(7, dtype=torch.long))
+    assert (succ == torch.ones(7)).all()
+    print("4rd push again:", stack._top_cur)
+
+    # pop out for 3 times
+    val, succ = stack.pop(batch_size=7)
+    assert (val == data).all()
+    assert (succ == torch.ones(7)).all()
+    print("1st pop:", stack._top_cur)
+    val, succ = stack.pop(batch_size=7)
+    assert (val == data).all()
+    assert (succ == torch.ones(7)).all()
+    print("2nd pop:", stack._top_cur)
+    val, succ = stack.pop(batch_size=7)
+    assert (val == data).all()
+    assert (succ == torch.ones(7)).all()
+    print("3rd pop:", stack._top_cur)
+
+    # read value from empty stack -> must be failed
+    _, succ = stack.top(batch_size=7)
+    assert (succ == torch.zeros(7)).all()
+    print("empty stack again:", stack._top_cur)
+
