@@ -3,7 +3,7 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 from .npda_cell import PDACellBase, NPDAHidden
-from .batched_stack import BatchedStack
+from .batched_stack import BatchStack
 from .nt_decoder import NTDecoder
 import logging, datetime
 
@@ -11,7 +11,7 @@ class NeuralPDA(torch.nn.Module):
     def __init__(self,
                  pda_decoder: PDACellBase,
                  nt_decoder: NTDecoder,
-                 batch_stack: BatchedStack,
+                 batch_stack: BatchStack,
                  num_nonterminals: int,
                  nonterminal_dim: int,
                  token_embedding: nn.Embedding,
@@ -218,5 +218,5 @@ class NeuralPDA(torch.nn.Module):
     def _init_stack(self, batch_size: int, default_device: Optional[torch.device] = None):
         stack_bottom = torch.zeros((batch_size, self.nonterminal_dim), device=default_device)
         push_mask = torch.ones((batch_size,), device=default_device)
-        self.stack.reset(batch_size)
+        self.stack.reset(batch_size, default_device=default_device)
         self.stack.push(stack_bottom, push_mask)

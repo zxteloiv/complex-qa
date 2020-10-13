@@ -29,6 +29,7 @@ def cfq_pattern():
     p.hidden_dim = 64
     p.ntdec_layer = 1
     p.dropout = .2
+    p.stack_capacity = 150
     p.num_nonterminals = 10
     p.codebook_initial_n = 1
     p.ntdec_factor = 1.
@@ -146,7 +147,7 @@ def main():
         bot.add_event_handler(Events.STARTED, print_hyperparameters, 100)
         bot.add_event_handler(Events.STARTED, ext_write_info, 105, msg="-" * 50)
         bot.add_event_handler(Events.STARTED, track_pytorch_module_forward_time, 105, max_depth=3)
-        bot.add_event_handler(Events.ITERATION_COMPLETED, ext_write_info, 100, msg="-" * 50)
+        # bot.add_event_handler(Events.ITERATION_COMPLETED, ext_write_info, 100, msg="-" * 50)
         bot.add_event_handler(Events.ITERATION_COMPLETED, end_with_nan_loss, 100)
         bot.add_event_handler(Events.EPOCH_COMPLETED, every_epoch_model_saver, 100)
         bot.add_event_handler(Events.EPOCH_COMPLETED, get_metrics, 90)

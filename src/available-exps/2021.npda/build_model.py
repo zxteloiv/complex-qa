@@ -3,7 +3,8 @@ from torch import nn
 
 def lm_npda(p, vocab: NSVocabulary):
     from models.neural_pda.formal_language_model import NPDAFLM
-    from models.neural_pda.npda import NeuralPDA, NTDecoder, BatchedStack
+    from models.neural_pda.npda import NeuralPDA, NTDecoder
+    from models.neural_pda.batched_stack import BatchStack, TensorBatchStack, ListedBatchStack
     from models.neural_pda.npda_cell import TRNNPDACell, LSTMPDACell
     from models.modules.stacked_rnn_cell import StackedRNNCell, RNNType
     from models.modules.mixture_softmax import MoSProjection
@@ -29,7 +30,9 @@ def lm_npda(p, vocab: NSVocabulary):
             normalize_nt=p.ntdec_normalize,
         ),
 
-        batch_stack=BatchedStack(max_batch_size=p.batch_sz),
+        batch_stack=TensorBatchStack(max_batch_size=p.batch_sz,
+                                     max_stack_size=150 if not hasattr(p, "stack_capacity") else p.stack_capacity,
+                                     item_size=p.stack_dim),
 
         num_nonterminals=p.num_nonterminals,
         nonterminal_dim=p.stack_dim,
