@@ -44,6 +44,7 @@ def lm_npda(p, vocab: NSVocabulary):
 
         init_codebook_confidence=p.codebook_initial_n,
         codebook_training_decay=p.codebook_decay,
+        ntdec_init_policy=p.ntdec_init,
     )
 
     model = NPDAFLM(npda, p.ntdec_factor)

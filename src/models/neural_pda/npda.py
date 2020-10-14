@@ -21,6 +21,7 @@ class NeuralPDA(torch.nn.Module):
                  validator: Optional[nn.Module] = None,
                  init_codebook_confidence: int = 1,  # the number of iterations from which the codebook is learnt
                  codebook_training_decay: float = 0.99,
+                 ntdec_init_policy: str = "next_token",
                  ):
         super().__init__()
         self.pda_decoder = pda_decoder
@@ -36,6 +37,8 @@ class NeuralPDA(torch.nn.Module):
 
         self.token_embedding = token_embedding
         self.token_predictor = token_predictor
+
+        self.ntdec_init_policy = ntdec_init_policy
 
         self.validator = validator
         self.stack = batch_stack
@@ -174,19 +177,34 @@ class NeuralPDA(torch.nn.Module):
 
     def _forward_step(self, step_tok, stack_top, h, attn_fn=None):
         step_input = self.token_embedding(step_tok)
+
+        last_token = None
+        if self.ntdec_init_policy == "current_token":
+            last_token = step_input
+        elif self.ntdec_init_policy == "last_state_default_none":
+            last_token = None if h is None else h.state
+        elif self.ntdec_init_policy == "last_state_default_current":
+            last_token = step_input if h is None else h.state
+
         h = self.pda_decoder(step_input, stack_top, h)
 
         # any thing in h_all: (batch, hidden_dim)
         h_all = h.token, h.stack, h.state  # terminal, non-terminal, and state of automata
         if attn_fn is not None:
             h_all = (h + attn_fn(h) for h in h_all)
+            if last_token is not None:
+                last_token = last_token + attn_fn(last_token)
+                last_token = last_token.tanh()
         h_t, h_nt, h_s = [h.tanh() for h in h_all]
+
+        if self.ntdec_init_policy == "next_state":
+            last_token = h_t
 
         # logits: (batch, vocab)
         # codes: (batch, 2, hidden_dim)
         # valid_logits: (batch, 3) or None
         logits = self.token_predictor(h_t)
-        codes = self.nt_decoder(h_nt, h_t)
+        codes = self.nt_decoder(h_nt, last_token)
         valid_logits = self.validator(h_s) if self.validator is not None else None
 
         return h, logits, codes, valid_logits

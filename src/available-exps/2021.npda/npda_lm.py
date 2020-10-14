@@ -38,6 +38,10 @@ def cfq_pattern():
     p.codebook_decay = 0.99
     p.ntdec_normalize = True
 
+    # next_state, current_token (t4nt),
+    # last_state_default_none, last_state_default_current
+    p.ntdec_init = "last_state_default_none"
+
     return p
 
 from utils.trialbot_grid_search_helper import import_grid_search_parameters
