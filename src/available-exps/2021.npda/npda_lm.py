@@ -131,11 +131,12 @@ def main():
             if output is None:
                 return
 
-            for l, raw in zip(output['likelihoods'], output['_raw']):
+            for l, raw, replays in zip(output['likelihoods'], output['_raw'], output['batch_replays']):
                 to_print = {
                     "likelihood": l.item(),
                     "reconstructed_sparqlPattern": raw['reconstructed_sparql_pattern'],
                     "sparqlPattern": raw['example']['sparqlPattern'],
+                    "replays": replays,
                 }
                 print(json.dumps(to_print))
 

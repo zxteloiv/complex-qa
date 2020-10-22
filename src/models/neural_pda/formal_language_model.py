@@ -23,10 +23,9 @@ class NPDAFLM(nn.Module):
         # pushes: (batch, step, 2)
         # raw_codes: (batch, step, 2, hidden_dim)
         # valid_logits: (batch, step, 3)
-        tlogits, pushes, raw_codes, vlogits = self.npda(seq_in)
+        tlogits, pushes, raw_codes, vlogits, collector = self.npda(seq_in)
 
-        tgt_mask = (seq_out != self.npda.pad_id).long()
-
+        tgt_mask = (seq_in != self.npda.pad_id).long()
         output = {}
         cross_ent = seq_cross_ent(tlogits, seq_out, tgt_mask)
         if self.training:
@@ -34,6 +33,8 @@ class NPDAFLM(nn.Module):
             loss_ntdec = (quantized_codes - raw_codes).norm()
             loss = cross_ent + self.beta * loss_ntdec
             output['loss'] = loss
+        else:
+            output['batch_replays'] = self.npda.tracing_generation(collector, seq_out)
 
         self.perplexity(cross_ent)
         output['likelihoods'] = seq_likelihood(tlogits, seq_out, tgt_mask)

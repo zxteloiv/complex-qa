@@ -5,6 +5,9 @@ class BatchStack:
     def reset(self, batch_size, default_device = None):
         raise NotImplementedError
 
+    def describe(self):
+        raise NotImplementedError
+
     def push(self, data: torch.Tensor, push_mask: Optional[torch.Tensor]) -> torch.Tensor:
         """
         :param data: (batch, *) item to push onto the stack
@@ -132,6 +135,13 @@ class TensorBatchStack(BatchStack):
         self._top_cur: Optional[torch.Tensor] = None
         self.reset(max_batch_size)
         self.inplace = False
+
+    def describe(self):
+        stat = {
+            "stack_shape": (self.max_batch_size, self.max_stack_size, self.item_size),
+            "stack_load": None if self._top_cur is None else self._top_cur.tolist(),
+        }
+        return stat
 
     def reset(self, batch_size, default_device: Optional[torch.device] = None):
         self._storage = torch.zeros(batch_size, self.max_stack_size, self.item_size, device=default_device)
