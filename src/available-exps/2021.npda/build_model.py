@@ -8,6 +8,7 @@ def lm_npda(p, vocab: NSVocabulary):
     from models.neural_pda.npda_cell import TRNNPDACell, LSTMPDACell
     from models.modules.stacked_rnn_cell import StackedRNNCell, RNNType
     from models.modules.mixture_softmax import MoSProjection
+    from models.neural_pda.codebook import CodeBook
     tgt_ns = getattr(p, 'target_namespace', 'sparqlPattern')
 
     pda_type = getattr(p, 'pda_type', 'trnn')
@@ -34,16 +35,16 @@ def lm_npda(p, vocab: NSVocabulary):
                                      max_stack_size=150 if not hasattr(p, "stack_capacity") else p.stack_capacity,
                                      item_size=p.stack_dim),
 
-        num_nonterminals=p.num_nonterminals,
-        nonterminal_dim=p.stack_dim,
+        codebook=CodeBook(num_nonterminals=p.num_nonterminals,
+                          nonterminal_dim=p.stack_dim,
+                          init_codebook_confidence=p.codebook_initial_n,
+                          codebook_training_decay=p.codebook_decay),
 
         token_embedding=nn.Embedding(vocab.get_vocab_size(tgt_ns), p.token_dim),
         token_predictor=MoSProjection(5, p.token_dim, vocab.get_vocab_size(tgt_ns)),
         start_token_id=vocab.get_token_index(START_SYMBOL, tgt_ns),
         padding_token_id=vocab.get_token_index(PADDING_TOKEN, tgt_ns),
 
-        init_codebook_confidence=p.codebook_initial_n,
-        codebook_training_decay=p.codebook_decay,
         ntdec_init_policy=p.ntdec_init,
         fn_decode_token=lambda i: vocab.get_token_from_index(i, namespace=tgt_ns),
     )

@@ -1,4 +1,4 @@
-from typing import Optional, Callable, Tuple, Generator, Mapping
+from typing import Optional, Callable, Tuple
 import torch
 from torch import nn
 import torch.nn.functional as F
@@ -6,7 +6,6 @@ from .npda_cell import PDACellBase, NPDAHidden
 from .batched_stack import BatchStack
 from .nt_decoder import NTDecoder
 import logging, datetime
-from trialbot.data.ns_vocabulary import NSVocabulary
 from utils.seq_collector import SeqCollector
 
 class NeuralPDA(torch.nn.Module):
@@ -14,15 +13,12 @@ class NeuralPDA(torch.nn.Module):
                  pda_decoder: PDACellBase,
                  nt_decoder: NTDecoder,
                  batch_stack: BatchStack,
-                 num_nonterminals: int,
-                 nonterminal_dim: int,
+                 codebook: nn.Module,
                  token_embedding: nn.Embedding,
                  token_predictor: nn.Module,
                  start_token_id: int,
                  padding_token_id: Optional[int] = None,
                  validator: Optional[nn.Module] = None,
-                 init_codebook_confidence: int = 1,  # the number of iterations from which the codebook is learnt
-                 codebook_training_decay: float = 0.99,
                  ntdec_init_policy: str = "next_token",
                  fn_decode_token: Optional[Callable[[int], str]] = None,
                  ):
@@ -30,13 +26,7 @@ class NeuralPDA(torch.nn.Module):
         self.pda_decoder = pda_decoder
         self.nt_decoder = nt_decoder
 
-        self.num_nt = num_nonterminals
-        self.nonterminal_dim = nonterminal_dim
-        codebook = F.normalize(torch.randn(num_nonterminals, nonterminal_dim)).detach()
-        self.codebook = nn.Parameter(codebook)
-        self._code_m_acc = nn.Parameter(codebook.clone())
-        self._code_n_acc = nn.Parameter(torch.full((num_nonterminals,), init_codebook_confidence))
-        self._code_decay = codebook_training_decay
+        self.codebook = codebook
 
         self.token_embedding = token_embedding
         self.token_predictor = token_predictor
@@ -119,7 +109,7 @@ class NeuralPDA(torch.nn.Module):
             # As long as the stack is empty, no more item could be pushed onto it.
             # quantized_code: (batch_size, 2, hidden_dim)
             # quantized_idx, push_mask: (batch_size, 2)
-            quantized_code, quantized_idx = self._quantize_code(codes)
+            quantized_code, quantized_idx = self.codebook(codes)
             self.logger.debug(f'--> stack push {datetime.datetime.now().strftime("%M:%S.%f")[:-3]}')
             push_mask = quantized_idx * step_mask.unsqueeze(-1)         # code indices are happened to be push masks
             self.stack.push(quantized_code[:, 0, :], push_mask[:, 0])   # mask>0 is equivalent to mask=1 by convention
@@ -128,16 +118,14 @@ class NeuralPDA(torch.nn.Module):
 
             if self.training:
                 self.logger.debug(f'--> moving avg {datetime.datetime.now().strftime("%M:%S.%f")[:-3]}')
-                m_t, n_t = self._get_step_moving_averages(codes, quantized_idx, step_mask)
+                m_t, n_t = self.codebook.get_step_moving_averages(codes, quantized_idx, step_mask)
                 acc_m = m_t if acc_m is None else acc_m + m_t
                 acc_n = n_t if acc_n is None else acc_n + n_t
 
         self.logger.debug(f'end decoding: {datetime.datetime.now().strftime("%M:%S.%f")[:-3]}')
         # update the moving average counter, but do not update the codebook which
         if self.training:
-            r = self._code_decay
-            self._code_m_acc = nn.Parameter(r * self._code_m_acc + (1 - r) * acc_m)
-            self._code_n_acc = nn.Parameter(r * self._code_n_acc + (1 - r) * acc_n)
+            self.codebook.update_accumulator(acc_m, acc_n)
 
         # logits: (batch, step, vocab)
         # pushes: (batch, step, 2)
@@ -148,33 +136,6 @@ class NeuralPDA(torch.nn.Module):
         raw_codes = mem_bread.get_stacked_tensor('codes')
         vlogits = mem_bread.get_stacked_tensor('valid') if self.validator is not None else None
         return tlogits, pushes, raw_codes, vlogits, mem_bread
-
-    def update_codebook(self):
-        """Called when the codebook parameters need update, after the optimizer update step perhaps"""
-        if self.training:
-            self.codebook = nn.Parameter(self._code_m_acc / (self._code_n_acc.unsqueeze(-1) + 1e-15))
-
-    def _get_step_moving_averages(self,
-                                  codes: torch.Tensor,
-                                  quantized_idx: torch.Tensor,
-                                  updating_mask: torch.Tensor):
-        """
-        Compute and return the moving average accumulators (m and n).
-        :param codes: (batch, 2, hidden_dim)
-        :param quantized_idx: (batch, 2)
-        :param updating_mask: (batch,)
-        :return: (#NT, d), (#NT) the accumulator of each timestep for the nominator and denominators.
-        """
-        # qidx_onehot, filtered_qidx: (batch, 2, #NT)
-        qidx_onehot = (quantized_idx.unsqueeze(-1) == torch.arange(self.num_nt, device=codes.device).reshape(1, 1, -1))
-        filtered_qidx = updating_mask.reshape(-1, 1, 1) * qidx_onehot
-
-        # n_t: (#NT,) the number of current codes quantized for each NT
-        # m_t: (#NT, d)
-        n_t = filtered_qidx.sum(0).sum(0)
-        m_t = (filtered_qidx.unsqueeze(-1) * codes.unsqueeze(-2)).sum(0).sum(0)
-
-        return m_t, n_t
 
     def _forward_step(self, step_tok, stack_top, h, attn_fn=None):
         step_input = self.token_embedding(step_tok)
@@ -210,32 +171,8 @@ class NeuralPDA(torch.nn.Module):
 
         return h, logits, codes, valid_logits
 
-    def _quantize_code(self, codes: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        """
-        :param codes: (batch_size, -1, hidden_dim)
-        :return: a tuple of
-                (batch_size, n, hidden_dim), the quantized code vector, selected directly from the codebook
-                (batch_size, n), the id of the code in the codebook
-        """
-        # codes: (B, n, hidden_dim)
-        batch_sz, _, hidden_dim = codes.size()
-
-        # code_rs: (nB, 1, hidden_dim)
-        # self.codebook: (#NT, hidden_dim) -> (1, #NT, hidden_dim)
-        # diff_vec: (nB, #NT, hidden_dim)
-        code_rs = codes.reshape(-1, 1, hidden_dim)
-        diff_vec = code_rs - torch.unsqueeze(self.codebook, dim=0)
-
-        # diff_norm: (nB, #NT)
-        # quantized_idx: (nB,)
-        diff_norm = torch.norm(diff_vec, dim=2)
-        quantized_idx = torch.argmin(diff_norm, dim=1)
-
-        quantized_codes = self.codebook[quantized_idx]
-        return quantized_codes.reshape(batch_sz, -1, hidden_dim), quantized_idx.reshape(batch_sz, -1)
-
     def _init_stack(self, batch_size: int, default_device: Optional[torch.device] = None):
-        stack_bottom = torch.zeros((batch_size, self.nonterminal_dim), device=default_device)
+        stack_bottom = torch.zeros((batch_size, self.codebook.nonterminal_dim), device=default_device)
         push_mask = torch.ones((batch_size,), device=default_device)
         self.stack.reset(batch_size, default_device=default_device)
         self.stack.push(stack_bottom, push_mask)
@@ -267,7 +204,7 @@ class NeuralPDA(torch.nn.Module):
 
         # inp_qnt_idx: (batch, steps)
         # preds: (batch, steps)
-        inp_qnt_idx = self._quantize_code(inp_stack)[1]
+        inp_qnt_idx = self.codebook.quantize_code(inp_stack)[1]
         preds = tlogits.argmax(dim=-1)
 
         batch_size, step_num = inp_token.size()

@@ -75,7 +75,7 @@ class CFQTrainingUpdater(TrainingUpdater):
             loss = output['loss']
             loss.backward()
             optim.step()
-            model.npda.update_codebook()
+            model.npda.codebook.update_codebook()
         return output
 
     @classmethod

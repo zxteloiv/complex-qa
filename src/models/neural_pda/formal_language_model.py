@@ -29,7 +29,7 @@ class NPDAFLM(nn.Module):
         output = {}
         cross_ent = seq_cross_ent(tlogits, seq_out, tgt_mask)
         if self.training:
-            quantized_codes = self.npda.codebook[pushes].detach()
+            quantized_codes = self.npda.codebook.codebook[pushes].detach()
             loss_ntdec = (quantized_codes - raw_codes).norm()
             loss = cross_ent + self.beta * loss_ntdec
             output['loss'] = loss
