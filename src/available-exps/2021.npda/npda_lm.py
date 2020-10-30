@@ -30,17 +30,24 @@ def cfq_pattern():
     p.ntdec_layer = 1
     p.dropout = .2
     p.stack_capacity = 150
-    p.num_nonterminals = 10
-    p.codebook_initial_n = 1
     p.ntdec_factor = 1.
     p.weight_decay = .2
     p.pda_type = 'trnn'
-    p.codebook_decay = 0.99
     p.ntdec_normalize = True
 
     # next_state, current_token (t4nt),
     # last_state_default_none, last_state_default_current
     p.ntdec_init = "last_state_default_none"
+
+    p.codebook = "split"  # vanilla, split
+    # stack_dim must be divisible by split_num (N)
+    p.split_num = 4
+    # num_nonterminals had better be set such that the N-root of it is an integer.
+    # otherwise the compositional num_nt will not be as specified.
+    # actually compositional_num_nt = round(num_nt ** (1/N)) ^ N
+    p.num_nonterminals = 16
+    p.codebook_decay = 0.99
+    p.codebook_initial_n = 1
 
     return p
 
