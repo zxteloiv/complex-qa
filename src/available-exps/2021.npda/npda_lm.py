@@ -138,13 +138,21 @@ def main():
             if output is None:
                 return
 
-            for l, raw, replays in zip(output['likelihoods'], output['_raw'], output['batch_replays']):
+            debug = bot.args.debug
+            zip_resource = [output['likelihoods'], output['_raw']]
+            if debug:
+                zip_resource.append(output['batch_replays'])
+
+            for data_tuple in zip(*zip_resource):
+                l, raw = data_tuple[:2]
                 to_print = {
                     "likelihood": l.item(),
                     "reconstructed_sparqlPattern": raw['reconstructed_sparql_pattern'],
                     "sparqlPattern": raw['example']['sparqlPattern'],
-                    "replays": replays,
                 }
+                if debug:
+                    replays = data_tuple[-1]
+                    to_print['replays'] = replays
                 print(json.dumps(to_print))
 
         bot.updater = CFQTestingUpdater.from_bot(bot)
@@ -159,7 +167,6 @@ def main():
         bot.add_event_handler(Events.STARTED, print_hyperparameters, 100)
         bot.add_event_handler(Events.STARTED, ext_write_info, 105, msg="-" * 50)
         bot.add_event_handler(Events.STARTED, track_pytorch_module_forward_time, 105, max_depth=3)
-        # bot.add_event_handler(Events.ITERATION_COMPLETED, ext_write_info, 100, msg="-" * 50)
         bot.add_event_handler(Events.ITERATION_COMPLETED, end_with_nan_loss, 100)
         bot.add_event_handler(Events.EPOCH_COMPLETED, every_epoch_model_saver, 100)
         bot.add_event_handler(Events.EPOCH_COMPLETED, get_metrics, 90)
