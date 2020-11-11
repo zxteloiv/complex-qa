@@ -1,0 +1,118 @@
+start: rule*
+
+// ---------------------------
+// Rules
+// ---------------------------
+
+// Terminal rules are only differentiable by the name in upper cases,
+// whereas non-terminal rules can use any valid identifiers for the lhs.
+
+rule: nonterminal_symbol "::=" expr
+    | terminal_symbol "::=" expr
+
+nonterminal_symbol: NON_PURE_UPPER_NAME
+terminal_symbol: PURE_UPPER_NAME
+
+?expr: atom | concat | alter
+?token: nonterminal_symbol | terminal_symbol | string
+
+// expressions with parenthesis are unambiguous
+optional: "(" expr ")" "?" | token "?"
+kleene_star: "(" expr ")" "*" | token "*"
+kleene_plus: "(" expr ")" "+" | token "+"
+combine: "(" expr ")"
+safe_concat: "(" expr+ ")"
+?unambiguous_expr: optional | kleene_star | kleene_plus | combine | safe_concat
+
+?atom: token | unambiguous_expr
+
+concat: atom+
+
+// concat has higher grammar priority than alter
+?alter_piece: atom | concat
+alter: _separated{alter_piece, "|"}
+
+// ------------------------------
+// Terminals
+// ------------------------------
+
+literal: "\"" _dquoted_text* "\"" | "'" _squoted_text* "'"
+
+// -------------
+// Double quote " doesn't need escaping in regular exp, but the lark implementation requires it.
+// Single quote ' is safe and is ok whether escaped or not.
+// Escaping both is for consistency
+
+_dquoted_text: /([\x09\x0A\x0D\x20-\x21\x23-\x26\x28-\x7E\']|((?<!\\)\\\"))+/
+_squoted_text: /([\x09\x0A\x0D\x20-\x21\x23-\x26\x28-\x7E\"]|((?<!\\)\\\'))+/
+
+// -------------
+// With the new literal implementation other than below, literals will not be split in chars
+//
+//literal: "\"" _double_quoted_text* "\"" | "'" _single_quoted_text* "'"
+//_single_quoted_text: (CHAR_EXCEPT_QUOTE | DOUBLE_QUOTE | ESC_PRINTABLE_CHAR)+
+//_double_quoted_text: (CHAR_EXCEPT_QUOTE | SINGLE_QUOTE | ESC_PRINTABLE_CHAR)+
+
+
+?string: string_cp | literal | exclusive_match | inclusive_match
+string_cp: codepoint
+
+// A caret cannot be at the beginning of an inclusive_match
+inclusive_match: "[" ( _match_char | match_range ) ( _match_char | match_range | "^" )* "]"
+exclusive_match: "[^" ( _match_char | match_range | "^" )+ "]"
+
+// ranging are limited to only the readable ASCII codes
+match_range: _range_char "-" _range_char
+_range_char: codepoint | "A".."Z" | "0".."9" | "a".."z"
+
+_match_char: codepoint | MATCHING_ASCII_CHAR_NO_EXCEPTIONS | ESC_PRINTABLE_CHAR | BACKSLASH
+
+codepoint: "#x" /[a-fA-F0-9]+/
+
+// ------------------------------
+// Terminals for CharSet
+// ------------------------------
+
+// ---------------
+// Define the char in [] matching only.
+// \x5B and \x5D are brackets, \x23 is # (number/sharp), \x5c is \ (backslash), \x2D is - (hyphen)
+// #xN is for codepoints, \ is for escaping, [] are for matching, - is for matching ranges
+// These chars are printable and belong to ASCII, but they must be entered using escaping
+// ---------------
+MATCHING_ASCII_CHAR_NO_EXCEPTIONS: /[\x01-\x22\x24-\x2C\x2E-\x5A\x5F-\x7E]/
+ESC_PRINTABLE_CHAR: /(?<!\\)\\[\x20-\x7E]/
+BACKSLASH: "\\"
+
+// \u22 and \u27 are double and single quote respectively.
+CHAR_EXCEPT_QUOTE: /[\x09\x0A\x0D\x20-\x21\x23-\x26\x28-\x7E]/
+SINGLE_QUOTE: "'"
+DOUBLE_QUOTE: "\""
+
+// For the recommend characters listed here, refer to https://www.w3.org/TR/xml11/#NT-Char
+XML_RECOMMEND_ASCII: /[\x09\x0A\x0D\x20-\x7E]/
+XML_CHAR: /[\u0001-\uD7FF\uE000-\uFFFD\U00010000-\U0010FFFF]/
+XML_RESTRICTED_CHAR: /[\x01-\x08\x0B\x0C\x0E-\x1F\x7F-\x84\x86-\x9F]/
+
+// Names must not start with any digit.
+// there must be a lower-case letter in a name
+
+// non-digit leads, and any upper-case
+NON_PURE_UPPER_NAME: /[A-Z_][a-zA-Z0-9_]*[a-z][a-zA-Z0-9_]*|[a-z][a-zA-Z0-9_]*/
+
+// Name with a single capitalized letter is prohibited because of the ambiguity in grammar.
+// non-digit leads, and any upper-case letter or digit consecutively adjacent
+PURE_UPPER_NAME: /[A-Z_][A-Z0-9_]+/
+
+C_COMMENT: "/*" /.*?/s "*/"
+
+// ------------------------------
+// Templates
+// ------------------------------
+
+_separated{x, sep}: x (sep x)*  // Define a sequence of 'x sep x sep x ...'
+
+%import common.HEXDIGIT
+%import common.LETTER
+%import common.WS
+%ignore WS
+%ignore C_COMMENT

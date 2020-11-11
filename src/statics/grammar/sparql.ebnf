@@ -10,7 +10,7 @@ ValuesClause
   	PrefixDecl	  ::=  	'PREFIX' PNAME_NS IRIREF
   	SelectQuery	  ::=  	SelectClause DatasetClause* WhereClause SolutionModifier
   	SubSelect	  ::=  	SelectClause WhereClause SolutionModifier ValuesClause
-  	SelectClause	  ::=  	'SELECT' ( 'DISTINCT' | 'REDUCED' )? ( ( Var | ( '(' Expression 'AS' Var ')' ) )+ | '*' )
+  	SelectClause	  ::=  	'SELECT' ( 'DISTINCT' | 'REDUCED' )? ( ( Var | BuiltInCall | Aggregate | FunctionCall | ( '(' Expression 'AS' Var ')' ) )+ | '*' )
   	ConstructQuery	  ::=  	'CONSTRUCT' ( ConstructTemplate DatasetClause* WhereClause SolutionModifier | DatasetClause* 'WHERE' '{' TriplesTemplate? '}' SolutionModifier )
   	DescribeQuery	  ::=  	'DESCRIBE' ( VarOrIri+ | '*' ) DatasetClause* WhereClause? SolutionModifier
   	AskQuery	  ::=  	'ASK' DatasetClause* WhereClause SolutionModifier
@@ -67,7 +67,7 @@ ValuesClause
   	DataBlock	  ::=  	InlineDataOneVar | InlineDataFull
   	InlineDataOneVar	  ::=  	Var '{' DataBlockValue* '}'
   	InlineDataFull	  ::=  	( NIL | '(' Var* ')' ) '{' ( '(' DataBlockValue* ')' | NIL )* '}'
-  	DataBlockValue	  ::=  	iri | RDFLiteral | NumericLiteral | BooleanLiteral | 'UNDEF'
+  	DataBlockValue	  ::=  	iri | RdfLiteral | NumericLiteral | BooleanLiteral | 'UNDEF'
   	MinusGraphPattern	  ::=  	'MINUS' GroupGraphPattern
   	GroupOrUnionGraphPattern	  ::=  	GroupGraphPattern ( 'UNION' GroupGraphPattern )*
   	Filter	  ::=  	'FILTER' Constraint
@@ -111,7 +111,7 @@ ValuesClause
   	VarOrTerm	  ::=  	Var | GraphTerm
   	VarOrIri	  ::=  	Var | iri
   	Var	  ::=  	VAR1 | VAR2
-  	GraphTerm	  ::=  	iri | RDFLiteral | NumericLiteral | BooleanLiteral | BlankNode | NIL
+  	GraphTerm	  ::=  	iri | RdfLiteral | NumericLiteral | BooleanLiteral | BlankNode | NIL
   	Expression	  ::=  	ConditionalOrExpression
   	ConditionalOrExpression	  ::=  	ConditionalAndExpression ( '||' ConditionalAndExpression )*
   	ConditionalAndExpression	  ::=  	ValueLogical ( '&&' ValueLogical )*
@@ -124,7 +124,7 @@ ValuesClause
 | '+' PrimaryExpression
 | '-' PrimaryExpression
 | PrimaryExpression
-  	PrimaryExpression	  ::=  	BrackettedExpression | BuiltInCall | iriOrFunction | RDFLiteral | NumericLiteral | BooleanLiteral | Var
+  	PrimaryExpression	  ::=  	BrackettedExpression | BuiltInCall | iriOrFunction | RdfLiteral | NumericLiteral | BooleanLiteral | Var
   	BrackettedExpression	  ::=  	'(' Expression ')'
   	BuiltInCall	  ::=  	  Aggregate
 | 'STR' '(' Expression ')'
@@ -194,7 +194,7 @@ ValuesClause
 | 'SAMPLE' '(' 'DISTINCT'? Expression ')'
 | 'GROUP_CONCAT' '(' 'DISTINCT'? Expression ( ';' 'SEPARATOR' '=' String )? ')'
   	iriOrFunction	  ::=  	iri ArgList?
-  	RDFLiteral	  ::=  	String ( LANGTAG | ( '^^' iri ) )?
+  	RdfLiteral	  ::=  	String ( LANGTAG | ( '^^' iri ) )?
   	NumericLiteral	  ::=  	NumericLiteralUnsigned | NumericLiteralPositive | NumericLiteralNegative
   	NumericLiteralUnsigned	  ::=  	INTEGER | DECIMAL | DOUBLE
   	NumericLiteralPositive	  ::=  	INTEGER_POSITIVE | DECIMAL_POSITIVE | DOUBLE_POSITIVE
@@ -205,9 +205,15 @@ ValuesClause
   	PrefixedName	  ::=  	PNAME_LN | PNAME_NS
   	BlankNode	  ::=  	BLANK_NODE_LABEL | ANON
 
-/*
+/* -------------------------------------------------- *
+ * the terminal production rules
+ * -------------------------------------------------- */
 
+/*  Rewrite the IRIREF rule to eliminate the subtraction operator in EBNF (hard to implement in the grammar)
   	IRIREF	  ::=  	'<' ([^<>"{}|^`\]-[#x00-#x20])* '>'
+*/
+  	IRIREF	  ::=  	'<' ([#x21#x23-#x3B#x3D#x3F-#x5B#x5D#x5F-#x7A#x7E-#xFFFD])* '>'
+
   	PNAME_NS	  ::=  	PN_PREFIX? ':'
   	PNAME_LN	  ::=  	PNAME_NS PN_LOCAL
   	BLANK_NODE_LABEL	  ::=  	'_:' ( PN_CHARS_U | [0-9] ) ((PN_CHARS|'.')* PN_CHARS)?
@@ -223,7 +229,13 @@ ValuesClause
   	INTEGER_NEGATIVE	  ::=  	'-' INTEGER
   	DECIMAL_NEGATIVE	  ::=  	'-' DECIMAL
   	DOUBLE_NEGATIVE	  ::=  	'-' DOUBLE
+
+  	/*
+  	Eliminated the raw production rule, in case of the ambiguity of "-" for either range or hyphen
   	EXPONENT	  ::=  	[eE] [+-]? [0-9]+
+  	*/
+
+  	EXPONENT	  ::=  	[eE] [+\-]? [0-9]+
   	STRING_LITERAL1	  ::=  	"'" ( ([^#x27#x5C#xA#xD]) | ECHAR )* "'"
   	STRING_LITERAL2	  ::=  	'"' ( ([^#x22#x5C#xA#xD]) | ECHAR )* '"'
   	STRING_LITERAL_LONG1	  ::=  	"'''" ( ( "'" | "''" )? ( [^'\] | ECHAR ) )* "'''"
@@ -241,6 +253,7 @@ ValuesClause
   	PLX	  ::=  	PERCENT | PN_LOCAL_ESC
   	PERCENT	  ::=  	'%' HEX HEX
   	HEX	  ::=  	[0-9] | [A-F] | [a-f]
-  	PN_LOCAL_ESC	  ::=  	'\' ( '_' | '~' | '.' | '-' | '!' | '$' | '&' | "'" | '(' | ')' | '*' | '+' | ',' | ';' | '=' | '/' | '?' | '#' | '@' | '%' )
 
+/*
   	*/
+  	PN_LOCAL_ESC	  ::=  	'\' ( '_' | '~' | '.' | '-' | '!' | '$' | '&' | "'" | '(' | ')' | '*' | '+' | ',' | ';' | '=' | '/' | '?' | '#' | '@' | '%' )

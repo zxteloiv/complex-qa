@@ -10,7 +10,7 @@ from trialbot.training.updater import TrainingUpdater, TestingUpdater
 from utils.root_finder import find_root
 from trialbot.utils.move_to_device import move_to_device
 from utils.trialbot_setup import setup
-from build_model import lm_npda
+from .build_model import lm_npda
 
 import datasets.cfq
 import datasets.cfq_translator
