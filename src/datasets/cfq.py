@@ -1,6 +1,6 @@
 from trialbot.training import Registry
-from .json_dataset import JsonDataset
 from trialbot.data.datasets.jsonl_dataset import JsonLDataset
+from .lark_dataset import LarkDataset
 from .index_dataset import IndexDataset
 from utils.root_finder import find_root
 import json
@@ -30,3 +30,14 @@ def cfq_mcd2():
 def cfq_mcd3():
     splitfile = join(CFQ_PATH, 'splits', 'mcd3.json')
     return cfq_filebase(splitfile)
+
+@Registry.dataset('sparql')
+def sparql_grammar(filename='sparql.bnf.lark'):
+    file = join(ROOT, 'src', 'statics', 'grammar', 'sparql.bnf.lark')
+    d = LarkDataset(file, 'queryunit')
+    return d, d, d
+
+@Registry.dataset('sparql_pattern')
+def sparql_pattern_grammar():
+    return sparql_grammar('sparql_pattern.bnf.lark')
+
