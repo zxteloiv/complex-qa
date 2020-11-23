@@ -7,8 +7,8 @@ start: rule*
 // Terminal rules are only differentiable by the name in upper cases,
 // whereas non-terminal rules can use any valid identifiers for the lhs.
 
-rule: nonterminal_symbol "::=" expr
-    | terminal_symbol "::=" expr
+rule: nonterminal_symbol "::=" expr   -> nonterminal_rule
+    | terminal_symbol "::=" expr      -> terminal_rule
 
 nonterminal_symbol: NON_PURE_UPPER_NAME
 terminal_symbol: PURE_UPPER_NAME
