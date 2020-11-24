@@ -55,3 +55,37 @@ def lm_npda(p, vocab: NSVocabulary):
 
     model = NPDAFLM(npda, p.ntdec_factor)
     return model
+
+def lm_ebnf(p, vocab: NSVocabulary):
+    from models.neural_pda.ebnf_npda import NeuralEBNF
+    from models.neural_pda.batched_stack import TensorBatchStack
+    from models.neural_pda.formal_language_model import EBNFTreeLM
+    from models.modules.stacked_rnn_cell import StackedLSTMCell
+    from models.modules.quantized_token_predictor import QuantTokenPredictor
+
+    emb_nt = nn.Embedding(vocab.get_vocab_size('nonterminal'), p.emb_sz)
+    emb_t = nn.Embedding(vocab.get_vocab_size('terminal_category'), p.emb_sz)
+
+    pda = NeuralEBNF(
+        emb_nonterminals=emb_nt,
+        emb_terminals=emb_t,
+        num_nonterminals=vocab.get_token_index('nonterminal'),
+        ebnf_expander=StackedLSTMCell(
+            input_dim=p.emb_sz * 2 + 1,
+            hidden_dim=p.hidden_dim + 1,    # quant predictor requires input hidden == embedding size
+            n_layers=p.num_expander_layer,
+            intermediate_dropout=p.dropout,
+        ),
+        state_transition=None,
+        batch_stack=TensorBatchStack(p.batch_sz, p.stack_capacity, 1 + 1),
+        predictor_nonterminals=QuantTokenPredictor(vocab.get_vocab_size('nonterminal'), p.emb_sz,
+                                                   shared_embedding=emb_nt.weight),
+        predictor_terminals=QuantTokenPredictor(vocab.get_vocab_size('terminal_category'), p.emb_sz,
+                                                shared_embedding=emb_t.weight),
+        start_token_id=vocab.get_token_index(START_SYMBOL, 'terminal_category'),
+        ebnf_entrypoint=vocab.get_token_index(p.grammar_entry, 'nonterminal'),
+        padding_token_id=0,
+    )
+
+    model = EBNFTreeLM(pda)
+    return model

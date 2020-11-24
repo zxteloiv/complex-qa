@@ -23,12 +23,12 @@ class LarkDataset(Dataset):
                 lhs = r.origin.name
                 rhs_seq = []
                 for t in r.expansion:
-                    symbol = {'token': t.name, 'exact_token': None, 'exactitude': 0}
+                    symbol = {'token': t.name, 'exact_token': None, 'fidelity': 0}
                     if t.is_term:
                         pattern = term_def_lookup[t.name]   # fatal error if t.name is not contained
-                        symbol['exactitude'] += 1
+                        symbol['fidelity'] += 1
                         if pattern.type == 'str':
-                            symbol['exactitude'] += 1
+                            symbol['fidelity'] += 1
                             exact = pattern.value
                             symbol['exact_token'] = exact.lower() if 'i' in pattern.flags else exact
                     rhs_seq.append(symbol)

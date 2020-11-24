@@ -21,7 +21,7 @@ class StackedRNNCell(torch.nn.Module):
     def get_layer_num(self):
         return len(self.layer_rnns)
 
-    def forward(self, inputs, hidden, input_aux:Optional[List] = None):
+    def forward(self, inputs, hidden: Optional[List], input_aux:Optional[List] = None):
         # hidden is a list of subhidden
         last_layer_output = inputs
 
@@ -36,7 +36,7 @@ class StackedRNNCell(torch.nn.Module):
             if i > 0:
                 last_layer_output = self._input_dropout(last_layer_output)
 
-            layer_hidden, last_layer_output = rnn(last_layer_output, hidden[i])
+            layer_hidden, last_layer_output = rnn(last_layer_output, None if hidden is None else hidden[i])
 
             updated_hiddens.append(layer_hidden)
 

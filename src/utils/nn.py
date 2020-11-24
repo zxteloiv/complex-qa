@@ -169,25 +169,26 @@ def seq_likelihood(logits: torch.FloatTensor,
                    targets: torch.LongTensor,
                    weights: torch.FloatTensor,
                    ):
-    # shape : (batch * sequence_length, num_classes)
+    # shape : (batch, ..., num_classes)
     logits_flat = logits.view(-1, logits.size(-1))
-    # shape : (batch * sequence_length, num_classes)
+    # shape : (batch, ..., num_classes)
     probs_flat = torch.nn.functional.softmax(logits_flat, dim=-1)
-    # shape : (batch * max_len, 1)
+    # shape : (batch, ..., 1)
     targets_flat = targets.view(-1, 1).long()
 
     # Contribution to the negative log likelihood only comes from the exact indices
     # of the targets, as the target distributions are one-hot. Here we use torch.gather
     # to extract the indices of the num_classes dimension which contribute to the loss.
-    # shape : (batch * sequence_length, 1)
+    # shape : (batch * ..., 1)
     likelihood_flat = torch.gather(probs_flat, dim=1, index=targets_flat)
-    # shape : (batch, sequence_length)
+    # shape : (batch, ...,)
     likelihood = likelihood_flat.view(*targets.size())
-    # shape : (batch, sequence_length)
+    # shape : (batch, ...,)
     likelihood = likelihood * weights.float()
 
     # shape : (batch_size,)
-    per_batch_loss = likelihood.sum(1) / (weights.sum(1).float() + 1e-13)
+    batch_size = targets.size()[0]
+    per_batch_loss = sum_to_batch_size(likelihood) / (sum_to_batch_size(weights).float() + 1e-13)
     return per_batch_loss
 
 
@@ -197,18 +198,11 @@ def seq_cross_ent(logits: torch.FloatTensor,
                   average: Optional[str] = "batch",
                   ):
     """
-    logits : ``torch.FloatTensor``, required.
-        A ``torch.FloatTensor`` of size (batch_size, sequence_length, num_classes)
-        which contains the unnormalized probability for each class.
-    targets : ``torch.LongTensor``, required.
-        A ``torch.LongTensor`` of size (batch, sequence_length) which contains the
-        index of the true class for each corresponding step.
-    weights : ``torch.FloatTensor``, required.
-        A ``torch.FloatTensor`` of size (batch, sequence_length)
-
-    Returns
-    -------
-    A torch.FloatTensor representing the scalar cross entropy loss.
+    :param logits: (batch_size, ..., num_classes), the logit (unnormalized probability) for each class.
+    :param targets: (batch, ...) the index of the true class for each corresponding step.
+    :param weights: (batch, ...)
+    :param average: reduction method
+    :return (batch, ) if average mode is batch or (0,) if average mode is token or None
     """
     if average not in {None, "token", "batch"}:
         raise ValueError("Got average f{average}, expected one of "
@@ -231,18 +225,22 @@ def seq_cross_ent(logits: torch.FloatTensor,
     # shape : (batch, sequence_length)
     negative_log_likelihood = negative_log_likelihood * weights.float()
 
+    batch_sz = targets.size()[0]
     if average == "batch":
         # shape : (batch_size,)
-        per_batch_loss = negative_log_likelihood.sum(1) / (weights.sum(1).float() + 1e-13)
-        num_non_empty_sequences = ((weights.sum(1) > 0).float().sum() + 1e-13)
+        per_batch_loss = sum_to_batch_size(negative_log_likelihood) / (sum_to_batch_size(weights) + 1e-13)
+        num_non_empty_sequences = ((sum_to_batch_size(weights) > 0).float().sum() + 1e-13)
         return per_batch_loss.sum() / num_non_empty_sequences
     elif average == "token":
         return negative_log_likelihood.sum() / (weights.sum().float() + 1e-13)
     else:
         # shape : (batch_size,)
-        per_batch_loss = negative_log_likelihood.sum(1) / (weights.sum(1).float() + 1e-13)
+        per_batch_loss = sum_to_batch_size(negative_log_likelihood) / (sum_to_batch_size(weights) + 1e-13)
         return per_batch_loss
 
+def sum_to_batch_size(t: torch.Tensor):
+    reducible_dims = list(range(t.ndim))[1:]
+    return t.sum(reducible_dims)
 
 def seq_masked_mean(x: torch.Tensor, mask: torch.LongTensor, dim: int = 1):
     """
