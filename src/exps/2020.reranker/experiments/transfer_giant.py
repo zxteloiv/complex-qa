@@ -101,7 +101,7 @@ def django_lf_ted():
     p.retriever_index_path = os.path.join(_ROOT, 'data', '_similarity_index', 'django_lf_ted.bin')
     return p
 
-from utils.trialbot_grid_search_helper import import_grid_search_parameters
+from trialbot.utils.grid_search_helper import import_grid_search_parameters
 import_grid_search_parameters(
     grid_conf={
         "num_inner_loops": [2, 3, 5],

@@ -1,7 +1,7 @@
 from trialbot.training import Registry
 from trialbot.data.datasets.jsonl_dataset import JsonLDataset
 from .lark_dataset import LarkDataset
-from .index_dataset import IndexDataset
+from trialbot.data.datasets.index_dataset import IndexDataset
 from utils.root_finder import find_root
 import json
 from os.path import join

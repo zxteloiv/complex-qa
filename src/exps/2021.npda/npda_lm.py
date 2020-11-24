@@ -51,7 +51,7 @@ def cfq_pattern():
 
     return p
 
-from utils.trialbot_grid_search_helper import import_grid_search_parameters
+from trialbot.utils.grid_search_helper import import_grid_search_parameters
 import_grid_search_parameters(
     grid_conf={
         "ntdec_normalize": [True, False],
