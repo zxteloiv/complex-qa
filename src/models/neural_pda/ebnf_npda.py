@@ -87,7 +87,7 @@ class NeuralEBNF(nn.Module):
         symbol_is_nt = torch.ones((batch_size,), device=device)
         self.stack.reset(batch_size, device)
         stack_bottom = torch.stack([symbol_is_nt, start], dim=-1)
-        push_mask = torch.ones((batch_size,))
+        push_mask = torch.ones((batch_size,), device=device)
         self.stack.push(stack_bottom, push_mask)
 
     def _forward_parallel(self, derivation_tree, is_nt):

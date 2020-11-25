@@ -9,7 +9,7 @@ class QuantTokenPredictor(nn.Module):
                  num_toks,
                  tok_dim,
                  output_semantics: PREDICTOR_OUTPUT_SEMANTIC = "logits",
-                 normalize_input: bool = True,
+                 normalizing_magnitude: int = 0,
                  shared_embedding: Optional[nn.Parameter] = None,
                  ):
         super().__init__()
@@ -24,7 +24,7 @@ class QuantTokenPredictor(nn.Module):
             self.weight = shared_embedding
 
         self.output_probs = output_semantics == "probs"
-        self.normalize_input = normalize_input
+        self.normalizing_magnitude = normalizing_magnitude
         self.num_toks = num_toks
         self.tok_dim = tok_dim
 
@@ -35,8 +35,8 @@ class QuantTokenPredictor(nn.Module):
         """
         assert h.size(-1) == self.tok_dim, "Quantization can only be applied on the same embedding size"
 
-        if self.normalize_input:
-            h = nn.functional.normalize(h, dim=-1)
+        if self.normalizing_magnitude > 0:
+            h = nn.functional.normalize(h, dim=-1) * self.normalizing_magnitude
 
         # h_rs: (..., 1, tok_dim)
         h_rs = h.unsqueeze(-2)

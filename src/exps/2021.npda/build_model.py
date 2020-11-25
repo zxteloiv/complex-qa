@@ -63,8 +63,18 @@ def lm_ebnf(p, vocab: NSVocabulary):
     from models.modules.stacked_rnn_cell import StackedLSTMCell
     from models.modules.quantized_token_predictor import QuantTokenPredictor
 
-    emb_nt = nn.Embedding(vocab.get_vocab_size('nonterminal'), p.emb_sz)
-    emb_t = nn.Embedding(vocab.get_vocab_size('terminal_category'), p.emb_sz)
+    emb_nt = nn.Embedding(vocab.get_vocab_size('nonterminal'), p.emb_sz, max_norm=p.nt_emb_max_norm)
+    emb_t = nn.Embedding(vocab.get_vocab_size('terminal_category'), p.emb_sz, max_norm=p.t_emb_max_norm)
+    nt_pred = QuantTokenPredictor(
+        num_toks=vocab.get_vocab_size('nonterminal'),
+        tok_dim=p.emb_sz,
+        normalizing_magnitude=p.nt_pred_norm_g,
+        shared_embedding=emb_nt.weight if p.tied_nonterminal_emb else None)
+    t_pred = QuantTokenPredictor(
+        num_toks=vocab.get_vocab_size('terminal_category'),
+        tok_dim=p.emb_sz,
+        normalizing_magnitude=p.t_pred_norm_g,
+        shared_embedding=emb_t.weight if p.tied_terminal_emb else None)
 
     pda = NeuralEBNF(
         emb_nonterminals=emb_nt,
@@ -78,10 +88,8 @@ def lm_ebnf(p, vocab: NSVocabulary):
         ),
         state_transition=None,
         batch_stack=TensorBatchStack(p.batch_sz, p.stack_capacity, 1 + 1),
-        predictor_nonterminals=QuantTokenPredictor(vocab.get_vocab_size('nonterminal'), p.emb_sz,
-                                                   shared_embedding=emb_nt.weight),
-        predictor_terminals=QuantTokenPredictor(vocab.get_vocab_size('terminal_category'), p.emb_sz,
-                                                shared_embedding=emb_t.weight),
+        predictor_nonterminals=nt_pred,
+        predictor_terminals=t_pred,
         start_token_id=vocab.get_token_index(START_SYMBOL, 'terminal_category'),
         ebnf_entrypoint=vocab.get_token_index(p.grammar_entry, 'nonterminal'),
         padding_token_id=0,

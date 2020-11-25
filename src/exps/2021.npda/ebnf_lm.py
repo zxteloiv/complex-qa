@@ -17,6 +17,7 @@ import datasets.cfq_translator
 def cfq_pattern():
     from trialbot.training.hparamset import HyperParamSet
     p = HyperParamSet.common_settings(find_root())
+    p.TRAINING_LIMIT = 1000
     p.emb_sz = 64
     p.hidden_dim = 64
     p.num_expander_layer = 2
@@ -26,6 +27,10 @@ def cfq_pattern():
 
     p.tied_nonterminal_emb = True
     p.tied_terminal_emb = True
+    p.nt_emb_max_norm = 1   # Optional[int]
+    p.t_emb_max_norm = 2
+    p.nt_pred_norm_g = 1 # normalizing magnitude, comparable to the emb max_norm
+    p.t_pred_norm_g = 2
     p.grammar_entry = 'queryunit'
     p.weight_decay = 0.2
 
@@ -44,6 +49,18 @@ class GrammarTrainingUpdater(TrainingUpdater):
         updater._optims = [optim]
         return updater
 
+class GrammarTestingUpdater(TestingUpdater):
+    def update_epoch(self):
+        model, iterator, device = self._models[0], self._iterators[0], self._device
+        model.train()
+        batch = next(iterator)
+        if iterator.is_new_epoch:
+            self.stop_epoch()
+        if device >= 0:
+            batch = move_to_device(batch, device)
+        output = model(**batch)
+        return output
+
 def main():
     args = setup(seed=2021)
     from trialbot.training import Events
@@ -61,10 +78,13 @@ def main():
     bot.add_event_handler(Events.STARTED, ext_write_info, 105, msg="-" * 50)
     bot.add_event_handler(Events.STARTED, debug_models, 100)
     bot.add_event_handler(Events.EPOCH_COMPLETED, get_metrics, 90)
+    bot.add_event_handler(Events.EPOCH_COMPLETED, ext_write_info, 100, msg='Epoch Ended')
     if not args.test:
         bot.add_event_handler(Events.EPOCH_COMPLETED, every_epoch_model_saver, 100)
         bot.add_event_handler(Events.ITERATION_COMPLETED, end_with_nan_loss, 100)
         bot.updater = GrammarTrainingUpdater.from_bot(bot)
+    else:
+        bot.updater = GrammarTestingUpdater.from_bot(bot)
     bot.run()
 
 if __name__ == '__main__':
