@@ -7,8 +7,8 @@ from trialbot.data import Translator, START_SYMBOL, END_SYMBOL, PADDING_TOKEN
 from utils.sparql_tokenizer import split_sparql
 from itertools import product
 
-@Registry.translator('cfq')
-class CFQTranslator(Translator):
+@Registry.translator('cfq_seq')
+class CFQSeq(Translator):
     def __init__(self):
         super().__init__()
 

@@ -78,7 +78,6 @@ class EBNFTreeLM(nn.Module):
         safe_t_out = tree_out * out_is_t
 
         output = {}
-        batch_sz = mask.size()[0]
         is_nt_xent = binary_cross_entropy(is_nt_prob, out_is_nt.float()) * mask
         reducible_dims = list(range(is_nt_xent.ndim)[1:])
         loss_is_nt = is_nt_xent.sum(reducible_dims) / (mask.sum(reducible_dims) + 1e-13)

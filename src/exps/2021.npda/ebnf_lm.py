@@ -7,6 +7,7 @@ from trialbot.training import TrialBot
 from trialbot.training import Registry
 from utils.root_finder import find_root
 from utils.trialbot_setup import setup
+from trialbot.utils.move_to_device import move_to_device
 from build_model import lm_ebnf
 
 import datasets.cfq
@@ -33,7 +34,7 @@ def cfq_pattern():
 from trialbot.training.updater import TrainingUpdater, TestingUpdater
 class GrammarTrainingUpdater(TrainingUpdater):
     @classmethod
-    def from_bot(cls, bot: TrialBot) -> 'CFQTrainingUpdater':
+    def from_bot(cls, bot: TrialBot) -> 'GrammarTrainingUpdater':
         updater = super().from_bot(bot)
         del updater._optims
         args, hparams, model = bot.args, bot.hparams, bot.model
@@ -59,10 +60,11 @@ def main():
     bot.add_event_handler(Events.STARTED, print_hyperparameters, 100)
     bot.add_event_handler(Events.STARTED, ext_write_info, 105, msg="-" * 50)
     bot.add_event_handler(Events.STARTED, debug_models, 100)
-    bot.add_event_handler(Events.ITERATION_COMPLETED, end_with_nan_loss, 100)
-    bot.add_event_handler(Events.EPOCH_COMPLETED, every_epoch_model_saver, 100)
     bot.add_event_handler(Events.EPOCH_COMPLETED, get_metrics, 90)
-    bot.updater = GrammarTrainingUpdater.from_bot(bot)
+    if not args.test:
+        bot.add_event_handler(Events.EPOCH_COMPLETED, every_epoch_model_saver, 100)
+        bot.add_event_handler(Events.ITERATION_COMPLETED, end_with_nan_loss, 100)
+        bot.updater = GrammarTrainingUpdater.from_bot(bot)
     bot.run()
 
 if __name__ == '__main__':

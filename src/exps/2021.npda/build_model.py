@@ -85,6 +85,7 @@ def lm_ebnf(p, vocab: NSVocabulary):
         start_token_id=vocab.get_token_index(START_SYMBOL, 'terminal_category'),
         ebnf_entrypoint=vocab.get_token_index(p.grammar_entry, 'nonterminal'),
         padding_token_id=0,
+        dropout=p.dropout,
     )
 
     model = EBNFTreeLM(pda)

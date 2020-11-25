@@ -20,6 +20,7 @@ class NeuralEBNF(nn.Module):
                  start_token_id: int,
                  ebnf_entrypoint: int,
                  padding_token_id: int = 0,
+                 dropout: float = 0.,
                  ):
         super().__init__()
         self.emb_nonterminals = emb_nonterminals
@@ -35,6 +36,7 @@ class NeuralEBNF(nn.Module):
         self.padding_id = padding_token_id
 
         self.logger = logging.getLogger(__name__)
+        self.dropout = nn.Dropout(dropout)
 
     def forward(self,
                 derivation_tree: Optional[torch.LongTensor] = None,
@@ -83,6 +85,7 @@ class NeuralEBNF(nn.Module):
             start = torch.full((batch_size,), fill_value=self.grammar_entry, device=device)
 
         symbol_is_nt = torch.ones((batch_size,), device=device)
+        self.stack.reset(batch_size, device)
         stack_bottom = torch.stack([symbol_is_nt, start], dim=-1)
         push_mask = torch.ones((batch_size,))
         self.stack.push(stack_bottom, push_mask)
@@ -150,7 +153,7 @@ class NeuralEBNF(nn.Module):
         last_is_nt = torch.full_like(last_preds, fill_value=0)
 
         # lhs_emb: (batch, emb_sz)
-        lhs_emb = self.emb_nonterminals(lhs)
+        lhs_emb = self.dropout(self.emb_nonterminals(lhs))
 
         for step in range(decoding_len):
             # step_tok: (batch,)
@@ -174,7 +177,7 @@ class NeuralEBNF(nn.Module):
             step_out_is_nt = torch.sigmoid(step_out[:, 0])
 
             # step_*_logits: (batch, #count)
-            step_out_emb = step_out[:, 1:]
+            step_out_emb = self.dropout(step_out[:, 1:])
             nt_logits = self.nt_predictor(step_out_emb)
             t_logits = self.t_predictor(step_out_emb)
 
@@ -208,5 +211,6 @@ class NeuralEBNF(nn.Module):
         step_emb_nt = self.emb_nonterminals(nt_tok_safe)
         step_emb_t = self.emb_terminals(t_tok_safe)
         step_emb = step_emb_nt * tok_is_nt + step_emb_t * tok_is_nt.logical_not()
+        step_emb = self.dropout(step_emb)
         return step_emb
 
