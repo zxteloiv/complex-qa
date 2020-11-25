@@ -65,16 +65,19 @@ def lm_ebnf(p, vocab: NSVocabulary):
 
     emb_nt = nn.Embedding(vocab.get_vocab_size('nonterminal'), p.emb_sz, max_norm=p.nt_emb_max_norm)
     emb_t = nn.Embedding(vocab.get_vocab_size('terminal_category'), p.emb_sz, max_norm=p.t_emb_max_norm)
+
     nt_pred = QuantTokenPredictor(
         num_toks=vocab.get_vocab_size('nonterminal'),
         tok_dim=p.emb_sz,
-        normalizing_magnitude=p.nt_pred_norm_g,
-        shared_embedding=emb_nt.weight if p.tied_nonterminal_emb else None)
+        shared_embedding=emb_nt.weight if p.tied_nonterminal_emb else None,
+        quant_criterion=p.nt_pred_crit,
+    )
     t_pred = QuantTokenPredictor(
         num_toks=vocab.get_vocab_size('terminal_category'),
         tok_dim=p.emb_sz,
-        normalizing_magnitude=p.t_pred_norm_g,
-        shared_embedding=emb_t.weight if p.tied_terminal_emb else None)
+        shared_embedding=emb_t.weight if p.tied_terminal_emb else None,
+        quant_criterion=p.t_pred_crit,
+    )
 
     pda = NeuralEBNF(
         emb_nonterminals=emb_nt,

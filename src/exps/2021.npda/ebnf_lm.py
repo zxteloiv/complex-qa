@@ -25,12 +25,15 @@ def cfq_pattern():
     p.batch_sz = 32
     p.stack_capacity = 100
 
+    # When using a tied embedding, the projection-based quant is conflicted with max_norm embedding,
+    # which is an inplace operation and modifies the graph.
     p.tied_nonterminal_emb = True
     p.tied_terminal_emb = True
-    p.nt_emb_max_norm = 1   # Optional[int]
-    p.t_emb_max_norm = 2
-    p.nt_pred_norm_g = 1 # normalizing magnitude, comparable to the emb max_norm
-    p.t_pred_norm_g = 2
+    p.nt_emb_max_norm = None   # Optional[int], set to None rather than 0 to disable max_norm
+    p.t_emb_max_norm = None
+    p.nt_pred_crit = "projection" # projection based or distance based
+    p.t_pred_crit = "projection"
+
     p.grammar_entry = 'queryunit'
     p.weight_decay = 0.2
 
@@ -52,7 +55,7 @@ class GrammarTrainingUpdater(TrainingUpdater):
 class GrammarTestingUpdater(TestingUpdater):
     def update_epoch(self):
         model, iterator, device = self._models[0], self._iterators[0], self._device
-        model.train()
+        model.eval()
         batch = next(iterator)
         if iterator.is_new_epoch:
             self.stop_epoch()
@@ -78,7 +81,6 @@ def main():
     bot.add_event_handler(Events.STARTED, ext_write_info, 105, msg="-" * 50)
     bot.add_event_handler(Events.STARTED, debug_models, 100)
     bot.add_event_handler(Events.EPOCH_COMPLETED, get_metrics, 90)
-    bot.add_event_handler(Events.EPOCH_COMPLETED, ext_write_info, 100, msg='Epoch Ended')
     if not args.test:
         bot.add_event_handler(Events.EPOCH_COMPLETED, every_epoch_model_saver, 100)
         bot.add_event_handler(Events.ITERATION_COMPLETED, end_with_nan_loss, 100)
