@@ -124,7 +124,7 @@ ValuesClause
 | '+' PrimaryExpression
 | '-' PrimaryExpression
 | PrimaryExpression
-  	PrimaryExpression	  ::=  	BrackettedExpression | BuiltInCall | iriOrFunction | RdfLiteral | NumericLiteral | BooleanLiteral | Var
+  	PrimaryExpression	  ::=  	BrackettedExpression | BuiltInCall | iriOrFunction | RdfLiteral | NumericLiteral | BooleanLiteral | Var | entity_pattern
   	BrackettedExpression	  ::=  	'(' Expression ')'
   	BuiltInCall	  ::=  	  Aggregate
 | 'STR' '(' Expression ')'

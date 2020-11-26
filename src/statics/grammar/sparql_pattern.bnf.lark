@@ -1,6 +1,6 @@
-// This file was automatically compiled from the W3C standard of SparQL grammar at 2020-11-23 20:48:04
-%import common.WS -> WS_1606135684
-%ignore WS_1606135684
+// This file was automatically compiled from the W3C standard of SparQL grammar at 2020-11-26 19:22:13
+%import common.WS -> WS_1606389733
+%ignore WS_1606389733
 
 queryunit: query
 query: prologue (selectquery | constructquery | describequery | askquery) valuesclause
@@ -120,7 +120,7 @@ numericexpression: additiveexpression
 additiveexpression: multiplicativeexpression ext_star_27
 multiplicativeexpression: unaryexpression ext_star_28
 unaryexpression: "!" primaryexpression | "+" primaryexpression | "-" primaryexpression | primaryexpression
-primaryexpression: brackettedexpression | builtincall | iriorfunction | rdfliteral | numericliteral | booleanliteral | var
+primaryexpression: brackettedexpression | builtincall | iriorfunction | rdfliteral | numericliteral | booleanliteral | var | entity_pattern
 brackettedexpression: "(" expression ")"
 builtincall: aggregate | "STR"i "(" expression ")" | "LANG"i "(" expression ")" | "LANGMATCHES"i "(" expression "," expression ")" | "DATATYPE"i "(" expression ")" | "BOUND"i "(" var ")" | "IRI"i "(" expression ")" | "URI"i "(" expression ")" | "BNODE"i ("(" expression ")" | NIL) | "RAND"i NIL | "ABS"i "(" expression ")" | "CEIL"i "(" expression ")" | "FLOOR"i "(" expression ")" | "ROUND"i "(" expression ")" | "CONCAT"i expressionlist | substringexpression | "STRLEN"i "(" expression ")" | strreplaceexpression | "UCASE"i "(" expression ")" | "LCASE"i "(" expression ")" | "ENCODE_FOR_URI"i "(" expression ")" | "CONTAINS"i "(" expression "," expression ")" | "STRSTARTS"i "(" expression "," expression ")" | "STRENDS"i "(" expression "," expression ")" | "STRBEFORE"i "(" expression "," expression ")" | "STRAFTER"i "(" expression "," expression ")" | "YEAR"i "(" expression ")" | "MONTH"i "(" expression ")" | "DAY"i "(" expression ")" | "HOURS"i "(" expression ")" | "MINUTES"i "(" expression ")" | "SECONDS"i "(" expression ")" | "TIMEZONE"i "(" expression ")" | "TZ"i "(" expression ")" | "NOW"i NIL | "UUID"i NIL | "STRUUID"i NIL | "MD5"i "(" expression ")" | "SHA1"i "(" expression ")" | "SHA256"i "(" expression ")" | "SHA384"i "(" expression ")" | "SHA512"i "(" expression ")" | "COALESCE"i expressionlist | "IF"i "(" expression "," expression "," expression ")" | "STRLANG"i "(" expression "," expression ")" | "STRDT"i "(" expression "," expression ")" | "sameTerm"i "(" expression "," expression ")" | "isIRI"i "(" expression ")" | "isURI"i "(" expression ")" | "isBLANK"i "(" expression ")" | "isLITERAL"i "(" expression ")" | "isNUMERIC"i "(" expression ")" | regexexpression | existsfunc | notexistsfunc
 regexexpression: "REGEX"i "(" expression "," expression ("," expression)? ")"

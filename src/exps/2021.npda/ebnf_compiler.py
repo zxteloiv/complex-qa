@@ -244,24 +244,51 @@ def test():
     sparql_lark = os.path.join(find_root(), 'src', 'statics', 'grammar', 'sparql_pattern.bnf.lark')
     sparql_parser = lark.Lark(open(sparql_lark), start="queryunit", keep_all_tokens=True,)
 
+    # sparql = r"""
+    #     SELECT count(*) WHERE {
+    #     ?x0 ns:film.actor.film/ns:film.performance.character ns:m.011n3bs6 .
+    #     ?x0 ns:film.editor.film ns:m.0_mhbxp .
+    #     ?x0 ns:film.producer.film|ns:film.production_company.films ns:m.0_mhbxp .
+    #     ?x0 ns:people.person.gender ns:m.02zsn
+    #     }
+    # """
     sparql = r"""
-        SELECT count(*) WHERE {
-        ?x0 ns:film.actor.film/ns:film.performance.character ns:m.011n3bs6 .
-        ?x0 ns:film.editor.film ns:m.0_mhbxp .
-        ?x0 ns:film.producer.film|ns:film.production_company.films ns:m.0_mhbxp .
-        ?x0 ns:people.person.gender ns:m.02zsn
-        }
+    SELECT DISTINCT ?x0 WHERE {
+    ?x0 a ns:film.editor .
+    ?x0 ns:people.person.spouse_s/ns:people.marriage.spouse|ns:fictional_universe.fictional_character.married_to/ns:fictional_universe.marriage_of_fictional_characters.spouses ns:m.079z_m .
+    ?x0 ns:people.person.spouse_s/ns:people.marriage.spouse|ns:fictional_universe.fictional_character.married_to/ns:fictional_universe.marriage_of_fictional_characters.spouses ns:m.0jwdyv3 .
+    FILTER ( ?x0 != ns:m.079z_m ) .
+    FILTER ( ?x0 != ns:m.0jwdyv3 )
+    }
+    """
+    sparql = r"""
+    SELECT DISTINCT ?x0 WHERE {
+    ?x0 P0 M1 .
+    ?x0 P0 M2 .
+    ?x0 a M0 .
+    FILTER ( ?x0 != M1 ) .
+    FILTER ( ?x0 != M2 )
+    }
     """
     print(pretty_repr_tree(sparql_parser.parse(sparql)))
-    sparql = r"""
-        SELECT count(*) WHERE {
-        ?x0 P0 M0 ;
-            P1 M0 .
-        ?x0 P2 M1 .
-        ?x0 P3 M2 .
-        }
-    """
-    print(pretty_repr_tree(sparql_parser.parse(sparql), indent_str='  '))
+    # sparql = r"""
+    #     SELECT count(*) WHERE {
+    #     ?x0 ns:film.actor.film/ns:film.performance.character M1 .
+    #     ?x0 ns:film.editor.film M0 .
+    #     ?x0 ns:film.producer.film|ns:film.production_company.films M0 .
+    #     ?x0 ns:people.person.gender ns:m.02zsn
+    #     }
+    # """
+    # print(pretty_repr_tree(sparql_parser.parse(sparql), indent_str='  '))
+    # sparql = r"""
+    #     SELECT count(*) WHERE {
+    #     ?x0 P0 M0 ;
+    #         P1 M0 .
+    #     ?x0 P2 M1 .
+    #     ?x0 P3 M2 .
+    #     }
+    # """
+    # print(pretty_repr_tree(sparql_parser.parse(sparql), indent_str='  '))
 
 def test2():
     ebnf = """
