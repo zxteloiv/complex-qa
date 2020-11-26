@@ -1,8 +1,9 @@
 from trialbot.data import Dataset
 import lark
-from typing import List
+import logging
+from typing import List, Union
 
-class LarkDataset(Dataset):
+class LarkGrammarDataset(Dataset):
     def __init__(self, grammar_filename, startpoint, ):
         self.filename = grammar_filename
         self.startpoint = startpoint
@@ -42,3 +43,33 @@ class LarkDataset(Dataset):
     def __len__(self):
         self.read_data()
         return len(self.data)
+
+class LarkParserDatasetWrapper(Dataset):
+    def __init__(self, grammar_filename, startpoint, parse_keys: Union[str, List[str], None], dataset: Dataset):
+        super().__init__()
+        self.parser = lark.Lark(open(grammar_filename), start=startpoint)
+        self._trees = {}
+        self.dataset = dataset
+        self.keys = parse_keys
+        self.logger = logging.getLogger(self.__class__.__name__)
+
+    def __len__(self):
+        return len(self.dataset)
+
+    def get_example(self, i: int):
+        example: dict = self.dataset.get_example(i)
+        tree = self._trees[i] if i in self._trees else self._parse(example)
+        example.update(tree)
+        return example
+
+    def _parse(self, example):
+        parse_tree = {}
+        for key in self.keys:
+            try:
+                t = self.parser.parse(example[key])
+            except:
+                self.logger.warning(f'Failed to parse the key {key} for the example {str(example)}')
+                t = None
+            parse_tree[key + '_tree'] = t
+        return parse_tree
+
