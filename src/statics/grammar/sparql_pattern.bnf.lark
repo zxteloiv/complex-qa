@@ -1,6 +1,6 @@
-// This file was automatically compiled from the W3C standard of SparQL grammar at 2020-11-26 19:22:13
-%import common.WS -> WS_1606389733
-%ignore WS_1606389733
+// This file was automatically compiled from the W3C standard of SparQL grammar at 2020-11-27 18:19:04
+%import common.WS -> WS_1606472344
+%ignore WS_1606472344
 
 queryunit: query
 query: prologue (selectquery | constructquery | describequery | askquery) valuesclause
@@ -141,8 +141,8 @@ iri: IRIREF | prefixedname
 prefixedname: PNAME_LN | PNAME_NS
 blanknode: BLANK_NODE_LABEL | ANON
 var_pattern: X0 | X1 | X2 | X3 | X4 | X5
-predicate_pattern: "P0"i | "P1"i | "P2"i | "P3"i | "P4"i | "P5"i | "P6"i | "P7"i | "P8"i | "P9"i
-entity_pattern: "M0"i | "M1"i | "M2"i | "M3"i | "M4"i | "M5"i | "M6"i | "M7"i | "M8"i | "M9"i
+predicate_pattern: "P0"i | "P1"i | "P2"i | "P3"i | "P4"i | "P5"i | "P6"i | "P7"i | "P8"i | "P24"i | "P31"i
+entity_pattern: "M0"i | "M1"i | "M2"i | "M3"i | "M4"i | "M5"i | "M6"i | "M7"i | "M8"i | "M9"i | "M10"i | "M39"i | "M150"i
 X0: "?x0"
 X1: "?x1"
 X2: "?x2"

@@ -206,8 +206,8 @@ ValuesClause
   	BlankNode	  ::=  	BLANK_NODE_LABEL | ANON
 
     var_pattern 	::= X0 | X1 | X2 | X3 | X4 | X5
-  	predicate_pattern ::= 'P0' | 'P1' | 'P2' | 'P3' | 'P4' | 'P5' | 'P6' | 'P7' | 'P8' | 'P9'
-  	entity_pattern ::= 'M0' | 'M1' | 'M2' | 'M3' | 'M4' | 'M5' | 'M6' | 'M7' | 'M8' | 'M9'
+  	predicate_pattern ::= 'P0' | 'P1' | 'P2' | 'P3' | 'P4' | 'P5' | 'P6' | 'P7' | 'P8' | 'P24' | 'P31'
+  	entity_pattern ::= 'M0' | 'M1' | 'M2' | 'M3' | 'M4' | 'M5' | 'M6' | 'M7' | 'M8' | 'M9' | 'M10' | 'M39' | 'M150'
 
 /* -------------------------------------------------- *
  * the terminal production rules

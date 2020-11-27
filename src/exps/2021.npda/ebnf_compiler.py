@@ -240,6 +240,24 @@ def pretty_repr_tree(tree: lark.Tree, indent_str='    '):
 
     return ''.join(_pretty(tree, 0, indent_str))
 
+def pretty_derivation_tree(tree: lark.Tree):
+    rules = []
+    for subtree in tree.iter_subtrees_topdown():
+        lhs = subtree.data
+        rhs = []
+        for s in subtree.children:
+            if isinstance(s, lark.Tree):
+                rhs.append(s.data)
+            elif isinstance(s, lark.Token):
+                rhs.append(f"{s.type}({s.value})")
+            else:
+                raise ValueError(f"Symbol {s} not recognized")
+
+        rhs = ' '.join(rhs)
+
+        rules.append(f"{lhs} --> {rhs}")
+    return rules
+
 def test():
     sparql_lark = os.path.join(find_root(), 'src', 'statics', 'grammar', 'sparql_pattern.bnf.lark')
     sparql_parser = lark.Lark(open(sparql_lark), start="queryunit", keep_all_tokens=True,)
@@ -252,15 +270,15 @@ def test():
     #     ?x0 ns:people.person.gender ns:m.02zsn
     #     }
     # """
-    sparql = r"""
-    SELECT DISTINCT ?x0 WHERE {
-    ?x0 a ns:film.editor .
-    ?x0 ns:people.person.spouse_s/ns:people.marriage.spouse|ns:fictional_universe.fictional_character.married_to/ns:fictional_universe.marriage_of_fictional_characters.spouses ns:m.079z_m .
-    ?x0 ns:people.person.spouse_s/ns:people.marriage.spouse|ns:fictional_universe.fictional_character.married_to/ns:fictional_universe.marriage_of_fictional_characters.spouses ns:m.0jwdyv3 .
-    FILTER ( ?x0 != ns:m.079z_m ) .
-    FILTER ( ?x0 != ns:m.0jwdyv3 )
-    }
-    """
+    # sparql = r"""
+    # SELECT DISTINCT ?x0 WHERE {
+    # ?x0 a ns:film.editor .
+    # ?x0 ns:people.person.spouse_s/ns:people.marriage.spouse|ns:fictional_universe.fictional_character.married_to/ns:fictional_universe.marriage_of_fictional_characters.spouses ns:m.079z_m .
+    # ?x0 ns:people.person.spouse_s/ns:people.marriage.spouse|ns:fictional_universe.fictional_character.married_to/ns:fictional_universe.marriage_of_fictional_characters.spouses ns:m.0jwdyv3 .
+    # FILTER ( ?x0 != ns:m.079z_m ) .
+    # FILTER ( ?x0 != ns:m.0jwdyv3 )
+    # }
+    # """
     sparql = r"""
     SELECT DISTINCT ?x0 WHERE {
     ?x0 P0 M1 .
@@ -270,7 +288,10 @@ def test():
     FILTER ( ?x0 != M2 )
     }
     """
-    print(pretty_repr_tree(sparql_parser.parse(sparql)))
+    tree = sparql_parser.parse(sparql)
+    print(pretty_repr_tree(tree))
+    print('\n'.join(pretty_derivation_tree(tree)))
+
     # sparql = r"""
     #     SELECT count(*) WHERE {
     #     ?x0 ns:film.actor.film/ns:film.performance.character M1 .
