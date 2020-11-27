@@ -14,12 +14,21 @@ parser: lark.Lark = None
 def main(args):
     import datasets.cfq
     cfq = datasets.cfq.complete_cfq()
-    print(len(cfq))
+    print("total", len(cfq))
 
-    pool = multiprocessing.Pool(args.workers, initializer=prepare, initargs=(args.grammar, args.entry))
-
-    extended_dataset = list(pool.starmap(parse, enumerate(cfq), chunksize=args.chunk))
     import pickle
+    if args.workers > 1:
+        pool = multiprocessing.Pool(args.workers, initializer=prepare, initargs=(args.grammar, args.entry))
+        extended_dataset = list(pool.starmap(parse, enumerate(cfq), chunksize=args.chunk))
+    else:
+        extended_dataset = list()
+        prepare(args.grammar, args.entry)
+        for i, data in enumerate(cfq):
+            data = parse(i, data)
+            if i % 1000 == 0:
+                print(i, "...", flush=True)
+            extended_dataset.append(data)
+
     pickle.dump(extended_dataset, open(args.output, 'wb'))
 
 def prepare(grammar_filename, start):
