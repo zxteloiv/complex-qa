@@ -6,6 +6,8 @@ from trialbot.training import Registry
 from trialbot.data import Translator, START_SYMBOL, END_SYMBOL, PADDING_TOKEN
 from utils.sparql_tokenizer import split_sparql
 from itertools import product
+import lark
+
 
 @Registry.translator('cfq_seq')
 class CFQSeq(Translator):
@@ -66,48 +68,40 @@ def list_of_dict_to_dict_of_list(ld: List[Mapping[str, Any]]) -> Mapping[str, Li
             list_by_keys[k].append(v)
     return list_by_keys
 
+PARSE_TREE_NS = (NS_NT, NS_T, NS_ET) = ('nonterminal', 'terminal_category', 'terminal')
+
 @Registry.translator('lark')
 class LarkTranslator(Translator):
-    def __init__(self):
-        super().__init__()
-        ns_nt, ns_t, ns_et = 'nonterminal', 'terminal_category', 'exact_terminal'
-        self.ns_nt, self.ns_t, self.ns_et = ns_nt, ns_t, ns_et
-
     def _read_s(self, symbol):
         return symbol['fidelity'], symbol['token'], symbol['exact_token']
 
     def generate_namespace_tokens(self, example) -> Generator[Tuple[str, str], None, None]:
-        ns_nt, ns_t, ns_et = self.ns_nt, self.ns_t, self.ns_et
         lhs, rhs_seq = example
-        yield ns_nt, lhs
-        yield from product([ns_t], [START_SYMBOL, END_SYMBOL])
+        yield from product([NS_NT], [lhs, START_SYMBOL, END_SYMBOL])
         for symbol in rhs_seq:
-            exactitude, token, exact_token = self._read_s(symbol)
+            exactitude, token, _ = self._read_s(symbol)
             if exactitude > 0:
-                yield ns_t, token
-                if exactitude == 2:
-                    yield ns_et, exact_token
+                yield NS_T, token
             else:
-                yield ns_nt, token
+                yield NS_NT, token
 
     def to_tensor(self, example) -> Mapping[str, torch.Tensor]:
-        ns_nt, ns_t, ns_et = self.ns_nt, self.ns_t, self.ns_et
         lhs, rhs_seq = example
-        get_tokid = self.vocab.get_token_index
-        # start and end symbols belong to terminal category namespace
-        rhs_fi = [1] + [s['fidelity'] for s in rhs_seq] + [1]
-        d_seq = [get_tokid(lhs, ns_nt), get_tokid(START_SYMBOL, ns_t)]
-        d_seq += [get_tokid(token, ns_nt if tofi == 0 else ns_t) for tofi, token, _ in map(self._read_s, rhs_seq)]
-        d_seq += [get_tokid(END_SYMBOL, ns_t)]
+        tokid = self.vocab.get_token_index
+        # start and end symbols are nonterminals
+        rhs_fi = [0] + [s['fidelity'] for s in rhs_seq] + [0]
+        symbols = [tokid(s, NS_NT) for s in (lhs, START_SYMBOL)]
+        symbols += [tokid(token, NS_NT if tofi == 0 else NS_T) for tofi, token, _ in map(self._read_s, rhs_seq)]
+        symbols += [tokid(END_SYMBOL, NS_NT)]
 
-        tensor_derivation_seq = torch.tensor(d_seq)
+        tensor_derivation_seq = torch.tensor(symbols)
         tensor_fidelity = torch.tensor(rhs_fi)
         return {'derivation_tree': tensor_derivation_seq, 'token_fidelity': tensor_fidelity}
 
     def batch_tensor(self, tensors: List[Mapping[str, torch.Tensor]]) -> Mapping[str, torch.Tensor]:
         assert len(tensors) > 0
         list_by_keys = list_of_dict_to_dict_of_list(tensors)
-        pad_id = self.vocab.get_token_index(PADDING_TOKEN, self.ns_t)
+        pad_id = self.vocab.get_token_index(PADDING_TOKEN, NS_NT)
         pad_seq_b = lambda k: pad_sequence(list_by_keys[k], batch_first=True, padding_value=pad_id)
         batch = {
             "derivation_tree": pad_seq_b("derivation_tree").unsqueeze(1),

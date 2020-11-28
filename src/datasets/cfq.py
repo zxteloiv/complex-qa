@@ -12,26 +12,17 @@ CFQ_PATH = join(ROOT, 'data', 'cfq')
 GRAMMAR_PATH = join(ROOT, 'src', 'statics', 'grammar')
 
 def cfq_filebase(split_filename):
-    store = JsonLDataset(join(CFQ_PATH, 'dataset_slim.jsonl'))
+    store = JsonLDataset(join(CFQ_PATH, 'dataset_slim.jsonl.gz'))
     all_idx = json.load(open(split_filename))
     split_idx = list(map(all_idx.get, ['trainIdxs', 'devIdxs', 'testIdxs']))
     return tuple(IndexDataset(store, ds) for ds in split_idx)
 
 def cfq_treebase(split_filename, grammar_file: str, keys):
-    store = JsonLDataset(join(CFQ_PATH, 'dataset_slim.jsonl'))
+    store = JsonLDataset(join(CFQ_PATH, 'dataset_slim.jsonl.gz'))
     all_idx = json.load(open(split_filename))
     split_idx = list(map(all_idx.get, ['trainIdxs', 'devIdxs', 'testIdxs']))
     get_parse_tree_dataset = lambda d: LarkParserDatasetWrapper(grammar_file, 'queryunit', keys, d)
     return tuple(get_parse_tree_dataset(IndexDataset(store, ds)) for ds in split_idx)
-
-class PatchedJsonLDataset(JsonLDataset):
-    def _read_data(self):
-        import trialbot.utils.file_reader as reader_utils
-        if self._data is None:
-            self._data = list(line.rstrip('\r\n') if isinstance(line, str) else line.decode().rstrip('\r\n') for line in reader_utils.open_file(self.filename))
-
-def complete_cfq():
-    return PatchedJsonLDataset(join(CFQ_PATH, 'dataset_slim.jsonl.gz'))
 
 @Registry.dataset()
 def cfq_mcd1():

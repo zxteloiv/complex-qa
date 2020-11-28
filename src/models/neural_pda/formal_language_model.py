@@ -70,7 +70,7 @@ class EBNFTreeLM(nn.Module):
 
         # padding is a terminal, padding_id for a non-terminal place is meaningless by convention
         # mask: (batch, derivation, rhs_seq - 1), mask is 1 for any non-padded token.
-        mask = ((tree_out == self.ebnf_pda.padding_id) * out_is_t).logical_not()
+        mask = ((tree_out == self.ebnf_pda.padding_id) * out_is_nt).logical_not()
         is_nt_prob, nt_logits, t_logits = self.ebnf_pda(tree_inp, inp_is_nt, parallel_mode=True)
 
         # gold token id is set to 0 if the position doesn't match the correct symbol type
