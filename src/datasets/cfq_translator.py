@@ -113,7 +113,7 @@ class LarkTranslator(Translator):
         }
         return batch
 
-class CFQPatternTree(Translator):
+class _CFQTreeLM(Translator):
     def __init__(self, tree_key: str):
         super().__init__()
         self.tree_key = tree_key
@@ -122,7 +122,7 @@ class CFQPatternTree(Translator):
         tree: lark.Tree = example.get(self.tree_key)
         for subtree in tree.iter_subtrees_topdown():
             yield NS_NT, subtree.data
-            yield from product([NS_T], [START_SYMBOL, END_SYMBOL])
+            yield from product([NS_NT], [START_SYMBOL, END_SYMBOL])
             for c in subtree.children:
                 if isinstance(c, lark.Token):
                     yield NS_T, c.type
@@ -137,10 +137,12 @@ class CFQPatternTree(Translator):
         for subtree in tree.iter_subtrees_topdown():
             lhs = tokid(subtree.data, NS_NT)
             rhs = [tokid(s.data, NS_NT) if isinstance(s, Tree) else tokid(s.type, NS_T) for s in subtree.children]
-            fidelity = [0 if isinstance(s, lark.Tree) else 1 for s in subtree.children]
-            rule = [lhs] + [tokid(START_SYMBOL, NS_T)] + rhs + [tokid(END_SYMBOL, NS_T)]
+            fidelity = [NS_NT_FI if isinstance(s, Tree) else NS_T_FI for s in subtree.children]
+            # the fidelity vector MUST NOT contain the fidelity of LHS, which is always NS_NT_FI
+            rule = [lhs] + [tokid(START_SYMBOL, NS_NT)] + rhs + [tokid(END_SYMBOL, NS_NT)]
+            rule_fi = [NS_NT_FI] + fidelity + [NS_NT_FI]
             derivation_tree.append(rule)
-            token_fidelity.append([0] + [1] + fidelity + [1])
+            token_fidelity.append(rule_fi)
         return {"derivation_tree": derivation_tree, "token_fidelity": token_fidelity}
 
     def batch_tensor(self, tensors: List[Mapping[str, torch.Tensor]]) -> Mapping[str, torch.Tensor]:
@@ -150,17 +152,53 @@ class CFQPatternTree(Translator):
         max_derivation_num = max(len(instance) for instance in tree_list)
         max_symbol_num = max(len(rule) for instance in tree_list for rule in instance)
 
-        padding_rule = [0] * max_symbol_num
+        pad_id = self.vocab.get_token_index(PADDING_TOKEN, NS_NT)
+        empty_rule = [pad_id] * max_symbol_num
+        empty_fidelity = [NS_NT_FI] * (max_symbol_num - 1)
 
-        for i, instance in enumerate(tree_list):
-            if len(instance) < max_derivation_num:
-                instance.extend([[0] * max_symbol_num] for _ in range(max_derivation_num - len(instance)))
-                tofi_list[i].append([0] * (max_symbol_num - 1))
+        tree_batch = []
+        fidelity_batch = []
+        for tree, tree_fi in zip(tree_list, tofi_list):
+            if len(tree) < max_derivation_num:
+                tree.extend(empty_rule for _ in range(max_derivation_num - len(tree)))
+                tree_fi.extend(empty_fidelity for _ in range(max_derivation_num - len(tree_fi)))
 
-            for j, rule in enumerate(instance):
+            derivations = []
+            derivations_fidelity = []
+            for rule, rule_fi in zip(tree, tree_fi):
                 if len(rule) < max_symbol_num:
-                    rule.extend(0 for _ in range(max_symbol_num - len(rule)))
-                    tofi_list[i][j].extend(0 for _ in range(max_symbol_num - len(rule)))
+                    rule.extend(pad_id for _ in range(len(empty_rule) - len(rule)))
+                    rule_fi.extend(NS_NT_FI for _ in range(len(empty_fidelity) - len(rule_fi)))
+                derivations.append(torch.tensor(rule))
+                derivations_fidelity.append(torch.tensor(rule_fi))
 
-        tree_batch = torch.tensor(tree_list)
+            # derivations: (max_derivation, max_symbol), after stacking
+            # derivations_fidelity: (max_derivation, max_symbol - 1), after stacking
+            tree_batch.append(torch.stack(derivations))
+            fidelity_batch.append(torch.stack(derivations_fidelity))
 
+        # tree_batch: (batch, max_derivation, max_symbol)
+        # fidelity_batch: (batch, max_derivation, max_symbol - 1)
+        tree_batch = torch.stack(tree_batch)
+        fidelity_batch = torch.stack(fidelity_batch)
+
+        batch = {
+            "derivation_tree": tree_batch,
+            "token_fidelity": fidelity_batch,
+        }
+        return batch
+
+@Registry.translator('cfq_pattern_tree')
+class CFQPatternTree(_CFQTreeLM):
+    def __init__(self):
+        super().__init__('sparqlPattern_tree')
+
+@Registry.translator('cfq_mod_tree')
+class CFQModTree(_CFQTreeLM):
+    def __init__(self):
+        super().__init__('sparqlPatternModEntities_tree')
+
+@Registry.translator('cfq_complete_tree')
+class CFQCompleteTree(_CFQTreeLM):
+    def __init__(self):
+        super().__init__('sparql_tree')

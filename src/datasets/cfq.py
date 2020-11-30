@@ -2,6 +2,7 @@ from typing import Optional
 from trialbot.training import Registry
 from trialbot.data.datasets.jsonl_dataset import JsonLDataset
 from .lark_dataset import LarkGrammarDataset, LarkParserDatasetWrapper
+from .pickle_dataset import PickleDataset
 from trialbot.data.datasets.index_dataset import IndexDataset
 from utils.root_finder import find_root
 import json
@@ -24,10 +25,17 @@ def cfq_treebase(split_filename, grammar_file: str, keys):
     get_parse_tree_dataset = lambda d: LarkParserDatasetWrapper(grammar_file, 'queryunit', keys, d)
     return tuple(get_parse_tree_dataset(IndexDataset(store, ds)) for ds in split_idx)
 
+def cfq_preparsed_treebase(split_filename):
+    import lark
+    store = PickleDataset(join(CFQ_PATH, 'parsed_cfq.pkl'), ('localhost', 6379, 0), 'cfq_parse_')
+    all_idx = json.load(open(split_filename))
+    split_idx = map(all_idx.get, ['trainIdxs', 'devIdxs', 'testIdxs'])
+    return tuple(IndexDataset(store, ds) for ds in split_idx)
+
 @Registry.dataset()
 def cfq_mcd1():
     splitfile = join(CFQ_PATH, 'splits', 'mcd1.json')
-    return cfq_filebase(splitfile)
+    return cfq_preparsed_treebase(splitfile)
 
 @Registry.dataset()
 def cfq_mcd1_tree():
