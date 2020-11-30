@@ -68,7 +68,9 @@ def list_of_dict_to_dict_of_list(ld: List[Mapping[str, Any]]) -> Mapping[str, Li
             list_by_keys[k].append(v)
     return list_by_keys
 
+# namespaces definition and the corresponding fidelity
 PARSE_TREE_NS = (NS_NT, NS_T, NS_ET) = ('nonterminal', 'terminal_category', 'terminal')
+NS_FI = (NS_NT_FI, NS_T_FI, NS_ET_FI) = (0, 1, 2)
 
 @Registry.translator('lark')
 class LarkTranslator(Translator):
@@ -89,7 +91,7 @@ class LarkTranslator(Translator):
         lhs, rhs_seq = example
         tokid = self.vocab.get_token_index
         # start and end symbols are nonterminals
-        rhs_fi = [0] + [s['fidelity'] for s in rhs_seq] + [0]
+        rhs_fi = [NS_NT_FI] + [s['fidelity'] for s in rhs_seq] + [NS_NT_FI]
         symbols = [tokid(s, NS_NT) for s in (lhs, START_SYMBOL)]
         symbols += [tokid(token, NS_NT if tofi == 0 else NS_T) for tofi, token, _ in map(self._read_s, rhs_seq)]
         symbols += [tokid(END_SYMBOL, NS_NT)]
@@ -101,11 +103,13 @@ class LarkTranslator(Translator):
     def batch_tensor(self, tensors: List[Mapping[str, torch.Tensor]]) -> Mapping[str, torch.Tensor]:
         assert len(tensors) > 0
         list_by_keys = list_of_dict_to_dict_of_list(tensors)
-        pad_id = self.vocab.get_token_index(PADDING_TOKEN, NS_NT)
-        pad_seq_b = lambda k: pad_sequence(list_by_keys[k], batch_first=True, padding_value=pad_id)
+
+        # both seq is actually padded by 0, simultaneously indicating the PAD_TOK of the NS_NT namespace.
+        token_pad_id = self.vocab.get_token_index(PADDING_TOKEN, NS_NT)
+        pad_seq_b = lambda k, pad_id: pad_sequence(list_by_keys[k], batch_first=True, padding_value=pad_id)
         batch = {
-            "derivation_tree": pad_seq_b("derivation_tree").unsqueeze(1),
-            "token_fidelity": pad_seq_b("token_fidelity").unsqueeze(1),
+            "derivation_tree": pad_seq_b("derivation_tree", token_pad_id).unsqueeze(1),
+            "token_fidelity": pad_seq_b("token_fidelity", NS_NT_FI).unsqueeze(1),
         }
         return batch
 

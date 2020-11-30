@@ -19,7 +19,6 @@ class NeuralEBNF(nn.Module):
                  predictor_terminals,
                  start_token_id: int,
                  ebnf_entrypoint: int,
-                 padding_token_id: int = 0,
                  dropout: float = 0.,
                  ):
         super().__init__()
@@ -33,7 +32,6 @@ class NeuralEBNF(nn.Module):
         self.t_predictor = predictor_terminals
         self.start_id = start_token_id
         self.grammar_entry = ebnf_entrypoint
-        self.padding_id = padding_token_id
 
         self.logger = logging.getLogger(__name__)
         self.dropout = nn.Dropout(dropout)

@@ -96,9 +96,8 @@ def lm_ebnf(p, vocab: NSVocabulary):
         predictor_terminals=t_pred,
         start_token_id=vocab.get_token_index(START_SYMBOL, ns_nt),
         ebnf_entrypoint=vocab.get_token_index(p.grammar_entry, ns_nt),
-        padding_token_id=vocab.get_token_index(PADDING_TOKEN, ns_nt),
         dropout=p.dropout,
     )
 
-    model = EBNFTreeLM(pda)
+    model = EBNFTreeLM(pda, tok_pad_id=vocab.get_token_index(PADDING_TOKEN, ns_nt), nt_fi=p.ns_fi[0])
     return model

@@ -49,10 +49,12 @@ class NPDAFLM(nn.Module):
 
 
 class EBNFTreeLM(nn.Module):
-    def __init__(self, ebnf_npda: NeuralEBNF):
+    def __init__(self, ebnf_npda: NeuralEBNF, tok_pad_id: int, nt_fi: int):
         super().__init__()
         self.ppl = Perplexity()
         self.ebnf_pda = ebnf_npda
+        self.tok_pad = tok_pad_id
+        self.nt_fi = nt_fi
 
     def forward(self, derivation_tree: torch.LongTensor, token_fidelity: torch.LongTensor):
         """
@@ -64,13 +66,13 @@ class EBNFTreeLM(nn.Module):
         tree_out = derivation_tree[:, :, 2:]    # excluding LHS and <RuleGo>
 
         # token_fidelity does not come with an indicator for LHS
-        inp_is_nt = token_fidelity[:, :, :-1] == 0   # excluding <RuleEnd>
-        out_is_nt = token_fidelity[:, :, 1:] == 0     # excluding <RuleGo>
+        inp_is_nt = token_fidelity[:, :, :-1] == self.nt_fi # excluding <RuleEnd>
+        out_is_nt = token_fidelity[:, :, 1:] == self.nt_fi  # excluding <RuleGo>
         out_is_t = out_is_nt.logical_not()
 
         # padding is a terminal, padding_id for a non-terminal place is meaningless by convention
         # mask: (batch, derivation, rhs_seq - 1), mask is 1 for any non-padded token.
-        mask = ((tree_out == self.ebnf_pda.padding_id) * out_is_nt).logical_not()
+        mask = ((tree_out == self.tok_pad) * out_is_nt).logical_not()
         is_nt_prob, nt_logits, t_logits = self.ebnf_pda(tree_inp, inp_is_nt, parallel_mode=True)
 
         # gold token id is set to 0 if the position doesn't match the correct symbol type

@@ -18,6 +18,7 @@ def cfq_pattern():
     from trialbot.training.hparamset import HyperParamSet
     p = HyperParamSet.common_settings(find_root())
     p.ns = datasets.cfq_translator.PARSE_TREE_NS
+    p.ns_fi = datasets.cfq_translator.NS_FI
     p.NS_VOCAB_KWARGS = {"non_padded_namespaces": p.ns[1:]}
     p.TRAINING_LIMIT = 1000
     p.emb_sz = 64
