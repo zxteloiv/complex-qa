@@ -108,3 +108,55 @@ class LarkTranslator(Translator):
             "token_fidelity": pad_seq_b("token_fidelity").unsqueeze(1),
         }
         return batch
+
+class CFQPatternTree(Translator):
+    def __init__(self, tree_key: str):
+        super().__init__()
+        self.tree_key = tree_key
+
+    def generate_namespace_tokens(self, example) -> Generator[Tuple[str, str], None, None]:
+        tree: lark.Tree = example.get(self.tree_key)
+        for subtree in tree.iter_subtrees_topdown():
+            yield NS_NT, subtree.data
+            yield from product([NS_T], [START_SYMBOL, END_SYMBOL])
+            for c in subtree.children:
+                if isinstance(c, lark.Token):
+                    yield NS_T, c.type
+                    yield NS_ET, c.value
+
+    def to_tensor(self, example):
+        Tree, Token = lark.Tree, lark.Token
+        tree: Tree = example.get(self.tree_key)
+        derivation_tree: List[List[int]] = []
+        token_fidelity: List[List[int]] = []
+        tokid = self.vocab.get_token_index
+        for subtree in tree.iter_subtrees_topdown():
+            lhs = tokid(subtree.data, NS_NT)
+            rhs = [tokid(s.data, NS_NT) if isinstance(s, Tree) else tokid(s.type, NS_T) for s in subtree.children]
+            fidelity = [0 if isinstance(s, lark.Tree) else 1 for s in subtree.children]
+            rule = [lhs] + [tokid(START_SYMBOL, NS_T)] + rhs + [tokid(END_SYMBOL, NS_T)]
+            derivation_tree.append(rule)
+            token_fidelity.append([0] + [1] + fidelity + [1])
+        return {"derivation_tree": derivation_tree, "token_fidelity": token_fidelity}
+
+    def batch_tensor(self, tensors: List[Mapping[str, torch.Tensor]]) -> Mapping[str, torch.Tensor]:
+        list_by_keys = list_of_dict_to_dict_of_list(tensors)
+        tree_list: List[List[List[int]]] = list_by_keys['derivation_tree']
+        tofi_list: List[List[List[int]]] = list_by_keys['token_fidelity']
+        max_derivation_num = max(len(instance) for instance in tree_list)
+        max_symbol_num = max(len(rule) for instance in tree_list for rule in instance)
+
+        padding_rule = [0] * max_symbol_num
+
+        for i, instance in enumerate(tree_list):
+            if len(instance) < max_derivation_num:
+                instance.extend([[0] * max_symbol_num] for _ in range(max_derivation_num - len(instance)))
+                tofi_list[i].append([0] * (max_symbol_num - 1))
+
+            for j, rule in enumerate(instance):
+                if len(rule) < max_symbol_num:
+                    rule.extend(0 for _ in range(max_symbol_num - len(rule)))
+                    tofi_list[i][j].extend(0 for _ in range(max_symbol_num - len(rule)))
+
+        tree_batch = torch.tensor(tree_list)
+

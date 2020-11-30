@@ -38,6 +38,7 @@ def cfq_mcd1_tree():
 @Registry.dataset('sparql')
 def sparql_grammar(filename='sparql.bnf.lark'):
     file = join(GRAMMAR_PATH, filename)
+    print("Dataset Filename:", file)
     d = LarkGrammarDataset(file, 'queryunit')
     return d, d, d
 
