@@ -9,27 +9,23 @@ from itertools import product
 import lark
 
 
-@Registry.translator('cfq_seq')
-class CFQSeq(Translator):
-    def __init__(self):
+class _CFQSeq(Translator):
+    def __init__(self, key):
         super().__init__()
+        self.key = key
 
     def generate_namespace_tokens(self, example) -> Generator[Tuple[str, str], None, None]:
-        key = 'sparqlPattern'
+        key = self.key
         sparql_pattern = example.get(key)
         yield from [(key, START_SYMBOL), (key, END_SYMBOL)]
         yield from product([key], split_sparql(sparql_pattern))
 
     def to_tensor(self, example) -> Mapping[str, torch.Tensor]:
-        key = 'sparqlPattern'
+        key = self.key
         sparql_pattern = example.get(key)
         sparql_pattern_toks = [START_SYMBOL] + split_sparql(sparql_pattern) + [END_SYMBOL]
         instance = {
-            "sparqlPattern": self._seq_word_vec(sparql_pattern_toks, key),
-            "_raw": {
-                "reconstructed_sparql_pattern": self._reconstructed_example(sparql_pattern_toks, key),
-                "example": example,
-            }
+            "seq": self._seq_word_vec(sparql_pattern_toks, key),
         }
         return instance
 
@@ -39,27 +35,31 @@ class CFQSeq(Translator):
         # word tokens
         return torch.tensor([self.vocab.get_token_index(tok, ns) for tok in seq])
 
-    def _reconstructed_example(self, seq: List[str], ns: str) -> Optional[List[str]]:
-        if seq is None or len(seq) == 0:
-            return None
-        # word tokens
-        reconstructed = []
-        for tok in seq:
-            tok_id = self.vocab.get_token_index(tok, ns)
-            reconstructed.append(self.vocab.get_token_from_index(tok_id, ns))
-        return reconstructed
-
     def batch_tensor(self, tensors: List[Mapping[str, torch.Tensor]]) -> Mapping[str, torch.Tensor]:
         assert len(tensors) > 0
         list_by_keys = list_of_dict_to_dict_of_list(tensors)
-        get_ns_pad = lambda ns: self.vocab.get_token_index(PADDING_TOKEN, ns)
-        pad_seq_b = lambda k, ns: pad_sequence(list_by_keys[k], batch_first=True, padding_value=get_ns_pad(ns))
+        pad_id = self.vocab.get_token_index(PADDING_TOKEN, self.key)
+        pad_seq_b = lambda k: pad_sequence(list_by_keys[k], batch_first=True, padding_value=pad_id)
 
         batch = {
-            "sparqlPattern": pad_seq_b("sparqlPattern", "sparqlPattern"),
-            "_raw": list_by_keys['_raw'],
+            "seq": pad_seq_b("seq"),
         }
         return batch
+
+@Registry.translator('cfq_seq_pattern')
+class CFQPatternSeq(_CFQSeq):
+    def __init__(self):
+        super().__init__('sparqlPattern')
+
+@Registry.translator('cfq_seq_mod_ent')
+class CFQPatternSeq(_CFQSeq):
+    def __init__(self):
+        super().__init__('sparqlPatternModEntities')
+
+@Registry.translator('cfq_seq_complete')
+class CFQPatternSeq(_CFQSeq):
+    def __init__(self):
+        super().__init__('sparql')
 
 def list_of_dict_to_dict_of_list(ld: List[Mapping[str, Any]]) -> Mapping[str, List[Any]]:
     list_by_keys = defaultdict(list)

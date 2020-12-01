@@ -1,11 +1,13 @@
+import os.path
 import sys
+sys.path.insert(0, os.path.join('..', '..'))
 import logging
 import json
 
 from trialbot.training import TrialBot
 from trialbot.training import Registry
 from trialbot.training.updater import TrainingUpdater, TestingUpdater
-from utils.root_finder import find_root
+from trialbot.utils.root_finder import find_root
 from trialbot.utils.move_to_device import move_to_device
 from utils.trialbot_setup import setup
 
@@ -23,16 +25,34 @@ def cfq_pattern():
     p.target_namespace = 'sparqlPattern'
     p.token_dim = 64
     p.hidden_dim = 64
-    p.num_layers = 2
     p.dropout = .2
     p.weight_decay = .2
+
+    p.encoder = "lstm"  # lstm, transformer
+    p.num_layers = 2
+    p.predictor = "quant" # quant, mos
+    p.quant_criterion = "projection" # for quant predictor: distance, projection
+    p.num_mixture = 5   # for mos predictor
 
     return p
 
 @Registry.hparamset()
-def cfq_lstm_one_layer():
+def cfq_pattern_mod_ent():
     p = cfq_pattern()
-    p.num_layers = 1
+    p.target_namespace = 'sparqlPatternModEntities'
+    return p
+
+@Registry.hparamset()
+def cfq_pattern_mos():
+    p = cfq_pattern()
+    p.predictor = "mos"
+    return p
+
+@Registry.hparamset()
+def cfq_pattern_quant_dist():
+    p = cfq_pattern()
+    p.predictor = "quant" # quant, mos
+    p.quant_criterion = "distance"
     return p
 
 def get_model(p, vocab):
@@ -41,38 +61,20 @@ def get_model(p, vocab):
     import torch.nn as nn
     from models.modules.mixture_softmax import MoSProjection
     from models.matching.seq_modeling import SeqModeling, PytorchSeq2SeqWrapper
-    m = SeqModeling(
-        embedding=nn.Embedding(vocab.get_vocab_size(p.target_namespace), p.token_dim),
-        encoder=PytorchSeq2SeqWrapper(nn.LSTM(p.token_dim, p.hidden_dim, p.num_layers, batch_first=True,
-                                              dropout=p.dropout if p.num_layers > 1 else 0.)),
-        padding=0,
-        prediction=MoSProjection(5, p.token_dim, vocab.get_vocab_size(p.target_namespace)),
-        attention=None,
-    )
-    return m
+    from models.modules.quantized_token_predictor import QuantTokenPredictor
+
+    num_toks = vocab.get_vocab_size(p.target_namespace)
+    emb = nn.Embedding(num_toks, p.token_dim)
+    encoder = PytorchSeq2SeqWrapper(nn.LSTM(p.token_dim, p.hidden_dim, p.num_layers, batch_first=True,
+                                            dropout=p.dropout if p.num_layers > 1 else 0.))
+    if p.predictor == "quant":
+        pred = QuantTokenPredictor(num_toks, p.token_dim, shared_embedding=emb.weight, quant_criterion=p.quant_criterion)
+    else:   # MoS by default
+        pred = MoSProjection(p.num_mixture, p.hidden_dim, num_toks)
+
+    return SeqModeling(embedding=emb, encoder=encoder, padding=0, prediction=pred, attention=None)
 
 class CFQTrainingUpdater(TrainingUpdater):
-    def update_epoch(self):
-        model, optim, iterator = self._models[0], self._optims[0], self._iterators[0]
-        if iterator.is_new_epoch:
-            self.stop_epoch()
-
-        device = self._device
-        model.train()
-        optim.zero_grad()
-        batch = next(iterator)
-
-        sp = batch['sparqlPattern']
-        if device >= 0:
-            sp = move_to_device(sp, device)
-
-        output = model(seq=sp)
-        if not self._dry_run:
-            loss = output['loss']
-            loss.backward()
-            optim.step()
-        return output
-
     @classmethod
     def from_bot(cls, bot: TrialBot) -> 'CFQTrainingUpdater':
         updater = super().from_bot(bot)
@@ -84,60 +86,43 @@ class CFQTrainingUpdater(TrainingUpdater):
         updater._optims = [optim]
         return updater
 
-class CFQTestingUpdater(TestingUpdater):
-    def update_epoch(self):
-        model, iterator = self._models[0], self._iterators[0]
-        if iterator.is_new_epoch:
-            self.stop_epoch()
+def evaluation_on_dev_every_epoch(bot: TrialBot, interval: int = 1):
+    if bot.state.epoch % interval == 0:
+        bot.logger.info("Running for evaluation metrics ...")
 
-        device = self._device
+        dataset, hparams = bot.dev_set, bot.hparams
+        from trialbot.data import RandomIterator
+        iterator = RandomIterator(bot.dev_set, hparams.batch_sz, bot.translator, shuffle=False, repeat=False)
+        model = bot.model
+        device = bot.args.device
         model.eval()
-        batch = next(iterator)
-        sp = batch['sparqlPattern']
-        if device >= 0:
-            sp = move_to_device(sp, device)
-        output = model(seq=sp)
-        output['_raw'] = batch['_raw']
-        return output
+        for batch in iterator:
+            if device >= 0:
+                batch = move_to_device(batch, device)
+            model(**batch)
+
+        bot.logger.info(json.dumps(bot.model.get_metric(reset=True)))
 
 def main():
     args = setup(seed="2021", dataset="cfq_mcd1", translator="cfq")
     bot = TrialBot(trial_name="lstm_lm", get_model_func=get_model, args=args)
 
     from trialbot.training import Events
+    @bot.attach_extension(Events.EPOCH_COMPLETED)
     def training_metrics(bot: TrialBot):
-        print(json.dumps(bot.model.get_metric(reset=True)))
+        bot.logger.info("Epoch Metrics:")
+        bot.logger.info(json.dumps(bot.model.get_metric(reset=True)))
 
-    if args.test:
-        from trialbot.training.trial_bot import Engine
-        new_engine = Engine()
-        new_engine.register_events(*Events)
-        bot._engine = new_engine
-        bot.add_event_handler(Events.EPOCH_COMPLETED, training_metrics, 90)
-
-        @bot.attach_extension(Events.ITERATION_COMPLETED)
-        def print_output(bot: TrialBot):
-            output = bot.state.output
-            if output is None:
-                return
-
-            for l, raw in zip(output['likelihoods'], output['_raw']):
-                to_print = {
-                    "likelihood": l.item(),
-                    "reconstructed_sparqlPattern": raw['reconstructed_sparql_pattern'],
-                    "sparqlPattern": raw['example']['sparqlPattern'],
-                }
-                print(json.dumps(to_print))
-
-        bot.updater = CFQTestingUpdater.from_bot(bot)
-    else:
+    from utils.trial_bot_extensions import print_hyperparameters
+    bot.add_event_handler(Events.STARTED, print_hyperparameters, 100)
+    if not args.test:
         # --------------------- Training -------------------------------
         from trialbot.training.extensions import every_epoch_model_saver
         from utils.trial_bot_extensions import debug_models, end_with_nan_loss
 
         bot.add_event_handler(Events.ITERATION_COMPLETED, end_with_nan_loss, 100)
-        bot.add_event_handler(Events.EPOCH_COMPLETED, every_epoch_model_saver, 100)
-        bot.add_event_handler(Events.EPOCH_COMPLETED, training_metrics, 90)
+        bot.add_event_handler(Events.EPOCH_COMPLETED, every_epoch_model_saver, 120)
+        bot.add_event_handler(Events.EPOCH_COMPLETED, evaluation_on_dev_every_epoch, 90)
         bot.add_event_handler(Events.STARTED, debug_models, 100)
         bot.updater = CFQTrainingUpdater.from_bot(bot)
     bot.run()

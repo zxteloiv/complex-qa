@@ -26,7 +26,7 @@ class SeqModeling(nn.Module):
         tgt = seq[:, 1:].contiguous()
 
         seq = self.embedding(inp)
-        mask = (inp != self.padding_val).long()
+        mask = (tgt != self.padding_val).long()
 
         logits = self.forward_emb(seq, mask)
         xent = seq_cross_ent(logits, tgt, mask)
