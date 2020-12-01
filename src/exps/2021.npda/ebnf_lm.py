@@ -27,6 +27,7 @@ def cfq_pattern():
     p.dropout = 0.2
     p.batch_sz = 32
     p.stack_capacity = 100
+    p.ADAM_LR = 1e-3    # by default
 
     # When using a tied embedding, the projection-based quant is conflicted with max_norm embedding,
     # which is an inplace operation and modifies the graph.
@@ -42,6 +43,13 @@ def cfq_pattern():
 
     return p
 
+@Registry.hparamset()
+def cfq_finetune():
+    p = cfq_pattern()
+    p.TRAINING_LIMIT = 5
+    p.ADAM_LR = 1e-5
+    return p
+
 from trialbot.training.updater import TrainingUpdater, TestingUpdater
 class GrammarTrainingUpdater(TrainingUpdater):
     @classmethod
@@ -50,7 +58,7 @@ class GrammarTrainingUpdater(TrainingUpdater):
         del updater._optims
         args, hparams, model = bot.args, bot.hparams, bot.model
         from radam import RAdam
-        optim = RAdam(model.parameters(), weight_decay=hparams.weight_decay)
+        optim = RAdam(model.parameters(), lr=hparams.ADAM_LR, weight_decay=hparams.weight_decay)
         bot.logger.info("Use RAdam optimizer: " + str(optim))
         updater._optims = [optim]
         return updater
