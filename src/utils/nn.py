@@ -204,7 +204,7 @@ def seq_cross_ent(logits: torch.FloatTensor,
     :param average: reduction method
     :return (batch, ) if average mode is batch or (0,) if average mode is token or None
     """
-    if average not in {None, "token", "batch"}:
+    if average not in {None, "token", "batch", "none"}:
         raise ValueError("Got average f{average}, expected one of "
                          "None, 'token', or 'batch'")
 
