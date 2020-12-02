@@ -49,6 +49,13 @@ def cfq_pattern_mos():
     return p
 
 @Registry.hparamset()
+def cfq_pattern_mos_n1():
+    p = cfq_pattern()
+    p.predictor = "mos"
+    p.num_mixture = 1
+    return p
+
+@Registry.hparamset()
 def cfq_pattern_quant_dist():
     p = cfq_pattern()
     p.predictor = "quant" # quant, mos
@@ -86,23 +93,6 @@ class CFQTrainingUpdater(TrainingUpdater):
         updater._optims = [optim]
         return updater
 
-def evaluation_on_dev_every_epoch(bot: TrialBot, interval: int = 1):
-    if bot.state.epoch % interval == 0:
-        bot.logger.info("Running for evaluation metrics ...")
-
-        dataset, hparams = bot.dev_set, bot.hparams
-        from trialbot.data import RandomIterator
-        iterator = RandomIterator(bot.dev_set, hparams.batch_sz, bot.translator, shuffle=False, repeat=False)
-        model = bot.model
-        device = bot.args.device
-        model.eval()
-        for batch in iterator:
-            if device >= 0:
-                batch = move_to_device(batch, device)
-            model(**batch)
-
-        bot.logger.info(json.dumps(bot.model.get_metric(reset=True)))
-
 def main():
     args = setup(seed="2021", dataset="cfq_mcd1", translator="cfq")
     bot = TrialBot(trial_name="lstm_lm", get_model_func=get_model, args=args)
@@ -118,7 +108,7 @@ def main():
     if not args.test:
         # --------------------- Training -------------------------------
         from trialbot.training.extensions import every_epoch_model_saver
-        from utils.trial_bot_extensions import debug_models, end_with_nan_loss
+        from utils.trial_bot_extensions import debug_models, end_with_nan_loss, evaluation_on_dev_every_epoch
 
         bot.add_event_handler(Events.ITERATION_COMPLETED, end_with_nan_loss, 100)
         bot.add_event_handler(Events.EPOCH_COMPLETED, every_epoch_model_saver, 120)

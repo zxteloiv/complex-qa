@@ -72,3 +72,21 @@ def track_pytorch_module_forward_time(bot: TrialBot, max_depth: int = -1, timefm
             if max_depth < 0 or name.count('.') - base_depth < max_depth:
                 module.register_forward_pre_hook(print_time_hook)
 
+def evaluation_on_dev_every_epoch(bot: TrialBot, interval: int = 1):
+    from trialbot.utils.move_to_device import move_to_device
+    import json
+    if bot.state.epoch % interval == 0:
+        bot.logger.info("Running for evaluation metrics ...")
+
+        dataset, hparams = bot.dev_set, bot.hparams
+        from trialbot.data import RandomIterator
+        iterator = RandomIterator(bot.dev_set, hparams.batch_sz, bot.translator, shuffle=False, repeat=False)
+        model = bot.model
+        device = bot.args.device
+        model.eval()
+        for batch in iterator:
+            if device >= 0:
+                batch = move_to_device(batch, device)
+            model(**batch)
+
+        bot.logger.info(json.dumps(bot.model.get_metric(reset=True)))

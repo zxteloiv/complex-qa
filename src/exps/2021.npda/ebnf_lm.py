@@ -93,6 +93,8 @@ def main():
     bot.add_event_handler(Events.STARTED, debug_models, 100)
     bot.add_event_handler(Events.EPOCH_COMPLETED, get_metrics, 90)
     if not args.test:
+        from utils.trial_bot_extensions import evaluation_on_dev_every_epoch
+        bot.add_event_handler(Events.EPOCH_COMPLETED, evaluation_on_dev_every_epoch, 90)
         bot.add_event_handler(Events.EPOCH_COMPLETED, every_epoch_model_saver, 100)
         bot.add_event_handler(Events.ITERATION_COMPLETED, end_with_nan_loss, 100)
         bot.updater = GrammarTrainingUpdater.from_bot(bot)
