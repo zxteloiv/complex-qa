@@ -7,6 +7,7 @@ def lm_ebnf(p, vocab: NSVocabulary):
     from models.neural_pda.formal_language_model import EBNFTreeLM
     from models.modules.stacked_rnn_cell import StackedLSTMCell
     from models.modules.quantized_token_predictor import QuantTokenPredictor
+    from models.modules.normalization import Normalization
 
     ns_nt, ns_t, ns_et = p.ns
     emb_nt = nn.Embedding(vocab.get_vocab_size(ns_nt), p.emb_sz, max_norm=p.nt_emb_max_norm)
@@ -24,6 +25,10 @@ def lm_ebnf(p, vocab: NSVocabulary):
         shared_embedding=emb_t.weight if p.tied_terminal_emb else None,
         quant_criterion=p.t_pred_crit,
     )
+
+    if p.embedding_norm:
+        emb_nt = nn.Sequential(emb_nt, Normalization())
+        emb_t = nn.Sequential(emb_t, Normalization())
 
     pda = NeuralEBNF(
         emb_nonterminals=emb_nt,

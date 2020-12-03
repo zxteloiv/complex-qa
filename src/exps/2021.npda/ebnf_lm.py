@@ -33,6 +33,7 @@ def cfq_pattern():
     # which is an inplace operation and modifies the graph.
     p.tied_nonterminal_emb = True
     p.tied_terminal_emb = True
+    p.embedding_norm = False
     p.nt_emb_max_norm = None   # Optional[int], set to None rather than 0 to disable max_norm
     p.t_emb_max_norm = None
     p.nt_pred_crit = "projection" # projection based or distance based
@@ -41,6 +42,12 @@ def cfq_pattern():
     p.grammar_entry = 'queryunit'
     p.weight_decay = 0.2
 
+    return p
+
+@Registry.hparamset()
+def cfq_pattern_both_norm():
+    p = cfq_pattern()
+    p.embedding_norm = True
     return p
 
 @Registry.hparamset()

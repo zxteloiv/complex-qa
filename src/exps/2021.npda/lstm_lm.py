@@ -30,9 +30,13 @@ def cfq_pattern():
 
     p.encoder = "lstm"  # lstm, transformer
     p.num_layers = 2
-    p.predictor = "quant" # quant, mos
+    p.predictor = "quant" # quant, mos, tied
     p.quant_criterion = "projection" # for quant predictor: distance, projection
     p.num_mixture = 5   # for mos predictor
+
+    # by default, tied(quant is set tied)+dec_norm
+    p.embedding_norm = False
+    # no decoding norm set, because quant-projection predictor implies a decoding cosine norm
 
     return p
 
@@ -40,6 +44,28 @@ def cfq_pattern():
 def cfq_pattern_mod_ent():
     p = cfq_pattern()
     p.target_namespace = 'sparqlPatternModEntities'
+    return p
+
+@Registry.hparamset()
+def cfq_pattern_not_norm():
+    p = cfq_pattern()
+    p.predictor = "tied"
+    p.embedding_norm = False
+    return p
+
+@Registry.hparamset()
+def cfq_pattern_emb_norm():
+    p = cfq_pattern()
+    p.predictor = "tied"
+    p.embedding_norm = True
+    return p
+
+@Registry.hparamset()
+def cfq_pattern_both_norm():
+    p = cfq_pattern()
+    p.predictor = "quant"
+    p.quant_criterion = "projection" # for quant predictor: distance, projection
+    p.embedding_norm = True
     return p
 
 @Registry.hparamset()
@@ -69,6 +95,7 @@ def get_model(p, vocab):
     from models.modules.mixture_softmax import MoSProjection
     from models.matching.seq_modeling import SeqModeling, PytorchSeq2SeqWrapper
     from models.modules.quantized_token_predictor import QuantTokenPredictor
+    from models.modules.normalization import Normalization
 
     num_toks = vocab.get_vocab_size(p.target_namespace)
     emb = nn.Embedding(num_toks, p.token_dim)
@@ -76,8 +103,14 @@ def get_model(p, vocab):
                                             dropout=p.dropout if p.num_layers > 1 else 0.))
     if p.predictor == "quant":
         pred = QuantTokenPredictor(num_toks, p.token_dim, shared_embedding=emb.weight, quant_criterion=p.quant_criterion)
-    else:   # MoS by default
+    elif p.predictor == "mos":   # MoS by default
         pred = MoSProjection(p.num_mixture, p.hidden_dim, num_toks)
+    else: # tied
+        pred = nn.Linear(p.token_dim, num_toks, bias=False)    # logits output
+        pred.weight = emb.weight
+
+    if p.embedding_norm:
+        emb = nn.Sequential(emb, Normalization())
 
     return SeqModeling(embedding=emb, encoder=encoder, padding=0, prediction=pred, attention=None)
 
