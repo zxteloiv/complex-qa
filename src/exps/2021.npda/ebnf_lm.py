@@ -162,7 +162,8 @@ def main():
         bot.updater = GrammarTrainingUpdater.from_bot(bot)
     else:
         bot.updater = GrammarTestingUpdater.from_bot(bot)
-        bot.add_event_handler(Events.ITERATION_COMPLETED, prediction_analysis, 100)
+        if args.debug:
+            bot.add_event_handler(Events.ITERATION_COMPLETED, prediction_analysis, 100)
     bot.run()
 
 if __name__ == '__main__':
