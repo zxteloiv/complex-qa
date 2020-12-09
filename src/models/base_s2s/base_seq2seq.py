@@ -54,6 +54,7 @@ class BaseSeq2Seq(torch.nn.Module):
         self._eos_id = vocab.get_token_index(eos_symbol, target_namespace)
         self._max_decoding_step = max_decoding_step
 
+        self._source_namespace = source_namespace
         self._target_namespace = target_namespace
 
         self._output_projection = word_projection
