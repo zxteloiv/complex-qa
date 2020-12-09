@@ -116,10 +116,13 @@ class BaseSeq2Seq(torch.nn.Module):
         for instance_err in total_err:
             self.err_rate(instance_err)
 
-    def get_metrics(self, reset=False):
+    def get_metric(self, reset=False):
         metric = {"PPL": self.ppl.get_metric(reset), "ERR": self.err_rate.get_metric(reset)}
         metric.update(self.bleu.get_metric(reset))
         return metric
+
+    # for possible misspelling error
+    get_metrics = get_metric
 
     def revert_tensor_to_string(self, output_dict: dict) -> dict:
         """Convert the predicted word ids into discrete tokens"""
