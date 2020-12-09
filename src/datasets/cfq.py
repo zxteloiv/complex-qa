@@ -38,7 +38,7 @@ def cfq_mcd1():
     return cfq_preparsed_treebase(splitfile)
 
 @Registry.dataset()
-def cfq_mcd1_tree():
+def cfq_mcd1_runtime_tree():
     splitfile = join(CFQ_PATH, 'splits', 'mcd1.json')
     grammar = join(GRAMMAR_PATH, 'sparql_pattern.bnf.lark')
     return cfq_treebase(splitfile, grammar, ['sparql', 'sparqlPattern', 'sparqlPatternModEntities'])

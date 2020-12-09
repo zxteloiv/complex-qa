@@ -6,7 +6,7 @@ from trialbot.training import Registry
 from trialbot.training.updater import TrainingUpdater, TestingUpdater
 from utils.root_finder import find_root
 from trialbot.utils.move_to_device import move_to_device
-from build_model import get_seq2seq_model
+from models.base_s2s.base_seq2seq import BaseS2SBuilder
 
 import datasets.complex_web_q
 import datasets.complex_web_q_translator
@@ -137,7 +137,7 @@ def setup():
 def main():
     args = setup()
 
-    bot = TrialBot(trial_name="seq2seq", get_model_func=get_seq2seq_model, args=args)
+    bot = TrialBot(trial_name="seq2seq", get_model_func=BaseS2SBuilder.from_param_and_vocab, args=args)
 
     from trialbot.training import Events
     if args.test:

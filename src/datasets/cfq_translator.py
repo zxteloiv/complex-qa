@@ -1,4 +1,4 @@
-from typing import List, Mapping, Generator, Tuple, Optional, Any
+from typing import List, Mapping, Generator, Tuple, Optional, Any, Literal
 from collections import defaultdict
 import torch
 from torch.nn.utils.rnn import pad_sequence
@@ -7,59 +7,23 @@ from trialbot.data import Translator, START_SYMBOL, END_SYMBOL, PADDING_TOKEN
 from utils.sparql_tokenizer import split_sparql
 from itertools import product
 import lark
+from .field import FieldAwareTranslator
+from .seq_field import SeqField
 
-
-class _CFQSeq(Translator):
-    def __init__(self, key):
-        super().__init__()
-        self.key = key
-
-    def generate_namespace_tokens(self, example) -> Generator[Tuple[str, str], None, None]:
-        key = self.key
-        sparql_pattern = example.get(key)
-        yield from [(key, START_SYMBOL), (key, END_SYMBOL)]
-        yield from product([key], split_sparql(sparql_pattern))
-
-    def to_tensor(self, example) -> Mapping[str, torch.Tensor]:
-        key = self.key
-        sparql_pattern = example.get(key)
-        sparql_pattern_toks = [START_SYMBOL] + split_sparql(sparql_pattern) + [END_SYMBOL]
-        instance = {
-            "seq": self._seq_word_vec(sparql_pattern_toks, key),
-        }
-        return instance
-
-    def _seq_word_vec(self, seq: List[str], ns: str) -> Optional[torch.Tensor]:
-        if seq is None or len(seq) == 0:
-            return None
-        # word tokens
-        return torch.tensor([self.vocab.get_token_index(tok, ns) for tok in seq])
-
-    def batch_tensor(self, tensors: List[Mapping[str, torch.Tensor]]) -> Mapping[str, torch.Tensor]:
-        assert len(tensors) > 0
-        list_by_keys = list_of_dict_to_dict_of_list(tensors)
-        pad_id = self.vocab.get_token_index(PADDING_TOKEN, self.key)
-        pad_seq_b = lambda k: pad_sequence(list_by_keys[k], batch_first=True, padding_value=pad_id)
-
-        batch = {
-            "seq": pad_seq_b("seq"),
-        }
-        return batch
-
-@Registry.translator('cfq_seq_pattern')
-class CFQPatternSeq(_CFQSeq):
+@Registry.translator('cfq_pattern_seq_lm')
+class CFQPatternSeqLM(FieldAwareTranslator):
     def __init__(self):
-        super().__init__('sparqlPattern')
+        super().__init__(field_list=[
+            SeqField(source_key="sparqlPattern", renamed_key="seq")
+        ])
 
-@Registry.translator('cfq_seq_mod_ent')
-class CFQPatternSeq(_CFQSeq):
+@Registry.translator('cfq_seq_mod_ent_qa')
+class CFQPatternSeqQA(FieldAwareTranslator):
     def __init__(self):
-        super().__init__('sparqlPatternModEntities')
-
-@Registry.translator('cfq_seq_complete')
-class CFQPatternSeq(_CFQSeq):
-    def __init__(self):
-        super().__init__('sparql')
+        super().__init__(field_list=[
+            SeqField(source_key='sparqlPatternModEntities', renamed_key="target_tokens", split_fn=split_sparql,),
+            SeqField(source_key='questionPatternModEntities', renamed_key='source_tokens', add_start_end_toks=False,)
+        ])
 
 def list_of_dict_to_dict_of_list(ld: List[Mapping[str, Any]]) -> Mapping[str, List[Any]]:
     list_by_keys = defaultdict(list)
