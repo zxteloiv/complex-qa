@@ -94,7 +94,9 @@ class BaseSeq2Seq(torch.nn.Module):
             loss = seq_cross_ent(logits, target[:, 1:].contiguous(), target_mask[:, 1:].contiguous())
             output['loss'] = loss
         else:
-            predictions, logits = self._forward_loop(state, source_mask, init_hidden, None, None)
+            runtime_default_len = -1 if target is None else target.size()[1] - 1
+            predictions, logits = self._forward_loop(state, source_mask, init_hidden, None, None,
+                                                     runtime_max_decoding_len=runtime_default_len)
 
         output.update(predictions=predictions, logits=logits, target=target)
         if target is not None:
@@ -158,6 +160,7 @@ class BaseSeq2Seq(torch.nn.Module):
                       init_hidden: torch.Tensor,
                       target: Optional[torch.LongTensor],
                       target_mask: Optional[torch.LongTensor],
+                      runtime_max_decoding_len: int = -1,
                       ) -> Tuple[torch.LongTensor, torch.FloatTensor]:
         """
         Do the decoding process for training and prediction
@@ -175,7 +178,7 @@ class BaseSeq2Seq(torch.nn.Module):
         if target is not None:
             num_decoding_steps = target.size()[1] - 1
         else:
-            num_decoding_steps = self._max_decoding_step
+            num_decoding_steps = self._max_decoding_step if runtime_max_decoding_len <= 0 else runtime_max_decoding_len
 
         # Initialize target predictions with the start index.
         # batch_start: (batch_size,)

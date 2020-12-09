@@ -19,7 +19,8 @@ def cfq_seq_qa():
     p = HyperParamSet.common_settings(ROOT)
     p.TRAINING_LIMIT = 50
     p.batch_sz = 128
-    p.weight_decay = .2
+    p.WEIGHT_DECAY = .2
+    p.OPTIM = "RAdam"
 
     p.src_namespace = 'questionPatternModEntities'
     p.tgt_namespace = 'sparqlPatternModEntities'
@@ -43,18 +44,6 @@ def cfq_seq_qa():
     p.concat_attn_to_dec_input = False  # concat attention is
     return p
 
-class RAdamTrainingUpdater(TrainingUpdater):
-    @classmethod
-    def from_bot(cls, bot: TrialBot) -> 'RAdamTrainingUpdater':
-        updater = super().from_bot(bot)
-        del updater._optims
-        args, hparams, model = bot.args, bot.hparams, bot.model
-        from radam import RAdam
-        optim = RAdam(model.parameters(), lr=hparams.ADAM_LR, weight_decay=hparams.weight_decay)
-        bot.logger.info("Use RAdam optimizer: " + str(optim))
-        updater._optims = [optim]
-        return updater
-
 def main():
     from utils.trialbot_setup import setup
     args = setup(seed=2021)
@@ -70,7 +59,6 @@ def main():
     from trialbot.training import Events
     if not args.test:
         # --------------------- Training -------------------------------
-        bot.updater = RAdamTrainingUpdater.from_bot(bot)
         from trialbot.training.extensions import every_epoch_model_saver
         from utils.trial_bot_extensions import debug_models, end_with_nan_loss
         from utils.trial_bot_extensions import evaluation_on_dev_every_epoch
