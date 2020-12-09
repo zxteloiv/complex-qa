@@ -330,6 +330,8 @@ class BaseS2SBuilder:
 
         proj_in_dim = dec_out_dim + (attn_size if p.concat_attn_to_dec_input else 0)
         word_proj = nn.Linear(proj_in_dim, vocab.get_vocab_size(p.tgt_namespace))
+        if p.tied_decoder_embedding:
+            word_proj.weight = target_embedding.weight  # tied embedding
 
         model = BaseSeq2Seq(
             vocab=vocab,

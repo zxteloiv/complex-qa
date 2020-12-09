@@ -21,21 +21,26 @@ def cfq_seq_qa():
     p.batch_sz = 128
     p.weight_decay = .2
 
-    p.emb_sz = 256
     p.src_namespace = 'questionPatternModEntities'
     p.tgt_namespace = 'sparqlPatternModEntities'
-    p.hidden_sz = 128
-    p.enc_attn = "bilinear"
+
+    p.enc_attn = "dot_product"
     p.dec_hist_attn = "dot_product"
-    p.concat_attn_to_dec_input = True
-    p.encoder = "bilstm"
+    # transformer requires input embedding equal to hidden size
+    p.encoder = "transformer"
+    p.emb_sz = 128
+    p.hidden_sz = 128
+    p.num_heads = 8
+    p.attention_dropout = 0.
     p.num_enc_layers = 2
     p.dropout = .2
     p.decoder = "lstm"
-    p.num_dec_layers = 2
+    p.num_dec_layers = 1
     p.max_decoding_step = 100
     p.scheduled_sampling = .1
-    p.decoder_init_strategy = "forward_last_parallel"
+    p.decoder_init_strategy = "forward_last_all"
+    p.tied_decoder_embedding = True
+    p.concat_attn_to_dec_input = False  # concat attention is
     return p
 
 class RAdamTrainingUpdater(TrainingUpdater):
@@ -73,22 +78,24 @@ def main():
 
         bot.add_event_handler(Events.ITERATION_COMPLETED, end_with_nan_loss, 100)
         bot.add_event_handler(Events.EPOCH_COMPLETED, every_epoch_model_saver, 100)
-        bot.add_event_handler(Events.STARTED, debug_models, 100)
+        @bot.attach_extension(Events.STARTED)
+        def print_models(bot: TrialBot):
+            print(str(bot.models))
 
         # debug strange errors by inspecting running time, data size, etc.
         if args.debug:
             from utils.trial_bot_extensions import track_pytorch_module_forward_time
             bot.add_event_handler(Events.STARTED, track_pytorch_module_forward_time, 100)
 
-            @bot.attach_extension(Events.ITERATION_COMPLETED)
-            def batch_data_size(bot: TrialBot):
-                output = bot.state.output
-                if output is None:
-                    return
+        @bot.attach_extension(Events.ITERATION_COMPLETED)
+        def batch_data_size(bot: TrialBot):
+            output = bot.state.output
+            if output is None:
+                return
 
-                print("source_size:", output['source'].size(),
-                      "target_size:", output['target'].size(),
-                      "pred_size:", output['predictions'].size())
+            print("source_size:", output['source'].size(),
+                  "target_size:", output['target'].size(),
+                  "pred_size:", output['predictions'].size())
     elif args.debug:
         @bot.attach_extension(Events.ITERATION_COMPLETED)
         def print_output(bot: TrialBot):
