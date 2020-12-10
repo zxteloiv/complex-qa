@@ -108,7 +108,7 @@ class BaseSeq2Seq(torch.nn.Module):
         # gold, gold_mask: (batch, max_tgt_len - 1)
         gold = target[:, 1:].contiguous()
         gold_mask = target_mask[:, 1:].contiguous()
-        self.bleu(predictions, gold)
+        # self.bleu(predictions, gold)
         # batch_xent: (batch,)
         batch_xent = seq_cross_ent(logits, gold, gold_mask, average=None)
         for xent in batch_xent:
