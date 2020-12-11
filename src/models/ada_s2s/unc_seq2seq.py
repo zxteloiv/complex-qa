@@ -6,8 +6,8 @@ from allennlp.data.vocabulary import Vocabulary
 from allennlp.modules import TokenEmbedder
 from allennlp.nn.util import masked_softmax
 from allennlp.nn import util as allen_util
-from utils.nn import AllenNLPAttentionWrapper, filter_cat, filter_sum
-from models.transformer.multi_head_attention import SingleTokenMHAttentionWrapper
+from models.interfaces.attention import Attention as IAttn
+from utils.nn import filter_cat, filter_sum
 from models.base_s2s.base_seq2seq import BaseSeq2Seq
 from utils.tree_acc_metric import TreeAccuracy
 
@@ -28,8 +28,8 @@ class UncSeq2Seq(BaseSeq2Seq):
                  max_decoding_step: int = 50,
                  use_bleu: bool = True,
                  label_smoothing: Optional[float] = None,
-                 enc_attention: Union[AllenNLPAttentionWrapper, SingleTokenMHAttentionWrapper, None] = None,
-                 dec_hist_attn: Union[AllenNLPAttentionWrapper, SingleTokenMHAttentionWrapper, None] = None,
+                 enc_attention: Union[IAttn, None] = None,
+                 dec_hist_attn: Union[IAttn, None] = None,
                  scheduled_sampling_ratio: float = 0.,
                  intermediate_dropout: float = .1,
                  concat_attn_to_dec_input: bool = False,

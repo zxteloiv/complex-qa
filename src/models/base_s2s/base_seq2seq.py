@@ -3,10 +3,9 @@ import numpy as np
 import torch
 import torch.nn as nn
 from trialbot.data.ns_vocabulary import NSVocabulary
-from models.transformer.multi_head_attention import SingleTokenMHAttentionWrapper
+from ..interfaces.attention import Attention as IAttn
 from models.modules.stacked_rnn_cell import StackedRNNCell
 from utils.nn import filter_cat, filter_sum, prepare_input_mask, seq_cross_ent, get_decoder_initial_states
-from utils.nn import AllenNLPAttentionWrapper
 from utils.seq_collector import SeqCollector
 from utils.text_tool import make_human_readable_text
 from allennlp.training.metrics import BLEU, Perplexity, Average
@@ -25,8 +24,8 @@ class BaseSeq2Seq(torch.nn.Module):
                  start_symbol: str = '<GO>',
                  eos_symbol: str = '<EOS>',
                  max_decoding_step: int = 50,
-                 enc_attention: Union[AllenNLPAttentionWrapper, SingleTokenMHAttentionWrapper, None] = None,
-                 dec_hist_attn: Union[AllenNLPAttentionWrapper, SingleTokenMHAttentionWrapper, None] = None,
+                 enc_attention: Union[IAttn, None] = None,
+                 dec_hist_attn: Union[IAttn, None] = None,
                  scheduled_sampling_ratio: float = 0.,
                  intermediate_dropout: float = .1,
                  concat_attn_to_dec_input: bool = False,
@@ -409,7 +408,7 @@ class BaseS2SBuilder:
         :param attention_dropout: the dropout to discard some attention weights
         :return: a torch.nn.Module
         """
-        from utils.nn import AllenNLPAttentionWrapper
+        from ..modules.attention_wrapper import AllenNLPAttentionWrapper
         from allennlp.modules.attention import BilinearAttention, DotProductAttention
 
         attn_type = attn_type.lower()

@@ -5,9 +5,9 @@ import torch
 import torch.nn
 from trialbot.data import NSVocabulary, PADDING_TOKEN, DEFAULT_OOV_TOKEN
 from allennlp.modules import TokenEmbedder
-from models.transformer.multi_head_attention import SingleTokenMHAttentionWrapper
+from models.interfaces.attention import Attention as IAttn
 from models.modules.stacked_rnn_cell import StackedRNNCell
-from utils.nn import AllenNLPAttentionWrapper, filter_cat, prepare_input_mask, get_decoder_initial_states
+from utils.nn import filter_cat, prepare_input_mask, get_decoder_initial_states
 from allennlp.training.metrics import BLEU
 from models.modules.stacked_encoder import StackedEncoder
 
@@ -25,8 +25,8 @@ class Seq2KeywordSeq(torch.nn.Module):
                  max_decoding_step: int = 50,
                  use_bleu: bool = True,
                  label_smoothing: Optional[float] = None,
-                 enc_attention: Union[AllenNLPAttentionWrapper, SingleTokenMHAttentionWrapper, None] = None,
-                 dec_hist_attn: Union[AllenNLPAttentionWrapper, SingleTokenMHAttentionWrapper, None] = None,
+                 enc_attention: Union[IAttn, None] = None,
+                 dec_hist_attn: Union[IAttn, None] = None,
                  scheduled_sampling_ratio: float = 0.,
                  intermediate_dropout: float = .1,
                  output_is_logit: bool = True,
