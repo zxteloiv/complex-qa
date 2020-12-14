@@ -6,7 +6,7 @@ from trialbot.training import TrialBot
 from trialbot.training import Registry
 from trialbot.training.updater import TrainingUpdater, TestingUpdater
 from trialbot.utils.move_to_device import move_to_device
-from models.base_s2s.base_seq2seq import BaseS2SBuilder, BaseSeq2Seq
+from models.base_s2s.base_seq2seq import BaseSeq2Seq
 
 import datasets.cfq
 import datasets.cfq_translator
@@ -48,7 +48,7 @@ def main():
     from utils.trialbot_setup import setup
     args = setup(seed=2021)
 
-    bot = TrialBot(trial_name="s2s_qa", get_model_func=BaseS2SBuilder.from_param_and_vocab, args=args)
+    bot = TrialBot(trial_name="s2s_qa", get_model_func=BaseSeq2Seq.from_param_and_vocab, args=args)
 
     from trialbot.training import Events
     @bot.attach_extension(Events.EPOCH_COMPLETED)

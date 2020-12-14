@@ -20,6 +20,8 @@ class NeuralEBNF(nn.Module):
                  start_token_id: int,
                  ebnf_entrypoint: int,
                  dropout: float = 0.,
+                 default_max_derivation: int = 100,
+                 default_max_expansion: int = 10,
                  ):
         super().__init__()
         self.emb_nonterminals = emb_nonterminals
@@ -35,6 +37,9 @@ class NeuralEBNF(nn.Module):
 
         self.logger = logging.getLogger(__name__)
         self.dropout = nn.Dropout(dropout)
+
+        self.default_max_derivation: int = default_max_derivation
+        self.default_max_expansion: int = default_max_expansion
 
     def forward(self,
                 derivation_tree: Optional[torch.LongTensor] = None,
@@ -58,21 +63,24 @@ class NeuralEBNF(nn.Module):
         :param hx:
         :param attn_fn:
         :param parallel_mode:
-        :return:
-        is_nt_prob: (batch*derivation, rhs_seq)
-        nt_logits: (batch*derivation, rhs_seq, #NT)
-        t_logits: (batch*derivation, rhs_seq, #T)
+        :return: is_nt_prob: (batch, derivation, rhs_seq)
+                nt_logits: (batch, derivation, rhs_seq, #NT)
+                t_logits: (batch, derivation, rhs_seq, #T)
         """
         batch_size = batch_size or derivation_tree.size()[0]
         device = device or derivation_tree.device
 
         self._init_stack(derivation_tree, batch_size, device)
-        if parallel_mode and derivation_tree is not None:
+        if parallel_mode and is_nt is not None:
             self.logger.debug("Run with parallel mode to independently predict each derivation of every instance")
-            return self._forward_parallel(derivation_tree, is_nt)
+            return self._forward_parallel(derivation_tree, is_nt, attn_fn)
+
+        elif parallel_mode:
+            # only the LHS is given (derivation length == 1), the RHS is unknown (is_nt is None)
+            # to some extent is equivalent to generate given oracle tree structure
+            return self._forward_parallel(derivation_tree, None, attn_fn, max_expansion_len)
 
         raise NotImplementedError
-
 
     def _init_stack(self, derivation_tree: Optional[torch.LongTensor], batch_size: int, device):
         # Init the stack with the given start non-terminals, which is the LHS of the first derivation.
@@ -88,21 +96,49 @@ class NeuralEBNF(nn.Module):
         push_mask = torch.ones((batch_size,), device=device)
         self.stack.push(stack_bottom, push_mask)
 
-    def _forward_parallel(self, derivation_tree, is_nt):
-        """
-        Forward pass when derivation_tree is definitely given,
-        and in the meantime all the derivations are independent with each other,
-        therefore hx is prohibited.
-        Typical scenarios are either (tree-)language model or grammar warm-up.
-        Note is_nt doesn't contain LHS info.
-        """
-        tree_shape = derivation_tree.size() # (batch, derivation, seq)
+    def _forward_serial(self, derivation_count, expansion_len):
+        for derive_step in range(derivation_count):
+
+            pass
+        raise NotImplementedError
+
+    def _forward_parallel(self, derivation_tree,
+                          is_nt: Optional[torch.LongTensor] = None,
+                          attn_fn: Optional[Callable[[torch.Tensor], torch.Tensor]] = None,
+                          expansion_len: Optional[int] = None,
+                          ):
+        # Forward pass when the oracle derivation_tree or at least the oracle LHS is given,
+        # and in the meantime all the derivations are independent with each other,
+        # therefore hx is prohibited.
+        # By "Parallel" it means to expand all the grammar LHS simultaneously.
+        # So the is_nt flag could be absent, and if so, the expansion is greedily generated.
+        # Typical scenarios are either (tree-)language model or grammar warm-up.
+        # Note is_nt doesn't contain LHS info.
+        tree_shape = derivation_tree.size()  # (batch, derivation, seq)
         flat_derivations = derivation_tree.reshape(-1, tree_shape[-1])
 
         flat_lhs = flat_derivations[:, 0]
         flat_rhs_seq = flat_derivations[:, 1:]
-        flat_is_nt = is_nt.reshape(-1, tree_shape[-1] - 1)
-        flat_predictions = self._expand_rhs(flat_lhs, flat_is_nt, flat_rhs_seq)
+        flat_is_nt = is_nt.reshape(-1, tree_shape[-1] - 1) if is_nt is not None else None
+
+        # due to the parallel setting, any EBNF embedding output is flattened,
+        # which will make the attention fail because it's unable to recognize batch size
+        def get_reverted_attention_for_flat_out(attn_net):
+            if attn_net is None:
+                return None
+
+            def reverted_attn(flat_out):
+                batch = tree_shape[0]
+                out = flat_out.reshape(batch, -1, flat_out.size()[-1])
+                context = attn_fn(out)
+                flat_context = context.reshape(-1, context.size()[-1])
+                return flat_context
+
+            return reverted_attn
+
+        flat_predictions = self._expand_rhs(flat_lhs, flat_is_nt, flat_rhs_seq,
+                                            attn_fn=get_reverted_attention_for_flat_out(attn_fn),
+                                            max_expansion_len=expansion_len)
 
         # flat_is_nt: (batch*derivation, rhs_seq)
         # flat_nt_logits: (batch*derivation, rhs_seq, #NT)
@@ -112,17 +148,13 @@ class NeuralEBNF(nn.Module):
         is_nt_prob = flat_is_nt.reshape(*tree_shape[:-1], -1)
         nt_logits = flat_nt_logits.reshape(*is_nt.size(), -1)
         t_logits = flat_t_logits.reshape(*is_nt.size(), -1)
-
         return is_nt_prob, nt_logits, t_logits
-
-    def _forward_serial(self):
-        raise NotImplementedError
 
     def _expand_rhs(self,
                     lhs: Optional[torch.LongTensor],
                     nt_mask: Optional[torch.LongTensor] = None,
                     target_symbol: Optional[torch.LongTensor] = None,
-                    max_expansion_len: int = 10,
+                    max_expansion_len: Optional[int] = None,
                     hx = None,
                     attn_fn: Callable[[torch.Tensor], torch.Tensor] = None,
                     ):
@@ -142,13 +174,13 @@ class NeuralEBNF(nn.Module):
         """
         batch_size = lhs.size()[0]
         device = lhs.device
-        decoding_len = nt_mask.size()[1] if nt_mask is not None else max_expansion_len
+        decoding_len = nt_mask.size()[1] if nt_mask is not None else (max_expansion_len or self.default_max_expansion)
         mem = SeqCollector()
 
         # Prepare the first input token of the RHS, some terminal like <GO>,
         # which is required when the target symbol sequence is not given.
         last_preds = torch.full((batch_size,), fill_value=self.start_id, dtype=torch.int, device=device)
-        last_is_nt = torch.full_like(last_preds, fill_value=0)
+        last_is_nt = torch.full_like(last_preds, fill_value=1)
 
         # lhs_emb: (batch, emb_sz)
         lhs_emb = self.dropout(self.emb_nonterminals(lhs))

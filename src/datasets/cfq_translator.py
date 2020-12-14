@@ -77,12 +77,15 @@ class LarkTranslator(Translator):
         }
         return batch
 
-class _CFQTreeLM(Translator):
+class _CFQTreeLM(FieldAwareTranslator):
     def __init__(self, tree_key: str):
-        super().__init__()
+        super().__init__(field_list=[
+            SeqField(source_key='questionPatternModEntities', renamed_key='source_tokens', add_start_end_toks=False, )
+        ])
         self.tree_key = tree_key
 
     def generate_namespace_tokens(self, example) -> Generator[Tuple[str, str], None, None]:
+        yield from super().generate_namespace_tokens(example)
         tree: lark.Tree = example.get(self.tree_key)
         for subtree in tree.iter_subtrees_topdown():
             yield NS_NT, subtree.data
@@ -92,7 +95,8 @@ class _CFQTreeLM(Translator):
                     yield NS_T, c.type
                     yield NS_ET, c.value
 
-    def to_tensor(self, example):
+    def to_tensor(self, example) -> Mapping[str, Any]:
+        output = dict(super().to_tensor(example))
         Tree, Token = lark.Tree, lark.Token
         tree: Tree = example.get(self.tree_key)
         derivation_tree: List[List[int]] = []
@@ -107,9 +111,13 @@ class _CFQTreeLM(Translator):
             rule_fi = [NS_NT_FI] + fidelity + [NS_NT_FI]
             derivation_tree.append(rule)
             token_fidelity.append(rule_fi)
-        return {"derivation_tree": derivation_tree, "token_fidelity": token_fidelity}
+
+        output.update(derivation_tree=derivation_tree, token_fidelity=token_fidelity)
+        return output
 
     def batch_tensor(self, tensors: List[Mapping[str, torch.Tensor]]) -> Mapping[str, torch.Tensor]:
+        output = dict(super().batch_tensor(tensors))
+
         list_by_keys = list_of_dict_to_dict_of_list(tensors)
         tree_list: List[List[List[int]]] = list_by_keys['derivation_tree']
         tofi_list: List[List[List[int]]] = list_by_keys['token_fidelity']
@@ -146,11 +154,8 @@ class _CFQTreeLM(Translator):
         tree_batch = torch.stack(tree_batch)
         fidelity_batch = torch.stack(fidelity_batch)
 
-        batch = {
-            "derivation_tree": tree_batch,
-            "token_fidelity": fidelity_batch,
-        }
-        return batch
+        output.update({ "derivation_tree": tree_batch, "token_fidelity": fidelity_batch, })
+        return output
 
 @Registry.translator('cfq_pattern_tree')
 class CFQPatternTree(_CFQTreeLM):

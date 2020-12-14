@@ -27,6 +27,7 @@ class FieldAwareTranslator(Translator):
         self.fields = field_list
 
     def index_with_vocab(self, vocab: NSVocabulary):
+        super().index_with_vocab(vocab)
         for field in self.fields:
             field.index_with_vocab(vocab)
 
