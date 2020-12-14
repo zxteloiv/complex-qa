@@ -55,17 +55,16 @@ class StackedEncoder(torch.nn.Module):
 
         inp_sz_fn = lambda floor: p.emb_sz if floor == 0 else p.hidden_sz
         if p.encoder == "lstm":
-            enc_cls = lambda inp_sz: LstmSeq2SeqEncoder(inp_sz, p.hidden_sz, bidirectional=False)
+            enc_cls = lambda floor: LstmSeq2SeqEncoder(inp_sz_fn(floor), p.hidden_sz, bidirectional=False)
         elif p.encoder == "transformer":
-            enc_cls = lambda inp_sz: TransformerEncoder(
-                inp_sz, p.hidden_sz, 1, p.num_heads, p.hidden_sz, p.dropout, p.dropout, 0., True,
+            enc_cls = lambda floor: TransformerEncoder(
+                inp_sz_fn(floor), p.hidden_sz, 1, p.num_heads, p.hidden_sz, p.dropout, p.dropout, 0., (floor == 0),
             )
         elif p.encoder == "bilstm":
-            enc_cls = lambda inp_sz: LstmSeq2SeqEncoder(inp_sz, p.hidden_sz, bidirectional=True)
+            enc_cls = lambda floor: LstmSeq2SeqEncoder(inp_sz_fn(floor), p.hidden_sz, bidirectional=True)
         else:
             raise NotImplementedError
 
-        encoder = StackedEncoder([enc_cls(inp_sz_fn(floor)) for floor in range(p.num_enc_layers)],
-                                 input_dropout=p.dropout)
+        encoder = StackedEncoder([enc_cls(floor) for floor in range(p.num_enc_layers)], input_dropout=p.dropout)
         return encoder
 

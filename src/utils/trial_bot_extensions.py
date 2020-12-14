@@ -89,4 +89,29 @@ def evaluation_on_dev_every_epoch(bot: TrialBot, interval: int = 1):
                 batch = move_to_device(batch, device)
             model(**batch)
 
-        bot.logger.info(json.dumps(bot.model.get_metric(reset=True)))
+        val_metrics = bot.model.get_metric(reset=True)
+        if hasattr(bot, 'tbx_writer'):
+            bot.tbx_writer.log_metrics(dict(), val_metrics=val_metrics)
+        bot.logger.info("Evaluation Metrics: " + json.dumps(val_metrics))
+
+def init_tensorboard_writer(bot: TrialBot, interval: int = 32):
+    from allennlp.training.tensorboard_writer import TensorboardWriter
+    bot.tbx_writer = TensorboardWriter(bot.savepath, summary_interval=interval,
+                                       should_log_learning_rate=True,
+                                       get_batch_num_total=lambda: bot.state.iteration)
+
+def write_batch_info_to_tensorboard(bot: TrialBot):
+    from allennlp.training.tensorboard_writer import TensorboardWriter
+    bot.tbx_writer: TensorboardWriter
+    metrics = bot.model.get_metrics()
+    output = bot.state.output
+    metrics['loss'] = output['loss'] if output is not None else 0
+    batch_grad_norm = torch.norm(torch.stack([torch.norm(p.grad.detach())
+                                              for p in bot.model.parameters() if p.grad is not None]))
+    # histogram and batch_size_interval are initialized to None
+    bot.tbx_writer.log_batch(bot.model, bot.updater._optims[0], batch_grad_norm, metrics, None, None)
+
+def close_tensorboard(bot: TrialBot):
+    from allennlp.training.tensorboard_writer import TensorboardWriter
+    bot.tbx_writer: TensorboardWriter
+    bot.tbx_writer.close()

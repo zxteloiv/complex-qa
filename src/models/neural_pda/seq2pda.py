@@ -36,6 +36,8 @@ class Seq2PDA(nn.Module):
         err = self.err.get_metric(reset)
         return {"PPL": ppl, "ERR": err}
 
+    get_metrics = get_metric
+
     def forward(self, source_tokens, derivation_tree: torch.LongTensor, token_fidelity: torch.LongTensor):
         """
         :param source_tokens: (batch, src_len)

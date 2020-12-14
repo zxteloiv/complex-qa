@@ -17,12 +17,14 @@ def cfq_ebnf_qa():
     ROOT = find_root()
     p = HyperParamSet.common_settings(ROOT)
     p.TRAINING_LIMIT = 50
+    p.OPTIM = "RAdam"
     p.batch_sz = 50
     p.weight_decay = .2
 
     p.src_ns = 'questionPatternModEntities'
     p.tgt_ns = datasets.cfq_translator.PARSE_TREE_NS
     p.tgt_ns_fi = datasets.cfq_translator.NS_FI
+    p.NS_VOCAB_KWARGS = {"non_padded_namespaces": p.tgt_ns[1:]}
 
     p.enc_attn = "generalized_bilinear"
     p.dec_hist_attn = "dot_product"
@@ -33,8 +35,8 @@ def cfq_ebnf_qa():
     p.num_heads = 8
     p.attention_dropout = 0.
     p.attn_use_linear = True
-    p.attn_use_bias = True
-    p.attn_use_tanh_activation = True
+    p.attn_use_bias = False
+    p.attn_use_tanh_activation = False
     p.num_enc_layers = 2
     p.dropout = .2
     p.decoder = "lstm"
@@ -146,20 +148,27 @@ def main():
         bot.add_event_handler(Events.ITERATION_COMPLETED, end_with_nan_loss, 100)
         bot.add_event_handler(Events.EPOCH_COMPLETED, every_epoch_model_saver, 100)
 
+        from utils.trial_bot_extensions import init_tensorboard_writer
+        from utils.trial_bot_extensions import write_batch_info_to_tensorboard
+        from utils.trial_bot_extensions import close_tensorboard
+        bot.add_event_handler(Events.STARTED, init_tensorboard_writer, 100)
+        bot.add_event_handler(Events.ITERATION_COMPLETED, write_batch_info_to_tensorboard, 100)
+        bot.add_event_handler(Events.COMPLETED, close_tensorboard, 100)
+
         # debug strange errors by inspecting running time, data size, etc.
         if args.debug:
             from utils.trial_bot_extensions import track_pytorch_module_forward_time
             bot.add_event_handler(Events.STARTED, track_pytorch_module_forward_time, 100)
 
-        @bot.attach_extension(Events.ITERATION_COMPLETED)
-        def batch_data_size(bot: TrialBot):
-            output = bot.state.output
-            if output is None:
-                return
+            @bot.attach_extension(Events.ITERATION_COMPLETED)
+            def batch_data_size(bot: TrialBot):
+                output = bot.state.output
+                if output is None:
+                    return
 
-            print("source_size:", output['source_tokens'].size(),
-                  "tree_size:", output['derivation_tree'].size(),
-                  "tofi_size:", output['token_fidelity'].size())
+                print("source_size:", output['source_tokens'].size(),
+                      "tree_size:", output['derivation_tree'].size(),
+                      "tofi_size:", output['token_fidelity'].size())
     bot.run()
 
 if __name__ == '__main__':
