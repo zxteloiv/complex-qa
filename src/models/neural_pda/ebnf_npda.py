@@ -118,7 +118,7 @@ class NeuralEBNF(nn.Module):
         flat_derivations = derivation_tree.reshape(-1, tree_shape[-1])
 
         flat_lhs = flat_derivations[:, 0]
-        flat_rhs_seq = flat_derivations[:, 1:]
+        flat_rhs_seq = flat_derivations[:, 1:] if is_nt is not None else None
         flat_is_nt = is_nt.reshape(-1, tree_shape[-1] - 1) if is_nt is not None else None
 
         # due to the parallel setting, any EBNF embedding output is flattened,
@@ -146,8 +146,8 @@ class NeuralEBNF(nn.Module):
         flat_is_nt, flat_nt_logits, flat_t_logits = flat_predictions
 
         is_nt_prob = flat_is_nt.reshape(*tree_shape[:-1], -1)
-        nt_logits = flat_nt_logits.reshape(*is_nt.size(), -1)
-        t_logits = flat_t_logits.reshape(*is_nt.size(), -1)
+        nt_logits = flat_nt_logits.reshape(tree_shape[0], -1, *flat_nt_logits.size()[-2:])
+        t_logits = flat_t_logits.reshape(tree_shape[0], -1, *flat_t_logits.size()[-2:])
         return is_nt_prob, nt_logits, t_logits
 
     def _expand_rhs(self,
@@ -215,8 +215,8 @@ class NeuralEBNF(nn.Module):
 
             # inference
             last_is_nt = step_out_is_nt > 0.5
-            last_preds = nt_logits.argmax(dim=-1) * last_is_nt + \
-                         t_logits.argmax(dim=-1) * last_is_nt.logical_not()
+            last_preds = (nt_logits.argmax(dim=-1) * last_is_nt
+                          + t_logits.argmax(dim=-1) * last_is_nt.logical_not()).long()
 
         t_logits = mem.get_stacked_tensor('t_logits')
         nt_logits = mem.get_stacked_tensor('nt_logits')
@@ -238,8 +238,8 @@ class NeuralEBNF(nn.Module):
         # tok_is_nt: (batch, 1) <- (batch,)
         tok_is_nt = is_nt.unsqueeze(-1)
         # step_emb*: (batch, emb_sz)
-        step_emb_nt = self.emb_nonterminals(nt_tok_safe)
-        step_emb_t = self.emb_terminals(t_tok_safe)
+        step_emb_nt = self.emb_nonterminals(nt_tok_safe.long())
+        step_emb_t = self.emb_terminals(t_tok_safe.long())
         step_emb = step_emb_nt * tok_is_nt + step_emb_t * tok_is_nt.logical_not()
         step_emb = self.dropout(step_emb)
         return step_emb
