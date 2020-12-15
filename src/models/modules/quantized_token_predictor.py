@@ -10,7 +10,7 @@ class QuantTokenPredictor(nn.Module):
                  tok_dim,
                  output_semantics: PREDICTOR_OUTPUT_SEMANTIC = "logits",
                  shared_embedding: Optional[nn.Parameter] = None,
-                 quant_criterion: Literal["distance", "projection"] = "distance",
+                 quant_criterion: Literal["distance", "projection", "dot_product"] = "distance",
                  ):
         super().__init__()
 
@@ -44,10 +44,13 @@ class QuantTokenPredictor(nn.Module):
             output = dist
         else:
             # weight: (num_toks, tok_dim)
-            # proj: (..., num_toks)
-            proj = (h_rs * self.weight).sum(-1) / self.weight.norm(dim=-1)
-            output = proj
+            # dot_prod, proj: (..., num_toks)
+            dot_prod = (h_rs * self.weight).sum(-1)
+            output = dot_prod
+            if self.quant_criterion == "projection":
+                proj = dot_prod / self.weight.norm(dim=-1)
+                output = proj
 
         if self.output_probs:
-            output = dist.softmax(dim=-1)
+            output = output.softmax(dim=-1)
         return output

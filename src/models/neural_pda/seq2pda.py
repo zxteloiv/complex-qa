@@ -89,15 +89,13 @@ class Seq2PDA(nn.Module):
         if derivation_tree is not None:
             # for clarity, the gold labels and xents inside metric computation will be duplicated during training
             gold_labels = self._get_gold_label(derivation_tree, token_fidelity)
-            self._compute_metrics(gold_labels, pda_logits, predictions)
+            analysis = self._compute_metrics(gold_labels, pda_logits, predictions)
+            analysis['all_lhs'] = derivation_tree[:, :, 0]
+            analysis['source_tokens'] = source_tokens
+            output['deliberate_analysis'] = analysis
 
         output['preds'] = predictions
         output.update(source_tokens=source_tokens, derivation_tree=derivation_tree, token_fidelity=token_fidelity)
-        # output['deliberate_analysis'] = {
-        #     "error": [is_nt_err, nt_err, t_err],
-        #     "gold": [mask, out_is_nt, safe_nt_out, safe_t_out],
-        #     "all_lhs": derivation_tree[:, :, 0],
-        # }
         return output
 
     def _compute_metrics(self, gold_labels, pda_logits, preds):
@@ -115,6 +113,11 @@ class Seq2PDA(nn.Module):
         total_err = (is_nt_err + nt_err + t_err).sum(dim=(1, 2)) > 0
         for instance_err in total_err:
             self.err(instance_err)
+        deliberate_analysis = {
+            "error": [is_nt_err, nt_err, t_err],
+            "gold": [mask, out_is_nt, safe_nt_out, safe_t_out],
+        }
+        return deliberate_analysis
 
     def _get_batch_xent(self, gold_labels, pda_output):
         is_nt_prob, nt_logits, t_logits = pda_output
