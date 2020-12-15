@@ -46,10 +46,16 @@ def cfq_ebnf_qa():
     p.stack_capacity = 100
     p.tied_nonterminal_emb = True
     p.tied_terminal_emb = True
-    p.nt_pred_crit = "projection" # projection based or distance based
+    p.nt_pred_crit = "projection" # distance, projection, dot_product
     p.t_pred_crit = "projection"
     p.grammar_entry = "queryunit"
     return p
+
+from trialbot.utils.grid_search_helper import import_grid_search_parameters
+import_grid_search_parameters(grid_conf={
+    "num_expander_layer": [2, 3, 4],
+    "TRAINING_LIMIT": [5],
+}, base_param_fn=cfq_ebnf_qa)
 
 def get_model(p, vocab: NSVocabulary):
     from torch import nn
@@ -169,7 +175,76 @@ def main():
                 print("source_size:", output['source_tokens'].size(),
                       "tree_size:", output['derivation_tree'].size(),
                       "tofi_size:", output['token_fidelity'].size())
+    else:
+        if args.debug:
+            bot.add_event_handler(Events.ITERATION_COMPLETED, prediction_analysis, 100)
     bot.run()
+
+def prediction_analysis(bot: TrialBot):
+    # everything is (batch, derivation, rhs_seq - 1)
+    # except for lhs is (batch, derivation)
+    #
+    # { "error": [is_nt_err, nt_err, t_err],
+    #   "gold": [mask, out_is_nt, safe_nt_out, safe_t_out],
+    #   "all_lhs": derivation_tree[:, :, 0], }
+    #
+    # preds = (is_nt_prob > 0.5, nt_logits.argmax(dim=-1), t_logits.argmax(dim=-1))
+    #
+    output = bot.state.output['deliberate_analysis']
+    source_tokens = output['source_tokens']
+    is_nt_err, nt_err, t_err = output['error']
+    mask, out_is_nt, safe_nt_out, safe_t_out = output['gold']
+    preds = bot.state.output['preds']
+    all_lhs = output['all_lhs']
+    print('===' * 30)
+    batch_sz, drv_num = all_lhs.size()
+
+    nt_tok = lambda k: bot.vocab.get_token_from_index(k, bot.hparams.tgt_ns[0])
+    t_tok = lambda k: bot.vocab.get_token_from_index(k, bot.hparams.tgt_ns[1])
+
+    def interweave_rule(is_nt, nt_toks, t_toks, padding_start):
+        # all: (rhs_seq - 1,)
+        expansion_id = [str(nt.item()) if cond > 0 else str(t.item())
+                        for cond, nt, t in zip(is_nt, nt_toks, t_toks)]
+        expansion_tok = [nt_tok(nt.item()) if cond > 0 else t_tok(t.item())
+                         for cond, nt, t in zip(is_nt, nt_toks, t_toks)]
+        expansion_id.insert(padding_start, '||')
+        expansion_tok.insert(padding_start, '||')
+        return expansion_id, expansion_tok
+
+    for i in range(batch_sz):
+        if mask[i][0][0].item() == 0:
+            continue
+
+        if i > 0:
+            print('===' * 30)
+
+        print("SRC_TOKS:" + " ".join(bot.vocab.get_token_from_index(tok, bot.hparams.src_ns)
+                                     for tok in source_tokens[i].tolist()))
+
+        for j in range(drv_num):
+            if mask[i][j][0].item() == 0:
+                continue
+
+            if j > 0:
+                print('---' * 20)
+
+            padding_start = mask[i][j].sum().item()
+
+            gold_id, gold_tok = interweave_rule(out_is_nt[i][j], safe_nt_out[i][j], safe_t_out[i][j], padding_start)
+            print(f'GOLD_ID:  {all_lhs[i][j].item()}   --> {" ".join(gold_id)}')
+            print(f'GOLD_TOK: {nt_tok(all_lhs[i][j].item())} --> {" ".join(gold_tok)}')
+
+            pred_medal = []
+            for gz, z, nt, t in zip(out_is_nt[i][j], is_nt_err[i][j], nt_err[i][j], t_err[i][j]):
+                z, nt, t = list(map(lambda n: 'x' if n > 0 else 'o', (z, nt, t)))
+                medal = (z + nt) if gz > 0 else (z + t)
+                pred_medal.append(medal)
+            pred_medal.insert(padding_start, '|')
+
+            pred_id, pred_tok = interweave_rule(preds[0][i][j], preds[1][i][j], preds[2][i][j], padding_start)
+            print(f'PRED_ID:  {all_lhs[i][j].item()}   --> {" ".join(pred_id)}')
+            print(f'PRED_TOK: {nt_tok(all_lhs[i][j].item())} --> {" ".join("%s(%s)" % t for t in zip(pred_tok, pred_medal))}')
 
 if __name__ == '__main__':
     main()
