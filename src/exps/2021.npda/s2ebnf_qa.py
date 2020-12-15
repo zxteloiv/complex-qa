@@ -18,7 +18,7 @@ def cfq_ebnf_qa():
     p = HyperParamSet.common_settings(ROOT)
     p.TRAINING_LIMIT = 50
     p.OPTIM = "RAdam"
-    p.batch_sz = 50
+    p.batch_sz = 32
     p.weight_decay = .2
 
     p.src_ns = 'questionPatternModEntities'
@@ -26,15 +26,13 @@ def cfq_ebnf_qa():
     p.tgt_ns_fi = datasets.cfq_translator.NS_FI
     p.NS_VOCAB_KWARGS = {"non_padded_namespaces": p.tgt_ns[1:]}
 
-    p.enc_attn = "generalized_bilinear"
-    p.dec_hist_attn = "dot_product"
+    p.enc_attn = "generalized_dot_product"
     # transformer requires input embedding equal to hidden size
     p.encoder = "transformer"
     p.emb_sz = 128
     p.hidden_sz = 128
     p.num_heads = 8
-    p.attention_dropout = 0.
-    p.attn_use_linear = True
+    p.attn_use_linear = False
     p.attn_use_bias = False
     p.attn_use_tanh_activation = False
     p.num_enc_layers = 2
@@ -49,6 +47,8 @@ def cfq_ebnf_qa():
     p.nt_pred_crit = "projection" # distance, projection, dot_product
     p.t_pred_crit = "projection"
     p.grammar_entry = "queryunit"
+
+    p.joint_topology_control = False
     return p
 
 from trialbot.utils.grid_search_helper import import_grid_search_parameters
@@ -89,13 +89,22 @@ def get_model(p, vocab: NSVocabulary):
         quant_criterion=p.t_pred_crit,
     )
 
+    topo_pred = None
+    dec_out_dim: int = p.hidden_sz + 1
+    if not p.joint_topology_control:
+        topo_pred = nn.Sequential(
+            nn.Linear(p.hidden_sz, 1),
+            nn.Sigmoid(),
+        )
+        dec_out_dim = p.hidden_sz
+
     ebnf_pda = NeuralEBNF(
         emb_nonterminals=emb_nt,
         emb_terminals=emb_t,
         num_nonterminals=vocab.get_token_index(ns_nt),
         ebnf_expander=StackedLSTMCell(
             input_dim=p.emb_sz * 2 + 1,
-            hidden_dim=p.hidden_sz + 1,  # quant predictor requires input hidden == embedding size
+            hidden_dim=dec_out_dim,  # quant predictor requires input hidden == embedding size
             n_layers=p.num_expander_layer,
             intermediate_dropout=p.dropout,
         ),
@@ -108,12 +117,13 @@ def get_model(p, vocab: NSVocabulary):
         dropout=p.dropout,
         default_max_derivation=p.default_max_derivation,
         default_max_expansion=p.default_max_expansion,
+        topology_predictor=topo_pred,
     )
     enc_attn_net = MultiInputsSequential(
-        get_wrapped_attention(p.enc_attn, p.hidden_sz + 1, encoder.get_output_dim(),
+        get_wrapped_attention(p.enc_attn, dec_out_dim, encoder.get_output_dim(),
                               num_heads=p.num_heads, use_linear=p.attn_use_linear, use_bias=p.attn_use_bias,
                               use_tanh_activation=p.attn_use_tanh_activation),
-        nn.Linear(encoder.get_output_dim(), p.hidden_sz + 1),
+        nn.Linear(encoder.get_output_dim(), dec_out_dim),
     )
 
     model = Seq2PDA(

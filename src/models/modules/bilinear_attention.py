@@ -4,8 +4,9 @@ from torch import nn
 from torch.nn import init
 import math
 from allennlp.nn.util import masked_softmax
+from ..interfaces.attention import Attention
 
-class GeneralizedBilinearAttention(nn.Module):
+class GeneralizedBilinearAttention(Attention):
     def __init__(self, attn_dim: int, vec_dim: int,
                  use_linear: bool = True,
                  use_bias: bool = True,
@@ -46,7 +47,7 @@ class GeneralizedBilinearAttention(nn.Module):
             nonlinearity = 'leaky_relu'
         return nonlinearity
 
-    def forward(self, inputs, attend_over, attend_mask) -> torch.Tensor:
+    def forward(self, inputs, attend_over, attend_mask = None) -> torch.Tensor:
         """
         Attend over the bunch of vectors.
 
@@ -114,7 +115,9 @@ class GeneralizedBilinearAttention(nn.Module):
             similarity = self.activation(similarity)
 
         # rs_mask: (...a..., 1, num_tensors, 1)
-        rs_mask = attend_mask.unsqueeze(-2).unsqueeze(-1)
+        rs_mask = None
+        if attend_mask is not None:
+            rs_mask = attend_mask.unsqueeze(-2).unsqueeze(-1)
 
         # the mask and the similarity are ensured to have the same shape, thus getting rid of broadcasting
         # attn: (...a..., -1, num_tensors, 1)

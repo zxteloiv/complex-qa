@@ -22,6 +22,7 @@ class NeuralEBNF(nn.Module):
                  dropout: float = 0.,
                  default_max_derivation: int = 100,
                  default_max_expansion: int = 10,
+                 topology_predictor: Optional[nn.Module] = None,
                  ):
         super().__init__()
         self.emb_nonterminals = emb_nonterminals
@@ -40,6 +41,8 @@ class NeuralEBNF(nn.Module):
 
         self.default_max_derivation: int = default_max_derivation
         self.default_max_expansion: int = default_max_expansion
+
+        self.topology_pred = topology_predictor
 
     def forward(self,
                 derivation_tree: Optional[torch.LongTensor] = None,
@@ -179,8 +182,9 @@ class NeuralEBNF(nn.Module):
 
         # Prepare the first input token of the RHS, some terminal like <GO>,
         # which is required when the target symbol sequence is not given.
-        last_preds = torch.full((batch_size,), fill_value=self.start_id, dtype=torch.int, device=device)
-        last_is_nt = torch.full_like(last_preds, fill_value=1)
+        if target_symbol is None or nt_mask is None:
+            last_preds = torch.full((batch_size,), fill_value=self.start_id, dtype=torch.int, device=device)
+            last_is_nt = torch.full_like(last_preds, fill_value=1)
 
         # lhs_emb: (batch, emb_sz)
         lhs_emb = self.dropout(self.emb_nonterminals(lhs))
@@ -189,20 +193,41 @@ class NeuralEBNF(nn.Module):
             # step_tok: (batch,)
             # tok_is_nt: (batch,)
             # step_emb: (batch, emb_sz)
-            step_tok = last_preds if target_symbol is None else target_symbol[:, step]
-            tok_is_nt = last_is_nt if nt_mask is None else nt_mask[:, step]
+            if target_symbol is None or nt_mask is None:
+                step_tok, tok_is_nt = last_preds, last_is_nt
+            else:
+                step_tok, tok_is_nt = target_symbol[:, step], nt_mask[:, step]
+
             step_emb = self._get_batch_symbol_embedding(step_tok, tok_is_nt)
 
-            # LHS is concatenated to every step input
-            # step_inp: (batch, emb_sz + 1 + emb_sz)
-            step_inp = torch.cat([lhs_emb, tok_is_nt.unsqueeze(-1), step_emb], dim=-1)
+            hx, step_out_is_nt, nt_logits, t_logits = self._pred_step(lhs_emb, tok_is_nt, step_emb, hx, attn_fn)
+            mem(is_nt_prob=step_out_is_nt, nt_logits=nt_logits, t_logits=t_logits)
 
-            # step_out: (batch, decoder_hidden)
-            hx, step_out = self.expander(step_inp, hx)
-            if attn_fn is not None:
-                context = attn_fn(step_out)
-                step_out = (step_out + context).tanh()
+            # inference
+            if target_symbol is None or nt_mask is None:
+                last_is_nt = step_out_is_nt > 0.5
+                last_is_t = step_out_is_nt < 0.5
+                last_preds = (nt_logits.argmax(dim=-1).mul_(last_is_nt).add_(
+                    t_logits.argmax(dim=-1).mul_(last_is_t))
+                ).long()
 
+        t_logits = mem.get_stacked_tensor('t_logits')
+        nt_logits = mem.get_stacked_tensor('nt_logits')
+        is_nt_prob = mem.get_stacked_tensor('is_nt_prob')
+        return is_nt_prob, nt_logits, t_logits
+
+    def _pred_step(self, lhs_emb, tok_is_nt, step_emb, hx=None, attn_fn=None):
+        # LHS is concatenated to every step input
+        # step_inp: (batch, emb_sz + 1 + emb_sz)
+        step_inp = torch.cat([lhs_emb, tok_is_nt.unsqueeze(-1), step_emb], dim=-1)
+
+        # step_out: (batch, decoder_hidden)
+        hx, step_out = self.expander(step_inp, hx)
+        if attn_fn is not None:
+            context = attn_fn(step_out)
+            step_out = (step_out + context).tanh()
+
+        if self.topology_pred is None:
             # step_out_is_nt: (batch,)
             step_out_is_nt = torch.sigmoid(step_out[:, 0])
 
@@ -210,18 +235,13 @@ class NeuralEBNF(nn.Module):
             step_out_emb = self.dropout(step_out[:, 1:])
             nt_logits = self.nt_predictor(step_out_emb)
             t_logits = self.t_predictor(step_out_emb)
+        else:
+            step_out_emb = self.dropout(step_out)
+            step_out_is_nt = self.topology_pred(step_out_emb).squeeze(-1)
+            nt_logits = self.nt_predictor(step_out_emb)
+            t_logits = self.t_predictor(step_out_emb)
 
-            mem(is_nt_prob=step_out_is_nt, nt_logits=nt_logits, t_logits=t_logits)
-
-            # inference
-            last_is_nt = step_out_is_nt > 0.5
-            last_preds = (nt_logits.argmax(dim=-1) * last_is_nt
-                          + t_logits.argmax(dim=-1) * last_is_nt.logical_not()).long()
-
-        t_logits = mem.get_stacked_tensor('t_logits')
-        nt_logits = mem.get_stacked_tensor('nt_logits')
-        is_nt_prob = mem.get_stacked_tensor('is_nt_prob')
-        return is_nt_prob, nt_logits, t_logits
+        return hx, step_out_is_nt, nt_logits, t_logits
 
     def _get_batch_symbol_embedding(self, tok: torch.LongTensor, is_nt: torch.LongTensor):
         """

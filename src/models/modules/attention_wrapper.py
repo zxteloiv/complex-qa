@@ -98,6 +98,10 @@ def get_wrapped_attention(attn_type: Literal["bilinear", "dot_product", "mha"],
         attn = GeneralizedBilinearAttention(matrix_dim, vector_dim,
                                             activation=activation, use_linear=use_linear, use_bias=use_bias)
 
+    elif attn_type == "generalized_dot_product":
+        from .dot_product_attention import GeneralizedDotProductAttention
+        attn = GeneralizedDotProductAttention()
+
     elif attn_type == "dot_product":
         from allennlp.modules.attention import DotProductAttention
         attn = DotProductAttention()
