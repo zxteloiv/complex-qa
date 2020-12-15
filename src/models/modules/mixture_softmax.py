@@ -1,10 +1,11 @@
-from typing import Optional
+from typing import Optional, Literal
 import torch
 from torch import nn
 import torch.nn.functional as F
 
 class MoSProjection(nn.Module):
-    def __init__(self, mixture_num: int, input_dim, output_dim, flatten_softmax: bool = False):
+    def __init__(self, mixture_num: int, input_dim, output_dim, flatten_softmax: bool = False,
+                 output_semantics: Literal["logits", "probs"] = "logits", eps: float = 1e-15):
         super(MoSProjection, self).__init__()
         assert mixture_num >= 1
 
@@ -20,6 +21,8 @@ class MoSProjection(nn.Module):
         )
 
         self.mixture_proj_layer = nn.Linear(input_dim, output_dim * mixture_num)
+        self.output_semantics = output_semantics
+        self.eps = eps
 
     def forward(self,
                 proj_input: torch.Tensor,
@@ -63,4 +66,6 @@ class MoSProjection(nn.Module):
         # output: (batch, *, output_dim)
         output = (mixture_rs * weight_rs).sum(-1)
         del mixture_rs, weight_rs
+        if self.output_semantics == "logits":
+            output = (output + self.eps).log()
         return output
