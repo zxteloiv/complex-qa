@@ -167,9 +167,9 @@ def main():
         from utils.trial_bot_extensions import init_tensorboard_writer
         from utils.trial_bot_extensions import write_batch_info_to_tensorboard
         from utils.trial_bot_extensions import close_tensorboard
-        bot.add_event_handler(Events.STARTED, init_tensorboard_writer, 100)
-        bot.add_event_handler(Events.ITERATION_COMPLETED, write_batch_info_to_tensorboard, 100)
-        bot.add_event_handler(Events.COMPLETED, close_tensorboard, 100)
+        # bot.add_event_handler(Events.STARTED, init_tensorboard_writer, 100)
+        # bot.add_event_handler(Events.ITERATION_COMPLETED, write_batch_info_to_tensorboard, 100)
+        # bot.add_event_handler(Events.COMPLETED, close_tensorboard, 100)
 
         # debug strange errors by inspecting running time, data size, etc.
         if args.debug:

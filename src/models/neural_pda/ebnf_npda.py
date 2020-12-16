@@ -5,6 +5,7 @@ import torch.nn.functional as F
 from .batched_stack import BatchStack
 import logging
 from utils.seq_collector import SeqCollector
+from utils.nn import get_final_encoder_states, get_decoder_initial_states
 from models.modules.stacked_rnn_cell import StackedRNNCell
 
 class NeuralEBNF(nn.Module):
@@ -47,6 +48,7 @@ class NeuralEBNF(nn.Module):
     def forward(self,
                 derivation_tree: Optional[torch.LongTensor] = None,
                 is_nt: Optional[torch.LongTensor] = None,
+                inp_mask: Optional[torch.LongTensor] = None,
                 max_expansion_len: int = 10,
                 max_derivation_num: int = 20,
                 batch_size: Optional[int] = None,
@@ -59,6 +61,7 @@ class NeuralEBNF(nn.Module):
 
         :param derivation_tree: (batch, derivation, seq), each seq starts with an LHS symbol.
         :param is_nt: (batch, derivation, rhs_seq), rhs_seq = seq - 1, excluding the LHS symbol.
+        :param inp_mask: (batch, derivation, rhs_seq), useful when init the hidden states.
         :param max_expansion_len: int,
         :param max_derivation_num: int,
         :param batch_size: overwritten batch size, must be specified if npda_start is absent.
@@ -76,7 +79,7 @@ class NeuralEBNF(nn.Module):
         self._init_stack(derivation_tree, batch_size, device)
         if parallel_mode and is_nt is not None:
             self.logger.debug("Run with parallel mode to independently predict each derivation of every instance")
-            return self._forward_parallel(derivation_tree, is_nt, attn_fn)
+            return self._forward_parallel(derivation_tree, is_nt, attn_fn, mask=inp_mask)
 
         elif parallel_mode:
             # only the LHS is given (derivation length == 1), the RHS is unknown (is_nt is None)
@@ -101,7 +104,6 @@ class NeuralEBNF(nn.Module):
 
     def _forward_serial(self, derivation_count, expansion_len):
         for derive_step in range(derivation_count):
-
             pass
         raise NotImplementedError
 
@@ -109,6 +111,7 @@ class NeuralEBNF(nn.Module):
                           is_nt: Optional[torch.LongTensor] = None,
                           attn_fn: Optional[Callable[[torch.Tensor], torch.Tensor]] = None,
                           expansion_len: Optional[int] = None,
+                          mask: Optional[torch.LongTensor] = None,
                           ):
         # Forward pass when the oracle derivation_tree or at least the oracle LHS is given,
         # and in the meantime all the derivations are independent with each other,
@@ -121,37 +124,65 @@ class NeuralEBNF(nn.Module):
         flat_derivations = derivation_tree.reshape(-1, tree_shape[-1])
 
         flat_lhs = flat_derivations[:, 0]
-        flat_rhs_seq = flat_derivations[:, 1:] if is_nt is not None else None
-        flat_is_nt = is_nt.reshape(-1, tree_shape[-1] - 1) if is_nt is not None else None
+        flat_rhs_seq = flat_is_nt = None
+        if is_nt is not None:
+            flat_rhs_seq = flat_derivations[:, 1:]
+            flat_is_nt = is_nt.reshape(-1, tree_shape[-1] - 1)
 
         # due to the parallel setting, any EBNF embedding output is flattened,
-        # which will make the attention fail because it's unable to recognize batch size
-        def get_reverted_attention_for_flat_out(attn_net):
-            if attn_net is None:
+        # which will make the attention fail because it's unable to recognize the batch size
+        def build_attn_for_flat_out(attn):
+            if attn is None:
                 return None
 
-            def reverted_attn(flat_out):
+            def attn_for_flat_out(flat_out):
                 batch = tree_shape[0]
                 out = flat_out.reshape(batch, -1, flat_out.size()[-1])
-                context = attn_fn(out)
+                context = attn(out)
                 flat_context = context.reshape(-1, context.size()[-1])
                 return flat_context
+            return attn_for_flat_out
 
-            return reverted_attn
+        attn_fn = build_attn_for_flat_out(attn_fn)
 
+        # the hx is meaningful and useful for training.
+        # although it will work for inference,
+        # it had better use serial inference to propagate the complete tree state
+        hx = self._init_parallel_hx(flat_lhs, flat_is_nt, flat_rhs_seq, attn_fn, mask)
         flat_predictions = self._expand_rhs(flat_lhs, flat_is_nt, flat_rhs_seq,
-                                            attn_fn=get_reverted_attention_for_flat_out(attn_fn),
-                                            max_expansion_len=expansion_len)
+                                            hx=hx, attn_fn=attn_fn, max_expansion_len=expansion_len)
 
         # flat_is_nt: (batch*derivation, rhs_seq)
         # flat_nt_logits: (batch*derivation, rhs_seq, #NT)
         # flat_t_logits: (batch*derivation, rhs_seq, #T)
-        flat_is_nt, flat_nt_logits, flat_t_logits = flat_predictions
+        flat_is_nt, flat_nt_logits, flat_t_logits, _ = flat_predictions
 
         is_nt_prob = flat_is_nt.reshape(*tree_shape[:-1], -1)
         nt_logits = flat_nt_logits.reshape(tree_shape[0], -1, *flat_nt_logits.size()[-2:])
         t_logits = flat_t_logits.reshape(tree_shape[0], -1, *flat_t_logits.size()[-2:])
         return is_nt_prob, nt_logits, t_logits
+
+    def _init_parallel_hx(self, lhs, is_nt: Optional, gold_rhs: Optional,
+                          attn_fn: Optional,
+                          mask: Optional = None,
+                          batch_sz: Optional[int] = None):
+        batch_sz = batch_sz or lhs.size()[0]
+        with torch.no_grad():
+            # out_emb: (batch*derivation, rhs_seq, hidden_dim)
+            _, _, _, out_emb = self._expand_rhs(lhs, is_nt, gold_rhs, attn_fn=attn_fn)
+            # mask: (-1, rhs_seq)
+            if mask is not None:
+                if mask.ndim >= out_emb.ndim:
+                    mask = mask.reshape(-1, mask.size()[-1])
+                crude_out = get_decoder_initial_states([out_emb], mask, num_decoder_layers=self.expander.get_layer_num())
+                del mask
+            else:
+                crude_out = [out_emb[:, -1, :] for _ in range(self.expander.get_layer_num())]
+
+            rolled_out = [torch.roll(layer_out, 1, dims=0) for layer_out in crude_out]
+            hidden, _ = self.expander.init_hidden_states(rolled_out)
+            del _, crude_out
+            return hidden
 
     def _expand_rhs(self,
                     lhs: Optional[torch.LongTensor],
@@ -200,13 +231,13 @@ class NeuralEBNF(nn.Module):
 
             step_emb = self._get_batch_symbol_embedding(step_tok, tok_is_nt)
 
-            hx, step_out_is_nt, nt_logits, t_logits = self._pred_step(lhs_emb, tok_is_nt, step_emb, hx, attn_fn)
-            mem(is_nt_prob=step_out_is_nt, nt_logits=nt_logits, t_logits=t_logits)
+            hx, out_emb, out_is_nt, nt_logits, t_logits = self._pred_step(lhs_emb, tok_is_nt, step_emb, hx, attn_fn)
+            mem(is_nt_prob=out_is_nt, nt_logits=nt_logits, t_logits=t_logits, step_out=out_emb)
 
             # inference
             if target_symbol is None or nt_mask is None:
-                last_is_nt = step_out_is_nt > 0.5
-                last_is_t = step_out_is_nt < 0.5
+                last_is_nt = out_is_nt > 0.5
+                last_is_t = last_is_nt.logical_not()
                 last_preds = (nt_logits.argmax(dim=-1).mul_(last_is_nt).add_(
                     t_logits.argmax(dim=-1).mul_(last_is_t))
                 ).long()
@@ -214,7 +245,8 @@ class NeuralEBNF(nn.Module):
         t_logits = mem.get_stacked_tensor('t_logits')
         nt_logits = mem.get_stacked_tensor('nt_logits')
         is_nt_prob = mem.get_stacked_tensor('is_nt_prob')
-        return is_nt_prob, nt_logits, t_logits
+        step_out = mem.get_stacked_tensor('step_out')
+        return is_nt_prob, nt_logits, t_logits, step_out
 
     def _pred_step(self, lhs_emb, tok_is_nt, step_emb, hx=None, attn_fn=None):
         # LHS is concatenated to every step input
@@ -231,7 +263,7 @@ class NeuralEBNF(nn.Module):
             # step_out_is_nt: (batch,)
             step_out_is_nt = torch.sigmoid(step_out[:, 0])
 
-            # step_*_logits: (batch, #count)
+            # *_logits: (batch, #count)
             step_out_emb = self.dropout(step_out[:, 1:])
             nt_logits = self.nt_predictor(step_out_emb)
             t_logits = self.t_predictor(step_out_emb)
@@ -241,7 +273,7 @@ class NeuralEBNF(nn.Module):
             nt_logits = self.nt_predictor(step_out_emb)
             t_logits = self.t_predictor(step_out_emb)
 
-        return hx, step_out_is_nt, nt_logits, t_logits
+        return hx, step_out_emb, step_out_is_nt, nt_logits, t_logits
 
     def _get_batch_symbol_embedding(self, tok: torch.LongTensor, is_nt: torch.LongTensor):
         """

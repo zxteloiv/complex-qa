@@ -60,12 +60,13 @@ class Seq2PDA(nn.Module):
             # token_fidelity does not come with an indicator for LHS
             inp_is_nt = token_fidelity[:, :, :-1] == self.nt_fi  # excluding <RuleEnd>
 
+            gold_labels = self._get_gold_label(derivation_tree, token_fidelity)
+            mask = gold_labels[3]
             # A tuple of the three
             # is_nt: (batch, derivation, rhs_seq - 1)
             # nt_logits: (batch, derivation, rhs_seq - 1, #NT)
             # t_logits: (batch, derivation, rhs_seq - 1, #T)
-            pda_logits = self.ebnf_npda(tree_inp, inp_is_nt, attn_fn=enc_attn_fn, parallel_mode=True)
-            gold_labels = self._get_gold_label(derivation_tree, token_fidelity)
+            pda_logits = self.ebnf_npda(tree_inp, inp_is_nt, attn_fn=enc_attn_fn, parallel_mode=True, inp_mask=mask)
             loss_is_nt, loss_nt, loss_t = self._get_batch_xent(gold_labels, pda_logits)
             loss = (loss_is_nt + loss_nt + loss_t).mean()
             output['loss'] = loss

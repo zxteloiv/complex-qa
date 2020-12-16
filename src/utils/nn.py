@@ -291,9 +291,12 @@ def get_decoder_initial_states(layer_state: List[torch.Tensor],
         src_agg = [source_mask.new_zeros((batch, hidden_dim), dtype=torch.float32) for _ in layer_state]
     else: # forward_last
         # last_word_indices: (batch,)
+        last_word_indices = (source_mask.sum(1).long() - 1)
+        # for the case the entire sequence is masked out, the last indices is set to 0 by default,
+        # because they don't contribute to the final loss.
+        last_word_indices = last_word_indices * (last_word_indices >= 0)
         # expanded_indices: (batch, 1, hidden_dim)
         # forward_by_layer: [(batch, hidden_dim)]
-        last_word_indices = source_mask.sum(1).long() - 1
         expanded_indices = last_word_indices.view(-1, 1, 1).expand(batch, 1, hidden_dim)
         forward_by_layer = [state.gather(1, expanded_indices).squeeze(1) for state in layer_state]
         if is_bidirectional:
