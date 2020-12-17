@@ -89,5 +89,20 @@ def s2s_top():
     p.tied_decoder_embedding = True
     return p
 
+@Registry.hparamset()
+def s2s_top_unified():
+    p = s2s_top()
+    p.src_namespace = 'unified_vocab'
+    p.tgt_namespace = 'unified_vocab'
+    return p
+
+@Registry.hparamset()
+def s2s_top_unified_aggressive():
+    p = s2s_top_unified()
+    p.emb_sz = 300
+    p.hidden_sz = 300
+    p.dropout = .5
+    return p
+
 if __name__ == '__main__':
     main()

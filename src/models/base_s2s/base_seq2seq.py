@@ -309,7 +309,10 @@ class BaseSeq2Seq(torch.nn.Module):
 
         emb_sz = p.emb_sz
         source_embedding = nn.Embedding(num_embeddings=vocab.get_vocab_size(p.src_namespace), embedding_dim=emb_sz)
-        target_embedding = nn.Embedding(num_embeddings=vocab.get_vocab_size(p.tgt_namespace), embedding_dim=emb_sz)
+        if p.src_namespace == p.tgt_namespace:
+            target_embedding = source_embedding
+        else:
+            target_embedding = nn.Embedding(num_embeddings=vocab.get_vocab_size(p.tgt_namespace), embedding_dim=emb_sz)
 
         encoder = StackedEncoder.get_encoder(p)
         enc_out_dim = encoder.get_output_dim()
