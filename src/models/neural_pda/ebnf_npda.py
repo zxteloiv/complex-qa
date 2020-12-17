@@ -179,9 +179,16 @@ class NeuralEBNF(nn.Module):
             else:
                 crude_out = [out_emb[:, -1, :] for _ in range(self.expander.get_layer_num())]
 
-            rolled_out = [torch.roll(layer_out, 1, dims=0) for layer_out in crude_out]
-            hidden, _ = self.expander.init_hidden_states(rolled_out)
-            del _, crude_out
+            one_step_context = []
+            for layer_out in crude_out:
+                layer_out = torch.roll(layer_out, 1, dims=0)
+                layer_out = layer_out.reshape(batch_sz, -1, *layer_out.size()[1:])
+                layer_out[:, 0, :] = 0
+                layer_out = layer_out.reshape(-1, layer_out.size()[-1])
+                one_step_context.append(layer_out)
+
+            hidden, _ = self.expander.init_hidden_states(one_step_context)
+            del _, crude_out, one_step_context
             return hidden
 
     def _expand_rhs(self,
