@@ -183,10 +183,9 @@ class BaseSeq2Seq(torch.nn.Module):
         # batch_start: (batch_size,)
         batch_start = source_mask.new_full((batch,), fill_value=self._start_id)
 
+        enc_attn_fn = None
         if self._enc_attn is not None:
             enc_attn_fn = lambda out: self._enc_attn_mapping(self._enc_attn(out, source_state, source_mask))
-        else:
-            enc_attn_fn = None
 
         mem = SeqCollector()
         last_pred = batch_start
@@ -242,7 +241,7 @@ class BaseSeq2Seq(torch.nn.Module):
             )
 
         else:
-            dec_hist_attn_fn = lambda out: torch.zeros_like(out)
+            dec_hist_attn_fn = lambda out: self._dec_hist_attn_mapping(out)
 
         return dec_hist_attn_fn
 
@@ -300,17 +299,19 @@ class BaseSeq2Seq(torch.nn.Module):
         p.max_decoding_step = 100
         p.scheduled_sampling = .1
         p.decoder_init_strategy = "forward_last_parallel"
+        p.tied_decoder_embedding = True
         """
         from trialbot.data import START_SYMBOL, END_SYMBOL
         from torch import nn
         from models.modules.stacked_rnn_cell import StackedRNNCell
+        from models.modules.stacked_encoder import StackedEncoder
         from ..modules.attention_wrapper import get_wrapped_attention
 
         emb_sz = p.emb_sz
         source_embedding = nn.Embedding(num_embeddings=vocab.get_vocab_size(p.src_namespace), embedding_dim=emb_sz)
         target_embedding = nn.Embedding(num_embeddings=vocab.get_vocab_size(p.tgt_namespace), embedding_dim=emb_sz)
 
-        encoder = cls.get_encoder(p)
+        encoder = StackedEncoder.get_encoder(p)
         enc_out_dim = encoder.get_output_dim()
         dec_out_dim = p.hidden_sz  # the output dimension of decoder is just the same as hidden_dim
 
@@ -326,7 +327,8 @@ class BaseSeq2Seq(torch.nn.Module):
             """Compute the dimension requirements for all attention modules"""
             return sum(dim for attn, dim in zip(attns, dims) if attn is not None)
 
-        # since attentions are mapped into hidden size, the hidden_dim is used instead of original context size
+        # since attentions are mapped into hidden size, the hidden_dim is used
+        # instead of original context size for the encoder outputs
         attn_size = sum_attn_dims([enc_attn, dec_hist_attn], [dec_out_dim, dec_out_dim])
 
         dec_in_dim = emb_sz + (attn_size if p.concat_attn_to_dec_input else 0)
@@ -336,6 +338,7 @@ class BaseSeq2Seq(torch.nn.Module):
         proj_in_dim = dec_out_dim + (attn_size if p.concat_attn_to_dec_input else 0)
         word_proj = nn.Linear(proj_in_dim, vocab.get_vocab_size(p.tgt_namespace))
         if p.tied_decoder_embedding:
+            assert proj_in_dim == emb_sz, "If output is tied with embedding, they must be equal"
             word_proj.weight = target_embedding.weight  # tied embedding
 
         model = BaseSeq2Seq(
