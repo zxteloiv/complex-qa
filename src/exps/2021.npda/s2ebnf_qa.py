@@ -62,6 +62,7 @@ def get_model(p, vocab: NSVocabulary):
     from models.modules.stacked_rnn_cell import StackedLSTMCell
     from models.modules.container import MultiInputsSequential
     from trialbot.data import START_SYMBOL, PADDING_TOKEN, END_SYMBOL
+    from allennlp.modules.matrix_attention import DotProductMatrixAttention
 
     encoder = StackedEncoder.get_encoder(p)
     emb_src = nn.Embedding(vocab.get_vocab_size(p.src_ns), embedding_dim=p.emb_sz)
@@ -112,6 +113,7 @@ def get_model(p, vocab: NSVocabulary):
         default_max_derivation=p.default_max_derivation,
         default_max_expansion=p.default_max_expansion,
         topology_predictor=topo_pred,
+        derivation_hist_similairty=DotProductMatrixAttention(),
     )
     enc_attn_net = MultiInputsSequential(
         get_wrapped_attention(p.enc_attn, dec_out_dim, encoder.get_output_dim(),

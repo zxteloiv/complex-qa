@@ -7,6 +7,8 @@ import logging
 from utils.seq_collector import SeqCollector
 from utils.nn import get_final_encoder_states, get_decoder_initial_states
 from models.modules.stacked_rnn_cell import StackedRNNCell
+from allennlp.modules.matrix_attention import MatrixAttention
+from allennlp.nn.util import masked_softmax
 
 class NeuralEBNF(nn.Module):
     def __init__(self,
@@ -24,6 +26,7 @@ class NeuralEBNF(nn.Module):
                  default_max_derivation: int = 100,
                  default_max_expansion: int = 10,
                  topology_predictor: Optional[nn.Module] = None,
+                 derivation_hist_similairty: Optional[MatrixAttention] = None,
                  ):
         super().__init__()
         self.emb_nonterminals = emb_nonterminals
@@ -44,6 +47,10 @@ class NeuralEBNF(nn.Module):
         self.default_max_expansion: int = default_max_expansion
 
         self.topology_pred = topology_predictor
+        self.derivation_hist_similairty = derivation_hist_similairty
+        self._derivation_mapping = None
+        if derivation_hist_similairty is not None:
+            self._derivation_mapping = nn.Linear(ebnf_expander.hidden_dim, ebnf_expander.hidden_dim)
 
     def forward(self,
                 derivation_tree: Optional[torch.LongTensor] = None,
@@ -121,46 +128,98 @@ class NeuralEBNF(nn.Module):
         # Typical scenarios are either (tree-)language model or grammar warm-up.
         # Note is_nt doesn't contain LHS info.
         tree_shape = derivation_tree.size()  # (batch, derivation, seq)
-        flat_derivations = derivation_tree.reshape(-1, tree_shape[-1])
+        flat_derivations = self._flatten_derivation(derivation_tree)
 
         flat_lhs = flat_derivations[:, 0]
         flat_rhs_seq = flat_is_nt = None
         if is_nt is not None:
             flat_rhs_seq = flat_derivations[:, 1:]
-            flat_is_nt = is_nt.reshape(-1, tree_shape[-1] - 1)
+            flat_is_nt = self._flatten_derivation(is_nt)
 
-        # due to the parallel setting, any EBNF embedding output is flattened,
-        # which will make the attention fail because it's unable to recognize the batch size
-        def build_attn_for_flat_out(attn):
-            if attn is None:
-                return None
-
-            def attn_for_flat_out(flat_out):
-                batch = tree_shape[0]
-                out = flat_out.reshape(batch, -1, flat_out.size()[-1])
-                context = attn(out)
-                flat_context = context.reshape(-1, context.size()[-1])
-                return flat_context
-            return attn_for_flat_out
-
-        attn_fn = build_attn_for_flat_out(attn_fn)
-
-        # the hx is meaningful and useful for training.
+        attn_fn = self._build_attn_for_flat_out(tree_shape[0], attn_fn)
+        # the hx is meaningful and useful for training, only encoder attention is used.
         # although it will work for inference,
         # it had better use serial inference to propagate the complete tree state
         hx = self._init_parallel_hx(flat_lhs, flat_is_nt, flat_rhs_seq, attn_fn, mask)
+
+        # out: (batch*derivation, hidden_dim)
+        flat_out = self.expander.get_output_state(hx)
+        out = self._revert_flat_derivation(flat_out, tree_shape[0])
+        dec_attn_fn = self._build_runtime_dec_hist_attn_fn(tree_shape[0], out)
+
+        def combined_attn(out):
+            context = 0
+            if attn_fn is not None:
+                context = context + attn_fn(out)
+
+            if dec_attn_fn is not None:
+                context = context + dec_attn_fn(out)
+            return context
+
         flat_predictions = self._expand_rhs(flat_lhs, flat_is_nt, flat_rhs_seq,
-                                            hx=hx, attn_fn=attn_fn, max_expansion_len=expansion_len)
+                                            hx=hx, attn_fn=combined_attn, max_expansion_len=expansion_len)
 
         # flat_is_nt: (batch*derivation, rhs_seq)
         # flat_nt_logits: (batch*derivation, rhs_seq, #NT)
         # flat_t_logits: (batch*derivation, rhs_seq, #T)
         flat_is_nt, flat_nt_logits, flat_t_logits, _ = flat_predictions
-
-        is_nt_prob = flat_is_nt.reshape(*tree_shape[:-1], -1)
-        nt_logits = flat_nt_logits.reshape(tree_shape[0], -1, *flat_nt_logits.size()[-2:])
-        t_logits = flat_t_logits.reshape(tree_shape[0], -1, *flat_t_logits.size()[-2:])
+        is_nt_prob = self._revert_flat_derivation(flat_is_nt, tree_shape[0])
+        nt_logits = self._revert_flat_derivation(flat_nt_logits, tree_shape[0])
+        t_logits = self._revert_flat_derivation(flat_t_logits, tree_shape[0])
         return is_nt_prob, nt_logits, t_logits
+
+    @staticmethod
+    def _flatten_derivation(t):
+        return t.reshape(-1, *t.size()[2:])
+
+    @staticmethod
+    def _revert_flat_derivation(t, batch_sz):
+        return t.reshape(batch_sz, -1, *t.size()[1:])
+
+    def _build_attn_for_flat_out(self, batch_sz, attn):
+        # due to the parallel setting, any EBNF embedding output is flattened,
+        # which will make the attention fail because it's unable to recognize the batch size
+        if attn is None:
+            return None
+
+        def attn_for_flat_out(flat_out):
+            context = attn(self._revert_flat_derivation(flat_out, batch_sz))
+            return self._flatten_derivation(context)
+        return attn_for_flat_out
+
+    def _build_runtime_dec_hist_attn_fn(self, batch_sz: int, history):
+        """
+        :param batch_sz:
+        :param history: (batch, hist_derivation, hidden_dim)
+        :return:
+        """
+        if self.derivation_hist_similairty is None:
+            return None
+
+        def attn_for_flat_out(flat_out):
+            # for the serial inference the derivation is 1, so everything would be just fine
+            # flat_out: (batch*derivation, hidden)
+            # out: (batch, derivation, hidden)
+            out = flat_out.reshape(batch_sz, -1, flat_out.size()[-1])
+            # similarity: (batch, derivation, hist_derivation)
+            similarity = self.derivation_hist_similairty(out, history)
+
+            # in parallel mode, derivation == hist_derivation
+            derivation, hist_derivation = similarity.size()[1:]
+            mask = torch.ones_like(similarity[0])
+            if derivation == hist_derivation:   # mask will be conducted
+                mask = mask.tril_(-1)
+
+            # mask: (1, derivation, hist_derivation)
+            mask = mask.unsqueeze(0)
+            # attn_weights: (batch, derivation, hist_derivation)
+            attn_weights = masked_softmax(similarity, mask, dim=-1)
+
+            # context: (batch, derivation, hidden_dim)
+            context = torch.matmul(attn_weights, history)
+            return self._flatten_derivation(self._derivation_mapping(context))
+
+        return attn_for_flat_out
 
     def _init_parallel_hx(self, lhs, is_nt: Optional, gold_rhs: Optional,
                           attn_fn: Optional,
@@ -264,7 +323,7 @@ class NeuralEBNF(nn.Module):
         hx, step_out = self.expander(step_inp, hx)
         if attn_fn is not None:
             context = attn_fn(step_out)
-            step_out = (step_out + context).tanh()
+            step_out = (step_out + self.dropout(context)).tanh()
 
         if self.topology_pred is None:
             # step_out_is_nt: (batch,)
