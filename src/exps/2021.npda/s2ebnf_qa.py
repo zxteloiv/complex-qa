@@ -16,7 +16,7 @@ def cfq_ebnf_qa():
     from utils.root_finder import find_root
     ROOT = find_root()
     p = HyperParamSet.common_settings(ROOT)
-    p.TRAINING_LIMIT = 50
+    p.TRAINING_LIMIT = 5
     p.OPTIM = "RAdam"
     p.batch_sz = 32
     p.weight_decay = .2
@@ -50,12 +50,6 @@ def cfq_ebnf_qa():
 
     p.joint_topology_control = False
     return p
-
-from trialbot.utils.grid_search_helper import import_grid_search_parameters
-import_grid_search_parameters(grid_conf={
-    "num_expander_layer": [2, 3, 4],
-    "TRAINING_LIMIT": [5],
-}, base_param_fn=cfq_ebnf_qa)
 
 def get_model(p, vocab: NSVocabulary):
     from torch import nn
