@@ -56,11 +56,11 @@ def add_depth_features_to_single_position(inputs: torch.Tensor, timestep: float)
     Add depth-wise features to inputs.
     The word ``depth'' is similar to ``timestep'' in Transformer.
 
-    :param inputs: (batch, emb_dim)
+    :param inputs: (batch, seq_len, emb_dim)
     :param timestep: float
-    :returns same shape with inputs: (batch, emb_dim)
+    :returns same shape with inputs: (batch, seq_len, emb_dim)
     """
-    return add_position_and_timestep_sinusoid(inputs.unsqueeze(1), timestep).squeeze(1)
+    return add_position_and_timestep_sinusoid(inputs, timestep)
 
 def filter_cat(iterable, dim):
     items = [item for item in iterable if item is not None]

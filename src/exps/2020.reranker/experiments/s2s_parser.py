@@ -22,7 +22,10 @@ def main():
         from utils.trial_bot_extensions import end_with_nan_loss
         from utils.trial_bot_extensions import evaluation_on_dev_every_epoch
         bot.add_event_handler(Events.EPOCH_COMPLETED, evaluation_on_dev_every_epoch, 90,
-                              rewrite_eval_hparams={"batch_sz": 16})
+                              rewrite_eval_hparams={"batch_sz": 32},
+                              interval=1,
+                              skip_first_epochs=15,
+                              )
 
         @bot.attach_extension(Events.EPOCH_COMPLETED, 95)
         def collect_garbage(bot: TrialBot):
@@ -82,12 +85,12 @@ def main():
     bot.run()
 
 def get_model(p, vocab):
-    if getattr(p, 'model_framework', 'rnn') == 'transformer':
-        from models.transformer.parallel_seq2seq import ParallelSeq2Seq
-        return ParallelSeq2Seq.from_param_and_vocab(p, vocab)
-    else:
+    if getattr(p, 'model_arch', 'rnn') == 'rnn':
         from models.base_s2s.base_seq2seq import BaseSeq2Seq
         return BaseSeq2Seq.from_param_and_vocab(p, vocab)
+    else:
+        from models.transformer.parallel_seq2seq import ParallelSeq2Seq
+        return ParallelSeq2Seq.from_param_and_vocab(p, vocab)
 
 
 @Registry.hparamset()
@@ -137,18 +140,19 @@ def top_transformer_unified():
     p = HyperParamSet.common_settings(find_root())
     p.TRAINING_LIMIT = 100  # in num of epochs
     p.WEIGHT_DECAY = .2
-    p.ADAM_LR = 3e-4
+    p.ADAM_LR = 1e-3
     p.OPTIM = "RAdam"
-    p.batch_sz = 32
+    p.batch_sz = 128
     p.emb_sz = 256
     p.src_namespace = 'unified_vocab'
     p.tgt_namespace = 'unified_vocab'
 
-    p.model_framework = 'transformer'
+    p.model_arch = 'transformer'    # transformer, universal_transformer, or rnn
 
     p.num_enc_layers = 4
     p.num_dec_layers = 4
     p.dropout = .2
+    p.attention_dropout = .05
     p.num_heads = 8
     p.max_decoding_len = 100
     p.nonlinear_activation = "mish"
@@ -156,13 +160,15 @@ def top_transformer_unified():
     p.predictor = 'quant'  # mos, quant
     # used for quant predictor
     p.tied_tgt_predictor = False
-    p.quant_crit = "dot_product"  # distance, projection, dot_product
+    p.quant_crit = "projection"  # distance, projection, dot_product
     # used for mos predictor
     # p.num_mixture = 10
 
     p.beam_size = 1
     p.diversity_factor = 0.
     p.acc_factor = 1.
+
+    p.flooding_bias = 0.2
     return p
 
 if __name__ == '__main__':

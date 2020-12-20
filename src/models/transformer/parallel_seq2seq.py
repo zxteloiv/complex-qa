@@ -29,6 +29,7 @@ class ParallelSeq2Seq(nn.Module):
                  diversity_factor: float = 0.,
                  accumulation_factor: float = 1.,
                  use_bleu: bool = False,
+                 flooding_bias: float = -1,
                  ):
         super().__init__()
         self.vocab = vocab
@@ -49,6 +50,8 @@ class ParallelSeq2Seq(nn.Module):
         self.bleu = None
         if use_bleu:
             self.bleu = BLEU(exclude_indices={pad_id, start_id, end_id})
+
+        self.flooding_bias = flooding_bias
 
         self.ppl = Perplexity()
         self.err = Average()
@@ -72,6 +75,8 @@ class ParallelSeq2Seq(nn.Module):
         if self.training:
             predictions, logits = self._forward_training(state, target[:, :-1], source_mask, target_mask[:, :-1])
             loss = seq_cross_ent(logits, target[:, 1:].contiguous(), target_mask[:, 1:].float())
+            if self.flooding_bias > 0:
+                loss = (loss - self.flooding_bias).abs() + self.flooding_bias
             output['loss'] = loss
 
         else:
@@ -344,8 +349,8 @@ class ParallelSeq2Seq(nn.Module):
         """
         from trialbot.data import START_SYMBOL, END_SYMBOL, PADDING_TOKEN
         from torch import nn
-        from .encoder import TransformerEncoder
-        from .decoder import TransformerDecoder
+        from .encoder import TransformerEncoder, UniversalTransformerEncoder
+        from .decoder import TransformerDecoder, UniversalTransformerDecoder
         from ..modules.mixture_softmax import MoSProjection
         from ..modules.quantized_token_predictor import QuantTokenPredictor
         emb_sz = p.emb_sz
@@ -362,28 +367,33 @@ class ParallelSeq2Seq(nn.Module):
                                             shared_embedding=target_embedding.weight if p.tied_tgt_predictor else None,
                                             quant_criterion=p.quant_crit)
 
+        if getattr(p, 'model_arch', None) == "universal_transformer":
+            enc_cls = UniversalTransformerEncoder
+            dec_cls = UniversalTransformerDecoder
+        else:
+            enc_cls = TransformerEncoder
+            dec_cls = TransformerDecoder
+
         model = ParallelSeq2Seq(
             vocab=vocab,
-            encoder=TransformerEncoder(input_dim=emb_sz,
-                                       num_layers=p.num_enc_layers,
-                                       num_heads=p.num_heads,
-                                       feedforward_hidden_dim=p.emb_sz,
-                                       feedforward_dropout=p.dropout,
-                                       residual_dropout=p.dropout,
-                                       attention_dropout=0.,
-                                       use_positional_embedding=True,
-                                       feedforward_hidden_activation=p.nonlinear_activation,
-                                       ),
-            decoder=TransformerDecoder(input_dim=emb_sz,
-                                       num_layers=p.num_dec_layers,
-                                       num_heads=p.num_heads,
-                                       feedforward_hidden_dim=emb_sz,
-                                       feedforward_dropout=p.dropout,
-                                       residual_dropout=p.dropout,
-                                       attention_dropout=0.,
-                                       use_positional_embedding=True,
-                                       feedforward_hidden_activation=p.nonlinear_activation,
-                                       ),
+            encoder=enc_cls(input_dim=emb_sz,
+                            num_layers=p.num_enc_layers,
+                            num_heads=p.num_heads,
+                            feedforward_hidden_dim=p.emb_sz,
+                            feedforward_dropout=p.dropout,
+                            residual_dropout=p.dropout,
+                            attention_dropout=getattr(p, 'attention_dropout', 0.),
+                            feedforward_hidden_activation=p.nonlinear_activation,
+                            ),
+            decoder=dec_cls(input_dim=emb_sz,
+                            num_layers=p.num_dec_layers,
+                            num_heads=p.num_heads,
+                            feedforward_hidden_dim=emb_sz,
+                            feedforward_dropout=p.dropout,
+                            residual_dropout=p.dropout,
+                            attention_dropout=getattr(p, 'attention_dropout', 0.),
+                            feedforward_hidden_activation=p.nonlinear_activation,
+                            ),
             source_embedding=source_embedding,
             target_embedding=target_embedding,
             word_projection=predictor,
@@ -397,6 +407,7 @@ class ParallelSeq2Seq(nn.Module):
             diversity_factor=getattr(p, 'diversity_factor', 0.),
             accumulation_factor=getattr(p, 'acc_factor', 1.),
             use_bleu=getattr(p, 'use_bleu', False),
+            flooding_bias=getattr(p, 'flooding_bias', -1),
         )
 
         return model

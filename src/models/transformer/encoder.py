@@ -4,7 +4,7 @@ import torch.nn
 
 from allennlp.modules import FeedForward
 from torch.nn import LayerNorm
-from utils.nn import add_positional_features
+from utils.nn import add_positional_features, add_depth_features_to_single_position
 from allennlp.nn import Activation
 
 from .multi_head_attention import MultiHeadSelfAttention
@@ -83,6 +83,70 @@ class TransformerEncoder(torch.nn.Module):
             feedforward_out = feedforward_norm(feedforward_out + attention_out)
 
             output_tensor = feedforward_out
+
+        return output_tensor
+
+    def get_output_dim(self) -> int:
+        return self.hidden_dim
+
+    def is_bidirectional(self) -> bool:
+        return False
+
+    def get_input_dim(self) -> int:
+        return self.input_dim
+
+
+class UniversalTransformerEncoder(torch.nn.Module):
+    def __init__(self,
+                 input_dim: int,  # input embedding dimension
+                 num_layers: int = 6,
+                 num_heads: int = 8,
+                 feedforward_hidden_dim: int = None,
+                 feedforward_hidden_activation: str = "mish",
+                 feedforward_dropout: float = 0.1,
+                 residual_dropout: float = 0.1,
+                 attention_dropout: float = 0.1,
+                 ):
+        super().__init__()
+
+        hidden_dim = input_dim
+        feedforward_hidden_dim = feedforward_hidden_dim or hidden_dim
+
+        layer_inp = input_dim
+        self.num_layers = num_layers
+
+        self.attention = MultiHeadSelfAttention(num_heads, layer_inp, layer_inp, layer_inp,
+                                           attention_dropout=attention_dropout)
+
+        self.attention_norm = LayerNorm(layer_inp)
+
+        self.feedfoward = FeedForward(layer_inp,
+                                      num_layers=2,
+                                      hidden_dims=[feedforward_hidden_dim, hidden_dim],
+                                      activations=[Activation.by_name(feedforward_hidden_activation)(),
+                                                   Activation.by_name('linear')()],
+                                      dropout=feedforward_dropout)
+
+        self.feedforward_norm = LayerNorm(hidden_dim)
+
+        self.dropout = torch.nn.Dropout(residual_dropout)
+        self.input_dim = self.hidden_dim = input_dim
+
+    def forward(self, inputs: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+        output_tensor = inputs
+
+        for i in range(self.num_layers):
+            output_tensor = add_depth_features_to_single_position(output_tensor, i)
+
+            attention_out, _ = self.attention(output_tensor, mask)
+
+            attention_out = self.dropout(attention_out + output_tensor)
+            attention_out = self.attention_norm(attention_out)
+
+            ffn_out = self.feedfoward(attention_out)
+            ffn_out = self.dropout(ffn_out + attention_out)
+
+            output_tensor = self.feedforward_norm(ffn_out)
 
         return output_tensor
 

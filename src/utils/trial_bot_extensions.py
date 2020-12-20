@@ -72,10 +72,14 @@ def track_pytorch_module_forward_time(bot: TrialBot, max_depth: int = -1, timefm
             if max_depth < 0 or name.count('.') - base_depth < max_depth:
                 module.register_forward_pre_hook(print_time_hook)
 
-def evaluation_on_dev_every_epoch(bot: TrialBot, interval: int = 1, rewrite_eval_hparams: dict = None):
+def evaluation_on_dev_every_epoch(bot: TrialBot, interval: int = 1,
+                                  clear_cache_each_batch: bool = True,
+                                  rewrite_eval_hparams: dict = None,
+                                  skip_first_epochs: int = 0,
+                                  ):
     from trialbot.utils.move_to_device import move_to_device
     import json
-    if bot.state.epoch % interval == 0:
+    if bot.state.epoch % interval == 0 and bot.state.epoch > skip_first_epochs:
         bot.logger.info("Running for evaluation metrics ...")
 
         dataset, hparams = bot.dev_set, bot.hparams
@@ -91,6 +95,13 @@ def evaluation_on_dev_every_epoch(bot: TrialBot, interval: int = 1, rewrite_eval
             if device >= 0:
                 batch = move_to_device(batch, device)
             model(**batch)
+
+            if clear_cache_each_batch:
+                import gc
+                gc.collect()
+                if bot.args.device >= 0:
+                    import torch.cuda
+                    torch.cuda.empty_cache()
 
         val_metrics = bot.model.get_metric(reset=True)
         if hasattr(bot, 'tbx_writer'):
