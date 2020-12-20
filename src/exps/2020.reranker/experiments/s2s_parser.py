@@ -22,17 +22,23 @@ def main():
         from utils.trial_bot_extensions import end_with_nan_loss
         from utils.trial_bot_extensions import evaluation_on_dev_every_epoch
         bot.add_event_handler(Events.EPOCH_COMPLETED, evaluation_on_dev_every_epoch, 90,
-                              rewrite_eval_hparams={"batch_sz": 32})
+                              rewrite_eval_hparams={"batch_sz": 16})
 
-        @bot.attach_extension(Events.ITERATION_COMPLETED, 95)
-        def clear_grads(bot: TrialBot):
+        @bot.attach_extension(Events.EPOCH_COMPLETED, 95)
+        def collect_garbage(bot: TrialBot):
             for optim in bot.updater._optims:
                 optim.zero_grad()
 
-        @bot.attach_extension(Events.ITERATION_COMPLETED, 93)
-        def collect_garbage(bot: TrialBot):
+            if bot.state.output is not None:
+                del bot.state.output
             import gc
             gc.collect()
+            if bot.args.device >= 0:
+                import torch.cuda
+                torch.cuda.empty_cache()
+
+        bot.add_event_handler(Events.EPOCH_STARTED, collect_garbage, 95)
+        bot.add_event_handler(Events.EPOCH_COMPLETED, collect_garbage, 95)
 
         bot.add_event_handler(Events.ITERATION_COMPLETED, end_with_nan_loss, 100)
         bot.add_event_handler(Events.EPOCH_COMPLETED, every_epoch_model_saver, 100)
@@ -129,27 +135,28 @@ def top_transformer_unified():
     from trialbot.training.hparamset import HyperParamSet
     from trialbot.utils.root_finder import find_root
     p = HyperParamSet.common_settings(find_root())
-    p.TRAINING_LIMIT = 200  # in num of epochs
+    p.TRAINING_LIMIT = 100  # in num of epochs
     p.WEIGHT_DECAY = .2
-    p.ADAM_LR = 1e-3
+    p.ADAM_LR = 3e-4
     p.OPTIM = "RAdam"
-    p.batch_sz = 128
-    p.emb_sz = 300
+    p.batch_sz = 32
+    p.emb_sz = 256
     p.src_namespace = 'unified_vocab'
     p.tgt_namespace = 'unified_vocab'
 
     p.model_framework = 'transformer'
 
-    p.num_enc_layers = 2
-    p.num_dec_layers = 2
-    p.dropout = .5
-    p.num_heads = 6
+    p.num_enc_layers = 4
+    p.num_dec_layers = 4
+    p.dropout = .2
+    p.num_heads = 8
     p.max_decoding_len = 100
+    p.nonlinear_activation = "mish"
 
     p.predictor = 'quant'  # mos, quant
     # used for quant predictor
     p.tied_tgt_predictor = False
-    p.quant_crit = "projection"  # distance, projection, dot_product
+    p.quant_crit = "dot_product"  # distance, projection, dot_product
     # used for mos predictor
     # p.num_mixture = 10
 

@@ -192,6 +192,7 @@ class ParallelSeq2Seq(nn.Module):
             # prediction: (batch, seq_len)
             # greedy decoding
             mem(logits=step_logit[:, -1, :], preds=step_logit.argmax(dim=-1)[:, -1])
+            del step_inputs, inputs_embedding, step_hidden, step_logit
 
         # predictions: (batch, seq_len)
         # logits: (batch, seq_len, vocab_size)
@@ -199,7 +200,7 @@ class ParallelSeq2Seq(nn.Module):
         # although it is implemented as resided in the prediction list for the sake of the api brevity.
         predictions = mem.get_stacked_tensor('preds')[:, 1:]
         logits = mem.get_stacked_tensor('logits')
-
+        del mem
         return predictions, logits
 
     def _forward_beam_search(self,
@@ -332,6 +333,8 @@ class ParallelSeq2Seq(nn.Module):
         p.num_dec_layers = 6
         p.num_heads = 6
         p.dropout = .2
+        p.nonlinear_activation = "mish"
+
         p.max_decoding_len = 30
         p.ADAM_LR = 1e-4
         p.TRAINING_LIMIT = 20
@@ -369,6 +372,7 @@ class ParallelSeq2Seq(nn.Module):
                                        residual_dropout=p.dropout,
                                        attention_dropout=0.,
                                        use_positional_embedding=True,
+                                       feedforward_hidden_activation=p.nonlinear_activation,
                                        ),
             decoder=TransformerDecoder(input_dim=emb_sz,
                                        num_layers=p.num_dec_layers,
@@ -378,6 +382,7 @@ class ParallelSeq2Seq(nn.Module):
                                        residual_dropout=p.dropout,
                                        attention_dropout=0.,
                                        use_positional_embedding=True,
+                                       feedforward_hidden_activation=p.nonlinear_activation,
                                        ),
             source_embedding=source_embedding,
             target_embedding=target_embedding,

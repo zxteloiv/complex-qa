@@ -15,6 +15,7 @@ class TransformerDecoder(torch.nn.Module):
                  num_layers: int = 6,
                  num_heads: int = 8,
                  feedforward_hidden_dim: int = None,
+                 feedforward_hidden_activation: str = "mish",
                  feedforward_dropout: float = 0.1,
                  attention_dim: int = None,
                  value_dim: int = None,
@@ -73,7 +74,7 @@ class TransformerDecoder(torch.nn.Module):
             feedfoward = FeedForward(hidden_dim,
                                      num_layers=2,
                                      hidden_dims=[feedforward_hidden_dim, hidden_dim],
-                                     activations=[Activation.by_name('relu')(),
+                                     activations=[Activation.by_name(feedforward_hidden_activation)(),
                                                   Activation.by_name('linear')()],
                                      dropout=feedforward_dropout)
             self.add_module(f"feedforward_{i}", feedfoward)
