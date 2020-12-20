@@ -8,7 +8,7 @@ def main():
     from utils.trialbot_setup import setup
     from models.base_s2s.base_seq2seq import BaseSeq2Seq
     args = setup(seed=2020, translator='top', dataset='top', hparamset='s2s_top')
-    bot = TrialBot(trial_name='s2s_parser', get_model_func=BaseSeq2Seq.from_param_and_vocab, args=args)
+    bot = TrialBot(trial_name='s2s_parser', get_model_func=get_model, args=args)
     from trialbot.training import Events
     @bot.attach_extension(Events.EPOCH_COMPLETED)
     def get_metrics(bot: TrialBot):
@@ -21,7 +21,18 @@ def main():
         from trialbot.training.extensions import every_epoch_model_saver
         from utils.trial_bot_extensions import end_with_nan_loss
         from utils.trial_bot_extensions import evaluation_on_dev_every_epoch
-        bot.add_event_handler(Events.EPOCH_COMPLETED, evaluation_on_dev_every_epoch, 90)
+        bot.add_event_handler(Events.EPOCH_COMPLETED, evaluation_on_dev_every_epoch, 90,
+                              rewrite_eval_hparams={"batch_sz": 32})
+
+        @bot.attach_extension(Events.ITERATION_COMPLETED, 95)
+        def clear_grads(bot: TrialBot):
+            for optim in bot.updater._optims:
+                optim.zero_grad()
+
+        @bot.attach_extension(Events.ITERATION_COMPLETED, 93)
+        def collect_garbage(bot: TrialBot):
+            import gc
+            gc.collect()
 
         bot.add_event_handler(Events.ITERATION_COMPLETED, end_with_nan_loss, 100)
         bot.add_event_handler(Events.EPOCH_COMPLETED, every_epoch_model_saver, 100)
@@ -51,7 +62,7 @@ def main():
             if output is None:
                 return
 
-            model: BaseSeq2Seq = bot.model
+            model = bot.model
             output = model.revert_tensor_to_string(output)
 
             batch_print = []
@@ -63,6 +74,15 @@ def main():
             print(sep.join(batch_print))
 
     bot.run()
+
+def get_model(p, vocab):
+    if getattr(p, 'model_framework', 'rnn') == 'transformer':
+        from models.transformer.parallel_seq2seq import ParallelSeq2Seq
+        return ParallelSeq2Seq.from_param_and_vocab(p, vocab)
+    else:
+        from models.base_s2s.base_seq2seq import BaseSeq2Seq
+        return BaseSeq2Seq.from_param_and_vocab(p, vocab)
+
 
 @Registry.hparamset()
 def s2s_top():
@@ -102,6 +122,40 @@ def s2s_top_unified_aggressive():
     p.emb_sz = 300
     p.hidden_sz = 300
     p.dropout = .5
+    return p
+
+@Registry.hparamset()
+def top_transformer_unified():
+    from trialbot.training.hparamset import HyperParamSet
+    from trialbot.utils.root_finder import find_root
+    p = HyperParamSet.common_settings(find_root())
+    p.TRAINING_LIMIT = 200  # in num of epochs
+    p.WEIGHT_DECAY = .2
+    p.ADAM_LR = 1e-3
+    p.OPTIM = "RAdam"
+    p.batch_sz = 128
+    p.emb_sz = 300
+    p.src_namespace = 'unified_vocab'
+    p.tgt_namespace = 'unified_vocab'
+
+    p.model_framework = 'transformer'
+
+    p.num_enc_layers = 2
+    p.num_dec_layers = 2
+    p.dropout = .5
+    p.num_heads = 6
+    p.max_decoding_len = 100
+
+    p.predictor = 'quant'  # mos, quant
+    # used for quant predictor
+    p.tied_tgt_predictor = False
+    p.quant_crit = "projection"  # distance, projection, dot_product
+    # used for mos predictor
+    # p.num_mixture = 10
+
+    p.beam_size = 1
+    p.diversity_factor = 0.
+    p.acc_factor = 1.
     return p
 
 if __name__ == '__main__':

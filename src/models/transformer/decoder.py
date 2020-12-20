@@ -2,7 +2,8 @@ from typing import Dict, List, Tuple, Mapping, Optional
 import torch
 import torch.nn
 
-from allennlp.modules import LayerNorm, FeedForward
+from allennlp.modules import FeedForward
+from torch.nn import LayerNorm
 from allennlp.nn import Activation
 from utils.nn import add_positional_features
 

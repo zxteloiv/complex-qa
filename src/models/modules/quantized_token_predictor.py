@@ -35,17 +35,18 @@ class QuantTokenPredictor(nn.Module):
         """
         assert h.size(-1) == self.tok_dim, "Quantization can only be applied on the same embedding size"
 
-        # h_rs: (..., 1, tok_dim)
-        h_rs = h.unsqueeze(-2)
         if self.quant_criterion == 'distance':
+            # h_rs: (..., 1, tok_dim)
+            h_rs = h.unsqueeze(-2)
             # weight: (num_toks, tok_dim)
             # dist: (..., num_toks)
             dist = (h_rs - self.weight).norm(dim=-1)
             output = dist
         else:
+            # h: (..., tok_dim)
             # weight: (num_toks, tok_dim)
             # dot_prod, proj: (..., num_toks)
-            dot_prod = (h_rs * self.weight).sum(-1)
+            dot_prod = torch.matmul(h, self.weight.t())
             output = dot_prod
             if self.quant_criterion == "projection":
                 proj = dot_prod / self.weight.norm(dim=-1)

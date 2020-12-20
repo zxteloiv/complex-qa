@@ -1,150 +1,126 @@
 from typing import Dict, List, Tuple, Optional
+# denote the type that can be None, but must be specified and does not come with a default value.
+Nullable = Optional
 
 import numpy
 import torch
-import torch.nn
-import allennlp.models
+import torch.nn as nn
 from trialbot.data.ns_vocabulary import NSVocabulary
-from allennlp.modules import TokenEmbedder
-from allennlp.nn import util
-from allennlp.training.metrics import BLEU
+from allennlp.training.metrics import BLEU, Perplexity, Average
+from utils.nn import prepare_input_mask, seq_cross_ent, seq_likelihood
+from utils.seq_collector import SeqCollector
+from utils.text_tool import make_human_readable_text
 
-class ParallelSeq2Seq(allennlp.models.Model):
+class ParallelSeq2Seq(nn.Module):
     def __init__(self,
                  vocab: NSVocabulary,
                  encoder: torch.nn.Module,
                  decoder: torch.nn.Module,
-                 source_embedding: TokenEmbedder,
-                 target_embedding: TokenEmbedder,
-                 target_namespace: str = "target_tokens",
-                 start_symbol: str = '<GO>',
-                 eos_symbol: str = '<EOS>',
+                 source_embedding: nn.Embedding,
+                 target_embedding: nn.Embedding,
+                 word_projection: nn.Module,
+                 src_namespace: str,
+                 tgt_namespace: str,
+                 start_id: int,
+                 end_id: int,
+                 pad_id: int = 0,
                  max_decoding_step: int = 50,
-                 use_bleu: bool = True,
-                 label_smoothing: Optional[float] = None,
-                 output_projection_layer = None,
-                 output_is_logit = True,
                  beam_size: int = 1,
                  diversity_factor: float = 0.,
                  accumulation_factor: float = 1.,
+                 use_bleu: bool = False,
                  ):
-        super(ParallelSeq2Seq, self).__init__(vocab)
+        super().__init__()
+        self.vocab = vocab
         self._encoder = encoder
         self._decoder = decoder
         self._src_embedding = source_embedding
         self._tgt_embedding = target_embedding
 
-        self._start_id = vocab.get_token_index(start_symbol, target_namespace)
-        self._eos_id = vocab.get_token_index(eos_symbol, target_namespace)
-        self._max_decoding_step = max_decoding_step
+        self.start_id = start_id
+        self.eos_id = end_id
+        self.pad_id = pad_id
+        self.max_decoding_step = max_decoding_step
 
-        self._target_namespace = target_namespace
-        self._label_smoothing = label_smoothing
-        self._vocab_size = vocab.get_vocab_size(target_namespace)
+        self.src_namespace = src_namespace
+        self.tgt_namespace = tgt_namespace
 
-        if output_projection_layer is None:
-            self._output_projection_layer = torch.nn.Linear(decoder.hidden_dim, self._vocab_size)
-        else:
-            self._output_projection_layer = output_projection_layer
-        self._output_is_logit = output_is_logit
-
+        self._word_proj = word_projection
+        self.bleu = None
         if use_bleu:
-            pad_index = self.vocab.get_token_index(self.vocab._padding_token, self._target_namespace)
-            self._bleu = BLEU(exclude_indices={pad_index, self._eos_id, self._start_id})
-        else:
-            self._bleu = None
+            self.bleu = BLEU(exclude_indices={pad_id, start_id, end_id})
+
+        self.ppl = Perplexity()
+        self.err = Average()
 
         self._beam_size = beam_size
         self._diversity_factor = diversity_factor
         self._acc_factor = accumulation_factor
 
-    def prepare_input(self, tokens, padding_val: int = 0):
-        if tokens is None:
-            token_ids, mask = None, None
-        elif tokens is not None and isinstance(tokens, dict):
-            token_ids, mask = tokens['tokens'], util.get_text_field_mask(tokens)
-        else:
-            token_ids, mask = tokens, (tokens != padding_val).long()
-        return token_ids, mask
-
     def forward(self,
-                source_tokens: Dict[str, torch.LongTensor],
-                target_tokens: Dict[str, torch.LongTensor] = None) -> Dict[str, torch.Tensor]:
+                source_tokens: torch.LongTensor,
+                target_tokens: Optional[torch.LongTensor] = None) -> dict:
         """Run the network, and dispatch work to helper functions based on the runtime"""
-
         # source: (batch, source_length), containing the input word IDs
         # target: (batch, target_length), containing the output IDs
 
-        source, source_mask = self.prepare_input(source_tokens)
+        source, source_mask = prepare_input_mask(source_tokens, self.pad_id)
         state = self._encode(source, source_mask)
 
-        if target_tokens is not None and self.training:
-            target, target_mask = self.prepare_input(target_tokens)
-
+        output = dict()
+        target, target_mask = prepare_input_mask(target_tokens, self.pad_id)
+        if self.training:
             predictions, logits = self._forward_training(state, target[:, :-1], source_mask, target_mask[:, :-1])
-            if self._output_is_logit:
-                loss = util.sequence_cross_entropy_with_logits(logits,
-                                                               target[:, 1:].contiguous(),
-                                                               target_mask[:, 1:].float(),
-                                                               label_smoothing=self._label_smoothing)
-            else:
-                loss = sequence_cross_entropy_with_probs(logits,
-                                                         target[:, 1:].contiguous(),
-                                                         target_mask[:, 1:].float(),
-                                                         label_smoothing=self._label_smoothing)
-            if self._bleu:
-                self._bleu(predictions, target[:, 1:])
-
-        elif target_tokens is not None: # validation, requires model in eval mode
-            target, target_mask = target_tokens['tokens'], util.get_text_field_mask(target_tokens)
-            predictions, logits = self._forward_greedy_search(state, source_mask)
-            max_len = min(logits.size()[1], target.size()[1] - 1)
-            loss = util.sequence_cross_entropy_with_logits(logits[:, :max_len, :].contiguous(),
-                                                           target[:, 1:(max_len + 1)].contiguous(),
-                                                           target_mask[:, 1:(max_len + 1)].float().contiguous(),
-                                                           label_smoothing=self._label_smoothing)
-        else: # testing
-            predictions, logits = self._forward_prediction(state, source_mask)
-            loss = None
-
-        output = {
-            "predictions": predictions,
-            "logits": logits,
-        }
-        if loss is not None:
+            loss = seq_cross_ent(logits, target[:, 1:].contiguous(), target_mask[:, 1:].float())
             output['loss'] = loss
 
+        else:
+            decoding_len = None if target_tokens is None else (target.size()[-1] - 1)
+            predictions, logits = self._forward_prediction(state, source_mask, decoding_len=decoding_len)
+
+        if target_tokens is not None:
+            self._compute_metrics(logits, predictions, target[:, 1:].contiguous(), target_mask[:, 1:].float())
+
+        output.update(predictions=predictions, source=source_tokens, target=target_tokens)
         return output
 
-    def decode(self, output_dict: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+    def _compute_metrics(self, logit, prediction, target, target_mask) -> None:
+        """
+        :param logit: (batch, seq, #vocab)
+        :param prediction: (batch, seq)
+        :param target: (batch, seq)
+        :param target_mask: (batch, seq)
+        :return:
+        """
+        if self.bleu is not None:
+            self.bleu(prediction, target)
+
+        xent = seq_cross_ent(logit, target, target_mask, average="batch")
+        self.ppl(xent)
+
+        # err rate must be strictly reported, thus the difference between batch sizes is important
+        err = ((prediction != target) * target_mask).sum(-1) > 0
+        for instance_err in err:
+            self.err(instance_err)
+
+    def revert_tensor_to_string(self, output_dict: dict) -> dict:
         """Convert the predicted word ids into discrete tokens"""
         # predictions: (batch, max_length)
-        predictions = output_dict["predictions"]
-        if not isinstance(predictions, numpy.ndarray):
-            predictions = predictions.detach().cpu().numpy()
-        all_predicted_tokens = []
-
-        if predictions.ndim == 2:
-            predictions = numpy.expand_dims(predictions, 1)
-
-        for beams in predictions:
-            all_beams_tokens = []
-            for token_ids in beams:
-                token_ids = list(token_ids)
-                if self._start_id in token_ids:
-                    token_ids = token_ids[(token_ids.index(self._start_id) + 1):]   # skip the start_id
-                if self._eos_id in token_ids:
-                    token_ids = token_ids[:token_ids.index(self._eos_id)]
-                tokens = [self.vocab.get_token_from_index(token_id, namespace=self._target_namespace)
-                          for token_id in token_ids]
-                all_beams_tokens.append(tokens)
-            all_predicted_tokens.append(all_beams_tokens)
-        output_dict['predicted_tokens'] = all_predicted_tokens
+        output_dict['predicted_tokens'] = make_human_readable_text(
+            output_dict['predictions'], self.vocab, self.tgt_namespace,
+            stop_ids=[self.eos_id, self.pad_id]
+        )
+        output_dict['source_tokens'] = make_human_readable_text(
+            output_dict['source'], self.vocab, self.src_namespace,
+            stop_ids=[self.eos_id, self.pad_id]
+        )
+        output_dict['target_tokens'] = make_human_readable_text(
+            output_dict['target'], self.vocab, self.tgt_namespace,
+            stop_ids=[self.eos_id, self.pad_id]
+        )
         return output_dict
 
-    def _encode(self,
-                source: torch.LongTensor,
-                source_mask: torch.LongTensor) -> torch.Tensor:
+    def _encode(self, source: torch.LongTensor, source_mask: torch.LongTensor) -> torch.Tensor:
         """
         Do the encoder work: embedding + encoder(which adds positional features and do stacked multi-head attention)
 
@@ -162,9 +138,9 @@ class ParallelSeq2Seq(allennlp.models.Model):
     def _forward_training(self,
                           state: torch.Tensor,
                           target: torch.LongTensor,
-                          source_mask: Optional[torch.LongTensor],
-                          target_mask: Optional[torch.LongTensor]
-                          ) -> Tuple[torch.Tensor, torch.Tensor]:
+                          source_mask: Nullable[torch.LongTensor],
+                          target_mask: Nullable[torch.LongTensor]
+                          ) -> Tuple[torch.Tensor, torch.FloatTensor]:
         """
         Run decoder for training, given target tokens as supervision.
         When training, all timesteps are used and computed universally.
@@ -175,65 +151,65 @@ class ParallelSeq2Seq(allennlp.models.Model):
         # predictions:      (batch, max_target_length)
         target_embedding = self._tgt_embedding(target)
         target_hidden = self._decoder(target_embedding, target_mask, state, source_mask)
-        logits = self._output_projection_layer(target_hidden)
-        predictions = torch.argmax(logits, dim=-1).detach_()
+        logits = self._word_proj(target_hidden)
+        predictions = torch.argmax(logits, dim=-1)
 
         return predictions, logits
 
-    def _forward_prediction(self, state, source_mask):
+    def _forward_prediction(self, state, source_mask, *, decoding_len: Nullable[int]):
         if self._beam_size > 1:
-            return self._forward_beam_search(state, source_mask)
+            return self._forward_beam_search(state, source_mask, decoding_len=decoding_len)
         else:
-            return self._forward_greedy_search(state, source_mask)
+            return self._forward_greedy_search(state, source_mask, decoding_len=decoding_len)
 
     def _forward_greedy_search(self,
                                state: torch.Tensor,
-                               source_mask: Optional[torch.LongTensor],
+                               source_mask: Nullable[torch.LongTensor],
+                               *,
+                               decoding_len: Nullable[int],
                                ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Run decoder step by step for testing or validation, with no gold tokens available.
         """
         batch_size = state.size()[0]
         # batch_start: (batch,)
-        batch_start = source_mask.new_ones((batch_size,), dtype=torch.long) * self._start_id
+        batch_start = source_mask.new_full((batch_size,), self.start_id, dtype=torch.long)
+        decoding_len = decoding_len or self.max_decoding_step
 
-        # step_logits: a list of logits, [(batch, seq_len, vocab_size)]
-        logits_by_step = []
-        # a list of predicted token ids at each step: [(batch,)]
-        predictions_by_step = [batch_start]
-
-        for timestep in range(self._max_decoding_step):
+        mem = SeqCollector()
+        mem(preds=batch_start)
+        for timestep in range(decoding_len):
             # step_inputs: (batch, timestep + 1), i.e., at least 1 token at step 0
             # inputs_embedding: (batch, seq_len, embedding_dim)
             # step_hidden:      (batch, seq_len, hidden_dim)
             # step_logit:       (batch, seq_len, vocab_size)
-            step_inputs = torch.stack(predictions_by_step, dim=1)
+            step_inputs = mem.get_stacked_tensor('preds')
             inputs_embedding = self._tgt_embedding(step_inputs)
             step_hidden = self._decoder(inputs_embedding, None, state, source_mask)
-            step_logit = self._output_projection_layer(step_hidden)
+            step_logit = self._word_proj(step_hidden)
 
             # a list of logits, [(batch, vocab_size)]
-            logits_by_step.append(step_logit[:, -1, :])
-
-            # greedy decoding
             # prediction: (batch, seq_len)
-            # step_prediction: (batch, )
-            prediction = torch.argmax(step_logit, dim=-1)
-            step_prediction = prediction[:, -1]
-            predictions_by_step.append(step_prediction)
+            # greedy decoding
+            mem(logits=step_logit[:, -1, :], preds=step_logit.argmax(dim=-1)[:, -1])
 
         # predictions: (batch, seq_len)
         # logits: (batch, seq_len, vocab_size)
-        predictions = torch.stack(predictions_by_step[1:], dim=1).detach_()
-        logits = torch.stack(logits_by_step, dim=1)
+        # <start> token must not be in the predictions to keep output semantic consistent,
+        # although it is implemented as resided in the prediction list for the sake of the api brevity.
+        predictions = mem.get_stacked_tensor('preds')[:, 1:]
+        logits = mem.get_stacked_tensor('logits')
 
         return predictions, logits
 
     def _forward_beam_search(self,
                              state: torch.Tensor,
-                             source_mask: Optional[torch.LongTensor]
+                             source_mask: Nullable[torch.LongTensor],
+                             *,
+                             decoding_len: Nullable[int],
                              ) -> Tuple[torch.Tensor, torch.Tensor]:
         batch_sz, beam_sz, vocab_sz = state.size()[0], self._beam_size, self._vocab_size
+        decoding_len = decoding_len or self.max_decoding_step
 
         # batch_start: (batch, 1)
         # inputs_embedding: (batch, 1, embedding_dim)
@@ -242,7 +218,7 @@ class ParallelSeq2Seq(allennlp.models.Model):
         batch_start = source_mask.new_ones((batch_sz, 1), dtype=torch.long) * self._start_id
         inputs_embedding = self._tgt_embedding(batch_start)
         step_hidden = self._decoder(inputs_embedding, None, state, source_mask)
-        step_logit = self._output_projection_layer(step_hidden).squeeze(1)
+        step_logit = self._word_proj(step_hidden).squeeze(1)
 
         # topk_value, topk_indices: (batch, beam)
         # last_preds: (batch, beam), start tokens
@@ -263,7 +239,7 @@ class ParallelSeq2Seq(allennlp.models.Model):
         # [(batch, beam)]
         backtrace: List[torch.Tensor] = [torch.zeros_like(topk_indices)]
 
-        for timestep in range(self._max_decoding_step):
+        for timestep in range(decoding_len):
             # step_inputs: (batch * beam, seq_len = (timestep + 1)), i.e., at least 1 token at step 0
             step_inputs = self._backtrace_predictions(prev_preds, backtrace).reshape(batch_sz * beam_sz, -1)
 
@@ -273,7 +249,7 @@ class ParallelSeq2Seq(allennlp.models.Model):
             # step_log_probs:   (batch * beam, vocab)
             inputs_embedding = self._tgt_embedding(step_inputs)
             step_hidden = self._decoder(inputs_embedding, None, state, source_mask)[:, -1, :]
-            step_logit: torch.Tensor = self._output_projection_layer(step_hidden)
+            step_logit: torch.Tensor = self._word_proj(step_hidden)
 
             # transition_log_probs: (batch, beam, vocab_size)
             # topk_trans_val, topk_trans_idx: (batch, beam, beam)
@@ -300,7 +276,7 @@ class ParallelSeq2Seq(allennlp.models.Model):
 
         # predictions: (batch, seq_len)
         # logits: (batch, seq_len, vocab_size)
-        predictions = self._backtrace_predictions(prev_preds, backtrace)
+        predictions = self._backtrace_predictions(prev_preds, backtrace)[:, 1:]
         return predictions, acc_log_probs
 
     def _backtrace_predictions(self,
@@ -327,89 +303,96 @@ class ParallelSeq2Seq(allennlp.models.Model):
 
     def get_metrics(self, reset: bool = False) -> Dict[str, float]:
         all_metrics: Dict[str, float] = {}
-        if self._bleu and not self.training:
-            all_metrics.update(self._bleu.get_metric(reset=reset))
+        if self.bleu:
+            all_metrics.update(self.bleu.get_metric(reset=reset))
+        all_metrics.update(PPL=self.ppl.get_metric(True))
+        all_metrics.update(ERR=self.err.get_metric(True))
         return all_metrics
 
-def sequence_cross_entropy_with_probs(probs: torch.FloatTensor,
-                                      targets: torch.LongTensor,
-                                      weights: torch.FloatTensor,
-                                      average: str = "batch",
-                                      label_smoothing: float = None) -> torch.FloatTensor:
-    """
-    Computes the cross entropy loss of a sequence, weighted with respect to
-    some user provided weights. Note that the weighting here is not the same as
-    in the :func:`torch.nn.CrossEntropyLoss()` criterion, which is weighting
-    classes; here we are weighting the loss contribution from particular elements
-    in the sequence. This allows loss computations for models which use padding.
+    get_metric = get_metrics
 
-    Parameters
-    ----------
-    logits : ``torch.FloatTensor``, required.
-        A ``torch.FloatTensor`` of size (batch_size, sequence_length, num_classes)
-        which contains the unnormalized probability for each class.
-    targets : ``torch.LongTensor``, required.
-        A ``torch.LongTensor`` of size (batch, sequence_length) which contains the
-        index of the true class for each corresponding step.
-    weights : ``torch.FloatTensor``, required.
-        A ``torch.FloatTensor`` of size (batch, sequence_length)
-    average: str, optional (default = "batch")
-        If "batch", average the loss across the batches. If "token", average
-        the loss across each item in the input. If ``None``, return a vector
-        of losses per batch element.
-    label_smoothing : ``float``, optional (default = None)
-        Whether or not to apply label smoothing to the cross-entropy loss.
-        For example, with a label smoothing value of 0.2, a 4 class classification
-        target would look like ``[0.05, 0.05, 0.85, 0.05]`` if the 3rd class was
-        the correct label.
+    @classmethod
+    def from_param_and_vocab(cls, p, vocab: NSVocabulary):
+        """
+        Example hyperparameter set:
 
-    Returns
-    -------
-    A torch.FloatTensor representing the cross entropy loss.
-    If ``average=="batch"`` or ``average=="token"``, the returned loss is a scalar.
-    If ``average is None``, the returned loss is a vector of shape (batch_size,).
+        p.batch_sz = 128
+        p.src_namespace = 'source_tokens'
+        p.tgt_namespace = 'target_tokens'
 
-    """
-    if average not in {None, "token", "batch"}:
-        raise ValueError("Got average f{average}, expected one of "
-                         "None, 'token', or 'batch'")
+        p.predictor = 'quant' # mos, quant
+        # used for mos predictor
+        p.num_mixture = 10
+        # used for quant predictor
+        p.tied_tgt_predictor = False
+        p.quant_crit = "projection" # distance, projection, dot_product
 
-    # shape : (batch * sequence_length, num_classes)
-    probs_flat = probs.view(-1, probs.size(-1))
-    # shape : (batch * sequence_length, num_classes)
-    log_probs_flat = (probs_flat + 1e-16).log()
-    # shape : (batch * max_len, 1)
-    targets_flat = targets.view(-1, 1).long()
+        p.emb_sz = 300
+        p.num_enc_layers = 6
+        p.num_dec_layers = 6
+        p.num_heads = 6
+        p.dropout = .2
+        p.max_decoding_len = 30
+        p.ADAM_LR = 1e-4
+        p.TRAINING_LIMIT = 20
+        p.beam_size = 1
+        p.diversity_factor = 0.
+        p.acc_factor = 1.
+        """
+        from trialbot.data import START_SYMBOL, END_SYMBOL, PADDING_TOKEN
+        from torch import nn
+        from .encoder import TransformerEncoder
+        from .decoder import TransformerDecoder
+        from ..modules.mixture_softmax import MoSProjection
+        from ..modules.quantized_token_predictor import QuantTokenPredictor
+        emb_sz = p.emb_sz
+        source_embedding = nn.Embedding(num_embeddings=vocab.get_vocab_size(p.src_namespace), embedding_dim=emb_sz)
+        if p.src_namespace == p.tgt_namespace:
+            target_embedding = source_embedding
+        else:
+            target_embedding = nn.Embedding(num_embeddings=vocab.get_vocab_size(p.tgt_namespace), embedding_dim=emb_sz)
 
-    if label_smoothing is not None and label_smoothing > 0.0:
-        num_classes = probs_flat.size(-1)
-        smoothing_value = label_smoothing / num_classes
-        # Fill all the correct indices with 1 - smoothing value.
-        one_hot_targets = torch.zeros_like(log_probs_flat).scatter_(-1, targets_flat, 1.0 - label_smoothing)
-        smoothed_targets = one_hot_targets + smoothing_value
-        negative_log_likelihood_flat = - log_probs_flat * smoothed_targets
-        negative_log_likelihood_flat = negative_log_likelihood_flat.sum(-1, keepdim=True)
-    else:
-        # Contribution to the negative log likelihood only comes from the exact indices
-        # of the targets, as the target distributions are one-hot. Here we use torch.gather
-        # to extract the indices of the num_classes dimension which contribute to the loss.
-        # shape : (batch * sequence_length, 1)
-        negative_log_likelihood_flat = - torch.gather(log_probs_flat, dim=1, index=targets_flat)
-    # shape : (batch, sequence_length)
-    negative_log_likelihood = negative_log_likelihood_flat.view(*targets.size())
-    # shape : (batch, sequence_length)
-    negative_log_likelihood = negative_log_likelihood * weights.float()
+        if p.predictor == 'mos':
+            predictor = MoSProjection(p.num_mixture, emb_sz, vocab.get_vocab_size(p.tgt_namespace))
+        else:
+            predictor = QuantTokenPredictor(vocab.get_vocab_size(p.tgt_namespace), emb_sz,
+                                            shared_embedding=target_embedding.weight if p.tied_tgt_predictor else None,
+                                            quant_criterion=p.quant_crit)
 
-    if average == "batch":
-        # shape : (batch_size,)
-        per_batch_loss = negative_log_likelihood.sum(1) / (weights.sum(1).float() + 1e-13)
-        num_non_empty_sequences = ((weights.sum(1) > 0).float().sum() + 1e-13)
-        return per_batch_loss.sum() / num_non_empty_sequences
-    elif average == "token":
-        return negative_log_likelihood.sum() / (weights.sum().float() + 1e-13)
-    else:
-        # shape : (batch_size,)
-        per_batch_loss = negative_log_likelihood.sum(1) / (weights.sum(1).float() + 1e-13)
-        return per_batch_loss
+        model = ParallelSeq2Seq(
+            vocab=vocab,
+            encoder=TransformerEncoder(input_dim=emb_sz,
+                                       num_layers=p.num_enc_layers,
+                                       num_heads=p.num_heads,
+                                       feedforward_hidden_dim=p.emb_sz,
+                                       feedforward_dropout=p.dropout,
+                                       residual_dropout=p.dropout,
+                                       attention_dropout=0.,
+                                       use_positional_embedding=True,
+                                       ),
+            decoder=TransformerDecoder(input_dim=emb_sz,
+                                       num_layers=p.num_dec_layers,
+                                       num_heads=p.num_heads,
+                                       feedforward_hidden_dim=emb_sz,
+                                       feedforward_dropout=p.dropout,
+                                       residual_dropout=p.dropout,
+                                       attention_dropout=0.,
+                                       use_positional_embedding=True,
+                                       ),
+            source_embedding=source_embedding,
+            target_embedding=target_embedding,
+            word_projection=predictor,
+            src_namespace=p.src_namespace,
+            tgt_namespace=p.tgt_namespace,
+            start_id=vocab.get_token_index(START_SYMBOL, namespace=p.tgt_namespace),
+            end_id=vocab.get_token_index(END_SYMBOL, namespace=p.tgt_namespace),
+            pad_id=vocab.get_token_index(PADDING_TOKEN, namespace=p.tgt_namespace),
+            max_decoding_step=p.max_decoding_len,
+            beam_size=getattr(p, 'beam_size', 1),
+            diversity_factor=getattr(p, 'diversity_factor', 0.),
+            accumulation_factor=getattr(p, 'acc_factor', 1.),
+            use_bleu=getattr(p, 'use_bleu', False),
+        )
 
+        return model
 
