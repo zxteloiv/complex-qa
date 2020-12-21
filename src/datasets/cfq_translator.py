@@ -9,16 +9,10 @@ from itertools import product
 import lark
 from .field import FieldAwareTranslator
 from .seq_field import SeqField
-
-@Registry.translator('cfq_pattern_seq_lm')
-class CFQPatternSeqLM(FieldAwareTranslator):
-    def __init__(self):
-        super().__init__(field_list=[
-            SeqField(source_key="sparqlPattern", renamed_key="seq")
-        ])
+from .cfq_fields import MidOrderTraversalField, GrammarPatternSeqField, GrammarModEntSeqField
 
 @Registry.translator('cfq_seq_mod_ent_qa')
-class CFQPatternSeqQA(FieldAwareTranslator):
+class CFQSeq(FieldAwareTranslator):
     def __init__(self):
         super().__init__(field_list=[
             SeqField(source_key='sparqlPatternModEntities', renamed_key="target_tokens", split_fn=split_sparql,),
@@ -76,6 +70,33 @@ class LarkTranslator(Translator):
             "token_fidelity": pad_seq_b("token_fidelity", NS_NT_FI).unsqueeze(1),
         }
         return batch
+
+@Registry.translator('cfq_tranx_pattern_qa')
+class TranXStyleTranslator(FieldAwareTranslator):
+    def __init__(self):
+        super().__init__(field_list=[
+            SeqField(source_key='questionPatternModEntities', renamed_key='source_tokens', add_start_end_toks=False,),
+            GrammarPatternSeqField(source_key='sparqlPatternModEntities_tree', renamed_key="target_tokens",
+                                   namespace="modent_rule_seq", split_fn=split_sparql, ),
+        ])
+
+@Registry.translator('cfq_tranx_mod_ent_qa')
+class TranXModEntTranslator(FieldAwareTranslator):
+    def __init__(self):
+        super().__init__(field_list=[
+            SeqField(source_key='questionPatternModEntities', renamed_key='source_tokens', add_start_end_toks=False,),
+            GrammarModEntSeqField(source_key='sparqlPatternModEntities_tree', renamed_key="target_tokens",
+                                  namespace="modent_rule_seq", split_fn=split_sparql, ),
+        ])
+
+@Registry.translator('cfq_mod_flat_tree_qa')
+class CFQFlatDerivations(FieldAwareTranslator):
+    def __init__(self):
+        super().__init__(field_list=[
+            SeqField(source_key='questionPatternModEntities', renamed_key='source_tokens', add_start_end_toks=False,),
+            MidOrderTraversalField(tree_key='sparqlPatternModEntities_tree',
+                                   namespaces=PARSE_TREE_NS)
+        ])
 
 class _CFQTreeLM(FieldAwareTranslator):
     def __init__(self, tree_key: str):
@@ -157,17 +178,17 @@ class _CFQTreeLM(FieldAwareTranslator):
         output.update({ "derivation_tree": tree_batch, "token_fidelity": fidelity_batch, })
         return output
 
-@Registry.translator('cfq_pattern_tree')
-class CFQPatternTree(_CFQTreeLM):
-    def __init__(self):
-        super().__init__('sparqlPattern_tree')
+# @Registry.translator('cfq_pattern_tree')
+# class CFQPatternTree(_CFQTreeLM):
+#     def __init__(self):
+#         super().__init__('sparqlPattern_tree')
 
 @Registry.translator('cfq_mod_tree')
 class CFQModTree(_CFQTreeLM):
     def __init__(self):
         super().__init__('sparqlPatternModEntities_tree')
 
-@Registry.translator('cfq_complete_tree')
-class CFQCompleteTree(_CFQTreeLM):
-    def __init__(self):
-        super().__init__('sparql_tree')
+# @Registry.translator('cfq_complete_tree')
+# class CFQCompleteTree(_CFQTreeLM):
+#     def __init__(self):
+#         super().__init__('sparql_tree')

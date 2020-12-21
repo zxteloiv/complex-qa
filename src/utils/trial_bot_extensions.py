@@ -30,7 +30,7 @@ def debug_models(bot: TrialBot):
 
 def end_with_nan_loss(bot: TrialBot):
     import numpy as np
-    output = bot.state.output
+    output = getattr(bot.state, 'output')
     if output is None:
         return
     loss = output["loss"]
@@ -129,3 +129,16 @@ def close_tensorboard(bot: TrialBot):
     from allennlp.training.tensorboard_writer import TensorboardWriter
     bot.tbx_writer: TensorboardWriter
     bot.tbx_writer.close()
+
+def collect_garbage(bot: TrialBot):
+    for optim in bot.updater._optims:
+        optim.zero_grad()
+
+    if bot.state.output is not None:
+        del bot.state.output
+    import gc
+    gc.collect()
+    if bot.args.device >= 0:
+        import torch.cuda
+        torch.cuda.empty_cache()
+
