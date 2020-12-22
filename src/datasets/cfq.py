@@ -43,6 +43,16 @@ def cfq_mcd1():
     return cfq_preparsed_treebase(splitfile)
 
 @Registry.dataset()
+def cfq_mcd2():
+    splitfile = join(CFQ_PATH, 'splits', 'mcd2.json')
+    return cfq_preparsed_treebase(splitfile)
+
+@Registry.dataset()
+def cfq_mcd3():
+    splitfile = join(CFQ_PATH, 'splits', 'mcd3.json')
+    return cfq_preparsed_treebase(splitfile)
+
+@Registry.dataset()
 def cfq_mcd1_test_on_training_set():
     import lark
     store = PickleDataset(join(CFQ_PATH, 'parsed_cfq.pkl'), ('localhost', 6379, 0), 'cfq_parse_')
