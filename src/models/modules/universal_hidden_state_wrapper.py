@@ -3,6 +3,7 @@ import torch.nn
 
 from models.modules.independent_rnn import IndRNNCell
 from utils.nn import filter_cat
+from ..interfaces.unified_rnn import UnifiedRNN
 
 class RNNType:
     VanillaRNN = torch.nn.RNNCell
@@ -11,12 +12,12 @@ class RNNType:
     IndRNN = IndRNNCell
 
 
-class UniversalHiddenStateWrapper(torch.nn.Module):
+class TorchRNNWrapper(UnifiedRNN):
     def __init__(self,
                  rnn_cell: torch.nn.Module,
                  get_output_fn: Callable = None,
                  merge_hidden_list_fn: Callable = None):
-        super(UniversalHiddenStateWrapper, self).__init__()
+        super().__init__()
         self._rnn_cell = rnn_cell
 
         self._get_output_fn = get_output_fn
@@ -93,4 +94,4 @@ class UniversalHiddenStateWrapper(torch.nn.Module):
         merged = (stacked * weight).sum(2)
         return merged
 
-
+UniversalHiddenStateWrapper = RNNWrapper

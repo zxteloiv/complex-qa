@@ -41,7 +41,7 @@ class QuantTokenPredictor(nn.Module):
             # weight: (num_toks, tok_dim)
             # dist: (..., num_toks)
             dist = (h_rs - self.weight).norm(dim=-1)
-            output = dist
+            output = -dist
         else:
             # h: (..., tok_dim)
             # weight: (num_toks, tok_dim)
