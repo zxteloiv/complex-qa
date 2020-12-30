@@ -1,220 +1,201 @@
-from typing import Optional, Tuple, Generic
+from typing import Optional, Tuple, Generic, List
 import torch
 import torch.nn as nn
 from torch.nn.functional import binary_cross_entropy
 from utils.nn import seq_cross_ent, seq_likelihood
 from models.modules.stacked_encoder import StackedEncoder
-from .ebnf_npda import NeuralEBNF
 from allennlp.training.metrics.perplexity import Perplexity, Average
 from utils.nn import prepare_input_mask
+from .npda import NeuralPDA
+from utils.seq_collector import SeqCollector
+from utils.text_tool import make_human_readable_text
+import logging
 
-Tuple3Tensor = Tuple[torch.Tensor, torch.Tensor, torch.Tensor]
-Tuple3LongTensor = Tuple[torch.LongTensor, torch.LongTensor, torch.LongTensor]
-Tuple3FloatTensor = Tuple[torch.FloatTensor, torch.FloatTensor, torch.FloatTensor]
-Tuple4Tensor = Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
-Tuple4LongTensor = Tuple[torch.LongTensor, torch.LongTensor, torch.LongTensor, torch.LongTensor]
-Tuple4FloatTensor = Tuple[torch.FloatTensor, torch.FloatTensor, torch.FloatTensor, torch.FloatTensor]
-Tuple5Tensor = Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
-Tuple5LongTensor = Tuple[torch.LongTensor, torch.LongTensor, torch.LongTensor, torch.LongTensor, torch.LongTensor]
-Tuple5FloatTensor = Tuple[torch.FloatTensor, torch.FloatTensor, torch.FloatTensor, torch.FloatTensor, torch.FloatTensor]
-
+# from .tensor_typing_util import ( T3T, T3L, T3F, T4T, T4L, T4F, T5T, T5L, T5F, )
+from .tensor_typing_util import *
 
 class Seq2PDA(nn.Module):
     def __init__(self,
+                 # modules
                  encoder: StackedEncoder,
                  src_embedding: nn.Embedding,
                  enc_attn_net: nn.Module,
-                 ebnf_npda: NeuralEBNF,
-                 tok_pad_id: int,
-                 nt_fi: int,
-                 inference_with_oracle_tree: bool = True
+                 npda: NeuralPDA,
+
+                 # configuration
+                 max_expansion_len: int,
+                 src_ns: str,
+                 tgt_ns: List[str],
+                 vocab,
                  ):
         super().__init__()
         self.encoder = encoder
         self.src_embedder = src_embedding
         self.enc_attn_net = enc_attn_net
+        self.npda = npda
 
         self.ppl = Perplexity()
         self.err = Average()
-        self.ebnf_npda = ebnf_npda
-        self.tok_pad = tok_pad_id
-        self.nt_fi = nt_fi
-
-        self.inference_with_oracle_tree = inference_with_oracle_tree
+        self.tok_pad = 0
+        self.max_expansion_len = max_expansion_len
+        self.src_ns = src_ns
+        self.tgt_ns = tgt_ns
+        self.logger = logging.getLogger(self.__class__.__name__)
+        self.vocab = vocab
 
     def get_metric(self, reset=False):
         ppl = self.ppl.get_metric(reset)
         err = self.err.get_metric(reset)
         return {"PPL": ppl, "ERR": err}
 
-    get_metrics = get_metric
+    def forward(self, *args, **kwargs):
+        if self.training:
+            return self._forward_amortized_training(*args, **kwargs)
 
-    def forward(self, source_tokens, derivation_tree: torch.LongTensor, token_fidelity: torch.LongTensor):
+        else:
+            return self._forward_inference(*args, **kwargs)
+
+    def _forward_amortized_training(self,
+                                    source_tokens: LT,
+                                    rhs_symbols: LT,
+                                    parental_growth: LT,
+                                    fraternal_growth: LT,
+                                    rhs_exact_symbols: LT,
+                                    target_tokens: LT,
+                                    ):
         """
-        :param source_tokens: (batch, src_len)
-        :param derivation_tree: (batch, derivation, seq), seq: [lhs, *rhs]
-        :param token_fidelity: (batch, derivation, rhs_seq), rhs_seq = seq - 1, rhs: [<RuleGo> ... <RuleEnd>]
+        :param source_tokens: (batch, max_src_len)
+        :param rhs_symbols: (batch, max_tgt_len), separated by every max_derivation_symbols
+        :param parental_growth: (batch, max_tgt_len)
+        :param fraternal_growth: (batch, max_tgt_len)
+        :param rhs_exact_symbols: (batch, max_tgt_len)
         :return:
         """
-        if source_tokens is not None:
-            source_tokens, source_mask = prepare_input_mask(source_tokens, self.tok_pad)
-            source = self.src_embedder(source_tokens)
-            source_hidden, _ = self.encoder(source, source_mask)
-            enc_attn_fn = lambda out: self.enc_attn_net(out, source_hidden, source_mask)
+        enc_attn_fn = self._encode_source(source_tokens)
+        self.npda.init_automata(source_tokens.size()[0], source_tokens.device, enc_attn_fn)
+
+        step = loss = 0
+        exact_token_list = []
+        while self.npda.continue_derivation() and step * self.max_expansion_len < source_tokens.size()[1]:
+            rhs_p, lhs_mask = self.npda()
+            rhs_gold = self._get_step_gold(step, rhs_symbols, parental_growth, fraternal_growth, rhs_exact_symbols)
+
+            derivation_loss = self._compute_loss(rhs_p, rhs_gold, lhs_mask)
+            derivation_loss.backward(retain_graph=True)
+            loss = loss + derivation_loss.detach()
+            step += 1
+
+            exact_token_list.append(self._arrange_target_tokens(self.npda.inference(rhs_p), lhs_mask))
+            self.npda.push_predictions_onto_stack(rhs_gold, lhs_mask)
+
+        # compute metrics
+        if len(exact_token_list) > 0:
+            exact_tokens = torch.cat(exact_token_list, dim=-1)
+            self._compute_err(exact_tokens, target_tokens)
         else:
-            enc_attn_fn = None
+            self.logger.warning('No exact token generated, which is impossible.')
+        self.ppl(loss)
 
-        output = dict()
-        if self.training:
-            # due to the teacher forcing, the parallel mode is OK for training
-            tree_inp = derivation_tree[:, :, :-1]  # excluding <RuleEnd>
-            # token_fidelity does not come with an indicator for LHS
-            inp_is_nt = token_fidelity[:, :, :-1] == self.nt_fi  # excluding <RuleEnd>
-
-            gold_labels = self._get_gold_label(derivation_tree, token_fidelity)
-            mask = gold_labels[2]
-            # A tuple of the three
-            # is_nt: (batch, derivation, rhs_seq - 1)
-            # nt_logits: (batch, derivation, rhs_seq - 1, #NT)
-            # t_logits: (batch, derivation, rhs_seq - 1, #T)
-            pda_logits = self.ebnf_npda(tree_inp, inp_is_nt, attn_fn=enc_attn_fn, parallel_mode=True, inp_mask=mask)
-            predictions = self._get_prediction(pda_logits)
-            loss = self._compute_loss(self._get_gold_label(derivation_tree, token_fidelity),
-                                      pda_logits, predictions)
-            output['loss'] = loss
-
-        elif self.inference_with_oracle_tree:
-            # with oracle trees, the derivation number and LHS is given.
-            tree_inp = derivation_tree[:, :, :2]  # the oracle tree, with LHS
-            expansion_len = None if derivation_tree is None else derivation_tree.size()[-1] - 2
-            pda_logits = self.ebnf_npda(tree_inp, None,
-                                        max_expansion_len=expansion_len,
-                                        attn_fn=enc_attn_fn, parallel_mode=True)
-            predictions = self._get_prediction(pda_logits)
-
-        else:
-            derivation_count = None if derivation_tree is None else derivation_tree.size()[1]
-            expansion_len = None if derivation_tree is None else derivation_tree.size()[-1] - 2
-            raise NotImplementedError
-
-        # anything in preds: (batch, derivation, rhs_seq - 1)
-        output['preds'] = predictions
-
-        if derivation_tree is not None:
-            analysis = self._compute_metrics_and_analyze_errors(
-                self._get_gold_label(derivation_tree, token_fidelity),
-                pda_logits, predictions
-            )
-            analysis['all_lhs'] = derivation_tree[:, :, 0]
-            analysis['source_tokens'] = source_tokens
-            output['deliberate_analysis'] = analysis
-
-        output.update(source_tokens=source_tokens, derivation_tree=derivation_tree, token_fidelity=token_fidelity)
+        output = {'loss': loss}
+        self.npda.reset_automata()
         return output
 
-    def _get_prediction(self,
-                        pda_output: Tuple3FloatTensor,
-                        ) -> Tuple3LongTensor:
-        is_nt_prob, nt_logits, t_logits = pda_output
-        predictions: Tuple3LongTensor = (is_nt_prob > 0.5, nt_logits.argmax(dim=-1), t_logits.argmax(dim=-1))
-        return predictions
+    def _encode_source(self, source_tokens):
+        source_tokens, source_mask = prepare_input_mask(source_tokens, padding_val=self.tok_pad)
+        source = self.src_embedder(source_tokens)
+        source_hidden, _ = self.encoder(source, source_mask)
+        enc_attn_fn = lambda out: self.enc_attn_net(out, source_hidden, source_mask)
+        return enc_attn_fn
 
-    def _get_gold_label(self,
-                        derivation_tree: torch.LongTensor,
-                        token_fidelity: torch.LongTensor,
-                        ) -> Tuple5LongTensor:
-        tree_out = derivation_tree[:, :, 2:]  # excluding LHS and <RuleGo>
-        out_is_nt = token_fidelity[:, :, 1:] == self.nt_fi  # excluding <RuleGo>
-        out_is_t = out_is_nt.logical_not()
+    def _get_step_gold(self, step_id: int, *args):
+        step_size = self.max_expansion_len
+        step_starts = step_id * step_size
+        step_ends = step_starts + step_size
+        clip = lambda t: t[:, step_starts:step_ends]
+        return tuple(map(clip, args))
 
-        # padding is a terminal, padding_id for a non-terminal place is meaningless by convention
-        # mask: (batch, derivation, rhs_seq - 1), mask is 1 for any non-padded token.
-        mask = ((tree_out == self.tok_pad) * out_is_nt).logical_not()
+    def _compute_loss(self, rhs_p, rhs_gold, lhs_mask):
+        # lhs_mask: (batch, 1)
+        lhs_mask = lhs_mask.unsqueeze(-1)
+        fraternal_p = rhs_p[2]
+        f_mask = rhs_gold[2]
+        comp_len = min(fraternal_p.size()[-1], f_mask.size()[-1])
 
-        # gold token id is set to 0 if the position doesn't match the correct symbol type
-        safe_nt_out = tree_out * out_is_nt
-        safe_t_out = tree_out * out_is_t
+        # mask: (batch, comp_len)
+        mask = (lhs_mask * f_mask)[:, :comp_len]
 
-        return out_is_nt, out_is_t, mask, safe_nt_out, safe_t_out
+        _clip_logprob = lambda t: (t + 1e-13).log()[:, :comp_len]
 
-    def _compute_metrics_and_analyze_errors(self,
-                                            gold_labels: Tuple5LongTensor,
-                                            pda_logits: Tuple3FloatTensor,
-                                            preds: Tuple3LongTensor,
-                                            ) -> dict:
-        out_is_nt, out_is_t, mask, safe_nt_out, safe_t_out = gold_labels
+        # *symbol_logp: (batch, comp_len, V)
+        # p/f*_p: (batch, comp_len)
+        symbol_logp = _clip_logprob(rhs_p[0])
+        exact_symbol_logp = _clip_logprob(rhs_p[3])
+        parental_p = rhs_p[1][:, :comp_len]
+        fraternal_p = fraternal_p[:, :comp_len]
 
-        # metric computation - PPL
-        xent = self._get_batch_xent(pda_logits,
-                                    (out_is_nt, safe_nt_out, safe_t_out),
-                                    (mask, mask * out_is_nt, mask * out_is_t))
-        for instance_xent in sum(xent):
-            self.ppl(instance_xent.sum())
+        # gold_labels: (batch, comp_len)
+        symbol, p_growth, f_mask, exact_symbol = map(lambda t: t[:, :comp_len], rhs_gold)
 
-        # metric computation - Acc
-        # *err: (batch, derivation, rhs_seq - 1)
-        is_nt_err, nt_err, t_err = self._get_errors(gold_labels, preds)
-        total_err = (is_nt_err + nt_err + t_err).sum(dim=(1, 2)) > 0
-        for instance_err in total_err:
-            self.err(instance_err)
+        # (batch, comp_len, V) -> (batch, comp_len, 1) -> (batch, comp_len)
+        symbol_loss = -symbol_logp.gather(dim=-1, index=symbol.unsqueeze(-1)).squeeze(-1) * mask
+        exact_symbol_loss = -exact_symbol_logp.gather(dim=-1, index=exact_symbol.unsqueeze(-1)).squeeze(-1) * mask
+        parental_loss = binary_cross_entropy(parental_p, p_growth.float()) * mask
+        fraternal_loss = binary_cross_entropy(fraternal_p, f_mask.float()) * mask
 
-        deliberate_analysis = {
-            "error": [is_nt_err, nt_err, t_err],
-            "gold": [mask, out_is_nt, safe_nt_out, safe_t_out],
-        }
-        return deliberate_analysis
-
-    def _compute_loss(self, gold_labels, pda_output, preds):
-        out_is_nt, out_is_t, mask, safe_nt_out, safe_t_out = gold_labels
-        # loss_mask: (batch, derivation, 1)
-        derivation_loss_mask = self._get_derivation_loss_mask(gold_labels, preds)
-        # loss_mask: (batch, derivation, rhs_seq - 1)
-        loss_mask = derivation_loss_mask * mask
-        xent = self._get_batch_xent(pda_logits=pda_output,
-                                    pda_gold_labels=(out_is_nt, safe_nt_out, safe_t_out),
-                                    pda_weights=(loss_mask, loss_mask * out_is_nt, loss_mask * out_is_t),
-                                    )
-        loss = sum(xent).mean(0).sum()
+        loss = (symbol_loss + exact_symbol_loss + parental_loss + fraternal_loss).mean(0).sum()
         return loss
 
-    def _get_derivation_loss_mask(self, gold_labels: Tuple5Tensor, preds: Tuple3LongTensor) -> torch.Tensor:
-        errors = self._get_errors(gold_labels, preds)
-        total_err = sum(errors)
-        # derivation_loss_mask: (batch, derivation, 1)
-        derivation_loss_mask = (total_err.sum(-1).cumsum(dim=-1) > 0).unsqueeze(-1)
 
-        return derivation_loss_mask
+    def _arrange_target_tokens(self, predictions, lhs_mask):
+        # (batch, pad_seq_len1)
+        _, _, f_mask_hat, exact_symbol_hat = predictions
+        target_hats = exact_symbol_hat * f_mask_hat * lhs_mask.unsqueeze(-1)
+        return target_hats
 
-    def _get_errors(self, gold_labels: Tuple5Tensor, preds: Tuple3LongTensor) -> Tuple3LongTensor:
-        # total_error, and anything in preds or gold_labels: (batch, derivation, rhs_seq - 1)
-        # predictions = (is_nt_prob > 0.5, nt_logits.argmax(dim=-1), t_logits.argmax(dim=-1))
-        out_is_nt, out_is_t, mask, safe_nt_out, safe_t_out = gold_labels
+    def _compute_err(self, batch_exact_tokens, batch_target_tokens):
+        """
+        :param batch_exact_tokens: (batch, seq1)
+        :param batch_target_tokens: (batch, seq2)
+        :return:
+        """
+        for instance_pair in zip(batch_exact_tokens, batch_target_tokens):
+            exact_tokens, target_tokens = list(map(lambda t: list(filter(lambda x: x != self.tok_pad, t.tolist())), instance_pair))
+            if len(exact_tokens) == len(target_tokens) and all(x == y for x, y in zip(exact_tokens, target_tokens)):
+                self.err(1.)
+            else:
+                self.err(0.)
 
-        is_nt_err = (preds[0] != out_is_nt) * mask
-        nt_err = (preds[1] != safe_nt_out) * mask * out_is_nt
-        t_err = (preds[2] != safe_t_out) * mask * out_is_t
-        return is_nt_err, nt_err, t_err
+    def _forward_inference(self,
+                           source_tokens: LT,
+                           rhs_symbols: NullOrLT,
+                           parental_growth: NullOrLT,
+                           fraternal_growth: NullOrLT,
+                           rhs_exact_symbols: NullOrLT,
+                           target_tokens: NullOrLT,
+                           ):
+        enc_attn_fn = self._encode_source(source_tokens)
+        self.npda.init_automata(source_tokens.size()[0], source_tokens.device, enc_attn_fn)
 
+        predicted_tokens = [
+            self._arrange_target_tokens(derivation_predictions, derivation_lhs_masks)
+            for _, derivation_predictions, derivation_lhs_masks in zip(*self.npda())
+        ]
 
-    def _get_batch_xent(self,
-                        pda_logits: Tuple3FloatTensor,
-                        pda_gold_labels: Tuple3LongTensor,
-                        pda_weights: Tuple3Tensor,
-                        ) -> Tuple3FloatTensor:
-        # is_nt: (batch, derivation, rhs_seq - 1)
-        # nt_logits: (batch, derivation, rhs_seq - 1, #NT)
-        # t_logits: (batch, derivation, rhs_seq - 1, #T)
-        is_nt_prob, nt_logits, t_logits = pda_logits
+        predicted_tokens = torch.cat(predicted_tokens, dim=-1)
+        self._compute_err(predicted_tokens, target_tokens)
 
-        # all others: (batch, derivation, rhs_seq - 1)
-        out_is_nt, safe_nt_out, safe_t_out = pda_gold_labels
-        is_nt_mask, nt_mask, t_mask = pda_weights
+        output = {
+            "source": source_tokens,
+            "target": target_tokens,
+            "prediction": predicted_tokens,
+        }
+        return output
 
-        is_nt_xent = binary_cross_entropy(is_nt_prob, out_is_nt.float()) * is_nt_mask
-        xent_is_nt = is_nt_xent.sum([1, 2]) / (is_nt_mask.sum([1, 2]) + 1e-13)
-        xent_nt = seq_cross_ent(nt_logits, safe_nt_out, nt_mask.float(), average=None)
-        xent_t = seq_cross_ent(t_logits, safe_t_out, t_mask.float(), average=None)
-        return xent_is_nt, xent_nt, xent_t
+    def make_human_readable_output(self, output):
+        output['source_tokens'] = make_human_readable_text(output['source'], self.vocab, self.src_ns)
+        output['target_tokens'] = make_human_readable_text(output['target'], self.vocab, self.tgt_ns[1])
+        output['predicted_tokens'] = make_human_readable_text(output['prediction'], self.vocab, self.tgt_ns[1])
+        return output
 
 
 

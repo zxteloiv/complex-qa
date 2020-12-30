@@ -5,7 +5,8 @@ from models.modules.independent_rnn import IndRNNCell
 from utils.nn import filter_cat
 from ..interfaces.unified_rnn import UnifiedRNN
 
-class RNNType:
+from enum import Enum
+class RNNType(Enum):
     VanillaRNN = torch.nn.RNNCell
     LSTM = torch.nn.LSTMCell
     GRU = torch.nn.GRUCell
@@ -94,4 +95,4 @@ class TorchRNNWrapper(UnifiedRNN):
         merged = (stacked * weight).sum(2)
         return merged
 
-UniversalHiddenStateWrapper = RNNWrapper
+UniversalHiddenStateWrapper = TorchRNNWrapper

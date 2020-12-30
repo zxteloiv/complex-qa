@@ -90,16 +90,16 @@ def get_wrapped_attention(attn_type: Literal["bilinear", "dot_product", "mha"],
         attn = AllenNLPAttentionWrapper(attn, attention_dropout)
 
     elif attn_type == "generalized_bilinear":
-        from .bilinear_attention import GeneralizedBilinearAttention
+        from .generalized_attention import GeneralizedBilinearAttention
         from torch import nn
         use_linear = kwargs.get('use_linear', True)
         use_bias = kwargs.get('use_bias', True)
-        activation = nn.Tanh() if kwargs.get('use_tanh_activation', True) else None
+        activation = nn.Tanh() if kwargs.get('use_tanh_activation', False) else None
         attn = GeneralizedBilinearAttention(matrix_dim, vector_dim,
                                             activation=activation, use_linear=use_linear, use_bias=use_bias)
 
     elif attn_type == "generalized_dot_product":
-        from .dot_product_attention import GeneralizedDotProductAttention
+        from .generalized_attention import GeneralizedDotProductAttention
         attn = GeneralizedDotProductAttention()
 
     elif attn_type == "dot_product":

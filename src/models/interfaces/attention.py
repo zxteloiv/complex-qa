@@ -35,3 +35,10 @@ class AttentionWeight(torch.nn.Module):
         :return: attention: (batch, max_input_length, max_attend_length)
         """
         raise NotImplementedError
+
+class VectorContextComposer(torch.nn.Module):
+    """
+    How to combine the context vector and the hidden states then?
+    """
+    def forward(self, context: torch.Tensor, hidden: torch.Tensor) -> torch.Tensor:
+        raise NotImplementedError

@@ -110,7 +110,7 @@ ValuesClause
   	GraphNodePath	  ::=  	VarOrTerm | TriplesNodePath
   	VarOrTerm	  ::=  	Var | GraphTerm
   	VarOrIri	  ::=  	Var | iri
-  	Var	  ::=  	var_pattern /* | VAR1 | VAR2 */
+  	Var	  ::=  	VAR1 | VAR2
   	GraphTerm	  ::=  	iri | RdfLiteral | NumericLiteral | BooleanLiteral | BlankNode | NIL | entity_pattern
   	Expression	  ::=  	ConditionalOrExpression
   	ConditionalOrExpression	  ::=  	ConditionalAndExpression ( '||' ConditionalAndExpression )*
@@ -205,20 +205,12 @@ ValuesClause
   	PrefixedName	  ::=  	PNAME_LN | PNAME_NS
   	BlankNode	  ::=  	BLANK_NODE_LABEL | ANON
 
-    var_pattern 	::= X0 | X1 | X2 | X3 | X4 | X5
   	predicate_pattern ::= 'P0' | 'P1' | 'P2' | 'P3' | 'P4' | 'P5' | 'P6' | 'P7' | 'P8' | 'P24' | 'P31'
   	entity_pattern ::= 'M0' | 'M1' | 'M2' | 'M3' | 'M4' | 'M5' | 'M6' | 'M7' | 'M8' | 'M9' | 'M10' | 'M39' | 'M150'
 
 /* -------------------------------------------------- *
  * the terminal production rules
  * -------------------------------------------------- */
-
- X0 ::= '?x0'
- X1 ::= '?x1'
- X2 ::= '?x2'
- X3 ::= '?x3'
- X4 ::= '?x4'
- X5 ::= '?x5'
 
 /*  Rewrite the IRIREF rule to eliminate the subtraction operator in EBNF (hard to implement in the grammar)
   	IRIREF	  ::=  	'<' ([^<>"{}|^`\]-[#x00-#x20])* '>'

@@ -62,8 +62,15 @@ class StackedEncoder(torch.nn.Module):
                                                        p.hidden_sz, bidirectional=False)
         elif p.encoder == "transformer":
             enc_cls = lambda floor: TransformerEncoder(
-                p.emb_sz if floor == 0 else p.hidden_sz,
-                p.hidden_sz, 1, p.num_heads, p.hidden_sz, p.dropout, p.dropout, 0., (floor == 0),
+                input_dim=p.emb_sz if floor == 0 else p.hidden_sz,
+                hidden_dim=p.hidden_sz,
+                num_layers=1,
+                num_heads=p.num_heads,
+                feedforward_hidden_dim=p.hidden_sz,
+                feedforward_dropout=p.dropout,
+                residual_dropout=p.dropout,
+                attention_dropout=0.,
+                use_positional_embedding=(floor == 0),
             )
         elif p.encoder == "bilstm":
             enc_cls = lambda floor: LstmSeq2SeqEncoder(p.emb_sz if floor == 0 else p.hidden_sz * 2, # bidirectional

@@ -14,6 +14,8 @@ def make_human_readable_text(output_tensor: torch.Tensor,
     if not isinstance(output_tensor, np.ndarray):
         output_tensor = output_tensor.detach().cpu().numpy()
 
+    stop_ids = [] if stop_ids is None else stop_ids
+
     all_readable_tokens = []
     for token_ids in output_tensor:
         if token_ids.ndim > 1:

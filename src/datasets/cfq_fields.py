@@ -1,10 +1,11 @@
-from typing import List, Mapping, Generator, Tuple, Optional, Any, Literal, Iterable
+from typing import List, Mapping, Generator, Tuple, Optional, Any, Literal, Iterable, Union
 from collections import defaultdict
 import torch
 from torch.nn.utils.rnn import pad_sequence
 from .field import FieldAwareTranslator, Field
 from .seq_field import SeqField
 import lark
+from trialbot.data import START_SYMBOL
 
 class GrammarPatternSeqField(SeqField):
     @classmethod
@@ -63,15 +64,20 @@ class GrammarModEntSeqField(GrammarPatternSeqField):
 class MidOrderTraversalField(Field):
     def __init__(self, tree_key: str,
                  namespaces: Iterable[str],
+                 max_derivation_symbols: int,
                  output_keys: Optional[List[str]] = None,
                  padding: int = 0,
-                 max_seq_len: int = 0):
+                 grammar_token_generation: bool = False,
+                 ):
         super().__init__()
         self.tree_key = tree_key
-        self.namespaces = list(namespaces) or ('nonterminal', 'terminal_category', 'terminal')
-        self.output_keys = output_keys or ('rule', 'is_nt', 'is_ending')
+        self.namespaces = list(namespaces) or ('symbols', 'exact_token')
+        self.output_keys = output_keys or (
+            'rhs_symbols', 'parental_growth', 'fraternal_growth', 'rhs_exact_symbols', 'target_tokens'
+        )
         self.padding = padding
-        self.max_seq_len = max_seq_len
+        self.max_derivation_symbols = max_derivation_symbols
+        self.grammar_token_generation = grammar_token_generation
 
     def batch_tensor_by_key(self, tensors_by_keys: Mapping[str, List[torch.Tensor]]) -> Mapping[str, torch.Tensor]:
         output = dict()
@@ -83,12 +89,16 @@ class MidOrderTraversalField(Field):
 
     def generate_namespace_tokens(self, example) -> Generator[Tuple[str, str], None, None]:
         tree: lark.Tree = example.get(self.tree_key)
-        ns_nt, ns_t, ns_et = self.namespaces
+        ns_s, ns_et = self.namespaces
         for subtree in tree.iter_subtrees_topdown():
-            yield ns_nt, subtree.data
+            if self.grammar_token_generation:
+                yield ns_s, subtree.data
+                yield ns_s, START_SYMBOL
+            yield ns_et, START_SYMBOL
             for c in subtree.children:
                 if isinstance(c, lark.Token):
-                    yield ns_t, c.type
+                    if self.grammar_token_generation:
+                        yield ns_s, c.type
                     yield ns_et, c.value
 
     def to_tensor(self, example) -> Mapping[str, torch.Tensor]:
@@ -97,27 +107,38 @@ class MidOrderTraversalField(Field):
         assert tree is not None
 
         tokid = self.vocab.get_token_index
-        key_rule, key_depth_stop, key_horizontal_stop = self.output_keys
-        ns_nt, ns_t, ns_et = self.namespaces
+        ns_s, ns_et = self.namespaces
 
         left_most_derivation = defaultdict(list)
         for subtree in tree.iter_subtrees_topdown():
-            lhs = tokid(subtree.data, ns_nt)
-            # for any token, the rhs contains its category name
-            rhs = [tokid(s.data, ns_nt) if isinstance(s, Tree) else tokid(s.type, ns_t) for s in subtree.children]
+            children: List[Union[Tree, Token]] = subtree.children
 
-            rule = [lhs] + rhs
-            is_nt = [1] + [1 if isinstance(s, Tree) else 0 for s in subtree.children]
-            is_ending = [0] * len(is_nt)
-            is_ending[-1] = 1
+            # fraternal_growth indicates rather the token validity than its direct right sibling's existence.
+            # this setting is very helpful to build a mask matrix.
+            rhs_symbol, rhs_exact_token, parental_growth = [tokid(START_SYMBOL, ns_s)], [tokid(START_SYMBOL, ns_et)], [0]
+            for s in children:
+                rhs_symbol.append(tokid(s.data, ns_s) if isinstance(s, Tree) else tokid(s.type, ns_s))
+                rhs_exact_token.append(tokid(s.value, ns_et) if isinstance(s, Token) else self.padding)
+                parental_growth.append(1 if isinstance(s, Tree) else 0)
 
-            left_most_derivation[key_rule].extend(rule)
-            left_most_derivation[key_depth_stop].extend(is_nt)
-            left_most_derivation[key_horizontal_stop].extend(is_ending)
+            fraternal_growth = [1] * len(rhs_symbol)
+
+            if len(rhs_symbol) < self.max_derivation_symbols:
+                padding_seq = [self.padding] * (self.max_derivation_symbols - len(rhs_symbol))
+                rhs_symbol.extend(padding_seq)
+                rhs_exact_token.extend(padding_seq)
+                parental_growth.extend(padding_seq)
+                fraternal_growth.extend(padding_seq)
+
+            for k, l in zip(self.output_keys[:-1], (rhs_symbol, parental_growth, fraternal_growth, rhs_exact_token)):
+                left_most_derivation[k].extend(l)
+
+        target_tokens = list(filter(lambda x: x not in (self.padding,), left_most_derivation[self.output_keys[-2]]))
 
         output = dict()
         for k, l in left_most_derivation.items():
             output[k] = torch.tensor(l)
 
+        output[self.output_keys[-1]] = torch.tensor(target_tokens)
         return output
 

@@ -1,18 +1,23 @@
-from typing import List, Optional
+from typing import List, Optional, Union
 import torch
 import torch.nn
 from models.modules.universal_hidden_state_wrapper import UniversalHiddenStateWrapper as HSWrapper, RNNType
 from utils.nn import filter_cat
+from ..interfaces.unified_rnn import UnifiedRNN
 
-class StackedRNNCell(torch.nn.Module):
-    def __init__(self, RNNType, input_dim, hidden_dim, n_layers, intermediate_dropout: float = 0.):
+class StackedRNNCell(UnifiedRNN):
+    def __init__(self, rnn: Union[List[UnifiedRNN], RNNType],
+                 input_dim, hidden_dim, n_layers, intermediate_dropout: float = 0.):
         super(StackedRNNCell, self).__init__()
 
         assert n_layers >= 1
-        self.layer_rnns = torch.nn.ModuleList(
-            [HSWrapper(RNNType(input_dim, hidden_dim))] +
-            [HSWrapper(RNNType(hidden_dim, hidden_dim)) for _ in range(n_layers - 1)]
-        )
+        if isinstance(rnn, list):
+            self.layer_rnns = torch.nn.ModuleList(rnn)
+        else:
+            self.layer_rnns = torch.nn.ModuleList(
+                [HSWrapper(rnn.value(input_dim, hidden_dim))] +
+                [HSWrapper(rnn.value(hidden_dim, hidden_dim)) for _ in range(n_layers - 1)]
+            )
 
         self.hidden_dim = hidden_dim
         self.input_dim = input_dim

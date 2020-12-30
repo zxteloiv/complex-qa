@@ -43,7 +43,7 @@ class BatchStack:
         :param batch_size: the required batch to pop
         :param default_item: the item to fill if the stack is empty.
         :return: A tuple of the two
-                (batch, *) tuple of data items popped out,
+                (batch, *) tuple of data items at the top, which will not be popped out if pop_data is set to False.
                 (batch,) an errcode for each item, (1) for successful pop, (0) if the appropriate stack is empty.
         """
         raise NotImplementedError
@@ -127,14 +127,16 @@ class TensorBatchStack(BatchStack):
                  max_batch_size: int,
                  max_stack_size: int = 0,
                  item_size: int = 1,
+                 dtype=torch.float,
                  ):
         self.max_batch_size = max_batch_size
         self.max_stack_size = max_stack_size
         self.item_size = item_size
         self._storage: Optional[torch.Tensor] = None
         self._top_cur: Optional[torch.Tensor] = None
-        self.reset(max_batch_size)
         self.inplace = False
+        self.dtype = dtype
+        self.reset(max_batch_size)
 
     def describe(self):
         stat = {
@@ -144,7 +146,7 @@ class TensorBatchStack(BatchStack):
         return stat
 
     def reset(self, batch_size, default_device: Optional[torch.device] = None):
-        self._storage = torch.zeros(batch_size, self.max_stack_size, self.item_size, device=default_device)
+        self._storage = torch.zeros(batch_size, self.max_stack_size, self.item_size, device=default_device, dtype=self.dtype)
         self._top_cur = torch.full((batch_size,), fill_value=-1, dtype=torch.long, device=default_device)
         self.max_batch_size = batch_size
 
@@ -157,7 +159,9 @@ class TensorBatchStack(BatchStack):
                 (1) if successful (either pushed or retained), (0) if max_stack_size is exceeded.
         """
         batch_sz = data.size()[0]
-        assert push_mask.size()[0] == batch_sz
+        assert push_mask is None or push_mask.size()[0] == batch_sz
+        push_mask = torch.tensor([1.], device=data.device) if push_mask is None else push_mask
+        push_mask = push_mask.long()
         # force the incoming batch size equal to the storage,
         # such that no slicing is required and the implementation is easier.
         assert batch_sz == self.max_batch_size
@@ -169,10 +173,10 @@ class TensorBatchStack(BatchStack):
 
         batch_range = torch.arange(batch_sz, device=data.device)
         # increasing the stack top cursor only if the push action is valid
-        self._top_cur = self._top_cur + 1 * succ.long()
+        self._top_cur = self._top_cur + 1 * succ.long() * push_mask
         val_backup = self._storage[batch_range, self._top_cur]
         push_mask = push_mask.unsqueeze(-1)
-        val_new = val_backup * (1 - push_mask) + data * push_mask
+        val_new = val_backup * push_mask.logical_not() + data * push_mask
 
         new_storage = self._storage.clone()
         new_storage[batch_range, self._top_cur] = val_new
