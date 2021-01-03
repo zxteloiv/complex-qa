@@ -9,7 +9,7 @@ from .batched_stack import BatchStack
 from ..interfaces.unified_rnn import UnifiedRNN
 from ..modules.stacked_rnn_cell import StackedRNNCell
 from utils.seq_collector import SeqCollector
-from allennlp.nn.util import min_value_of_dtype
+from allennlp.nn.util import min_value_of_dtype, tiny_value_of_dtype
 
 from .tensor_typing_util import *
 
@@ -23,13 +23,14 @@ class NeuralPDA(nn.Module):
                  stack: BatchStack,
 
                  symbol_predictor: nn.Module,
-                 exact_form_predictor: nn.Module,
+                 exact_token_predictor: nn.Module,
 
                  query_attention_composer: VectorContextComposer,
 
                  # configuration
                  grammar_entry: int,
                  max_derivation_step: int = 1000,
+                 dropout: float = 0.2,
                  ):
         super().__init__()
         self._expander = rhs_expander
@@ -37,9 +38,10 @@ class NeuralPDA(nn.Module):
         self._gt = grammar_tutor
         self._embedder = symbol_embedding
         self._symbol_predictor = symbol_predictor
-        self._exact_form_predictor = exact_form_predictor
+        self._exact_token_predictor = exact_token_predictor
 
         self._query_attn_comp = query_attention_composer
+        self._dropout = nn.Dropout(dropout)
 
         # configurations
         self.grammar_entry = grammar_entry
@@ -95,7 +97,7 @@ class NeuralPDA(nn.Module):
 
         opts_logp = self._expand_rhs(lhs, tree_state, grammar_guide)
         topo_preds = self.inference_tree_topology(opts_logp, grammar_guide)
-        exact_token_p = self._predict_exact_form_after_derivation(topo_preds[0])
+        exact_token_p = self._predict_exact_token_after_derivation(topo_preds[0])
         return lhs, lhs_mask, grammar_guide, opts_logp, topo_preds, exact_token_p
 
     def continue_derivation(self):
@@ -135,7 +137,7 @@ class NeuralPDA(nn.Module):
 
         # seq_logits, seq_logp: (batch, V, seq)
         seq_logits = mem.get_stacked_tensor('symbol_logits', dim=-1)
-        seq_logp = F.log_softmax(seq_logits, dim=1)
+        seq_logp = (F.softmax(seq_logits, dim=1) + 1e-15).log()
 
         # seq_opts, opt_mask: (batch, opt_num, seq_len)
         # seq_opts_logp: (batch, opt_num, seq_len)
@@ -149,7 +151,7 @@ class NeuralPDA(nn.Module):
     def _predict_tree_symbol(self, last_symbol, tree_state) -> Tuple[FT, FT]:
         # last_symbol: (batch,)
         # last_emb: (batch, emb)
-        last_emb = self._embedder(last_symbol)
+        last_emb = self._dropout(self._embedder(last_symbol))
 
         # tree_state: (batch, hidden)
         # the hidden state is discarded each time, hidden inputs of the RNN is constructed from the tree
@@ -188,19 +190,19 @@ class NeuralPDA(nn.Module):
         weights = torch.zeros_like(logit).bool()
         weights[torch.arange(logit.size()[0], device=logit.device).unsqueeze(-1), compliance] = 1
         weights[:, 0] = (((compliance == 0) * compliance_mask).sum(-1) > 0) # the mask is ignored at the current step
-        masked_logit = logit.masked_fill(~weights, min_value_of_dtype(logit.dtype))
+        masked_logit = logit + (weights + tiny_value_of_dtype(logit.dtype)).log()
         return masked_logit
 
-    def _predict_exact_form_after_derivation(self, symbols: LT) -> FT:
+    def _predict_exact_token_after_derivation(self, symbols: LT) -> FT:
         # symbol: (batch, seqlen)
         expansion_len = symbols.size()[-1]
 
         # symbol_emb: (batch, *, emb)
-        symbol_emb = self._embedder(symbols)
+        symbol_emb = self._dropout(self._embedder(symbols))
         # tree_state: (batch, expansion_len, hid) <- (batch, 1, hid) <- (batch, hid)
         tree_state = self._encode_partial_tree().unsqueeze(1).expand(-1, expansion_len, -1)
         proj_inp = torch.cat([symbol_emb, tree_state], dim=-1)
-        exact_p = self._exact_form_predictor(proj_inp)
+        exact_p = self._exact_token_predictor(proj_inp)
         return exact_p
 
     def push_predictions_onto_stack(self, topology_prediction: T3L, lhs_mask: LT):

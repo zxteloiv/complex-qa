@@ -36,14 +36,15 @@ def cfq_pda():
     p.attn_use_tanh_activation = False
     p.num_enc_layers = 2
     p.dropout = .2
-    p.num_expander_layer = 2
+    p.num_expander_layer = 1
     p.max_derivation_step = 500
     p.max_expansion_len = 11
-    p.tied_symbol_emb = True
+    p.tied_symbol_emb = False
     p.symbol_quant_criterion = "projection"
     p.grammar_entry = "queryunit"
 
-    p.num_exact_token_mixture = 1
+    p.exact_token_predictor = "linear" # linear, mos
+    p.num_exact_token_mixture = 5
 
     return p
 
@@ -88,6 +89,16 @@ def get_model(p, vocab: NSVocabulary):
         quant_criterion=p.symbol_quant_criterion,
     )
 
+    if p.exact_token_predictor == "linear":
+        exact_token_predictor = nn.Sequential(
+            nn.Linear(p.hidden_sz + p.emb_sz, vocab.get_vocab_size(ns_et)),
+            nn.Softmax(dim=-1),
+        )
+    else:
+        exact_token_predictor = MoSProjection(
+            p.num_exact_token_mixture, p.hidden_sz + p.emb_sz, vocab.get_vocab_size(ns_et), output_semantics="probs"
+        )
+
     npda = NeuralPDA(
         symbol_embedding=emb_s,
         grammar_tutor=get_grammar_tutor(vocab, ns_s),
@@ -100,10 +111,11 @@ def get_model(p, vocab: NSVocabulary):
         ),
         stack=TensorBatchStack(p.batch_sz, p.max_derivation_step, item_size=1, dtype=torch.long),
         symbol_predictor=symbol_predictor,
-        exact_form_predictor=MoSProjection(
-            p.num_exact_token_mixture, p.hidden_sz + p.emb_sz, vocab.get_vocab_size(ns_et), output_semantics="probs"
+        exact_token_predictor=exact_token_predictor,
+        query_attention_composer=MultiInputsSequential(
+            ClassicMLPComposer(encoder.get_output_dim(), p.hidden_sz, p.hidden_sz, use_tanh=False),
+            nn.Hardtanh()
         ),
-        query_attention_composer=ClassicMLPComposer(encoder.get_output_dim(), p.hidden_sz, p.hidden_sz),
         grammar_entry=vocab.get_token_index(p.grammar_entry, ns_s),
         max_derivation_step=p.max_derivation_step,
     )
@@ -176,6 +188,11 @@ def main():
         bot.add_event_handler(Events.ITERATION_COMPLETED, end_with_nan_loss, 100)
         bot.add_event_handler(Events.EPOCH_COMPLETED, every_epoch_model_saver, 100)
         bot.add_event_handler(Events.ITERATION_COMPLETED, save_model_every_num_iters, 100, interval=100)
+
+        @bot.attach_extension(Events.ITERATION_COMPLETED)
+        def iteration_metric(bot: TrialBot):
+            import json
+            print(json.dumps(bot.model.get_metric()))
 
         # from utils.trial_bot_extensions import init_tensorboard_writer
         # from utils.trial_bot_extensions import write_batch_info_to_tensorboard
