@@ -12,7 +12,7 @@ class GrammarTutorForGeneration(nn.Module):
 
         rule_sample = next(iter(padded_rhs_dict.values()))
         # (vocab, max_count, 4, max_seq)
-        self._g = nn.Parameter(torch.zeros(vocab_size, *rule_sample.size()).long(), requires_grad=False)
+        self._g = nn.Parameter(torch.zeros(vocab_size, *rule_sample.size()), requires_grad=False)
         for lhs_id, rhs_tensor in padded_rhs_dict.items():
             self._g[lhs_id] = rhs_tensor
 
@@ -23,7 +23,7 @@ class GrammarTutorForGeneration(nn.Module):
                 the 4 sequences are symbols, parental_growth, fraternal_growth, and mask, respectively.
         """
         # motto: (batch, max_count, 4, max_seq)
-        motto = self._g[lhs]
+        motto = self._g[lhs].long()
 
         # mask: (batch, max_count, max_seq)
         mask = motto[:, :, -1, :]

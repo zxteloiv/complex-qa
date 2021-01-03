@@ -47,10 +47,12 @@ class UnifiedLarkTranslator(Translator):
             symbols.append(tokid(token))
             has_children.append(1 if tofi == NS_NT_FI else 0)
 
-        is_a_valid_successor = [1] * len(symbols)
+        has_successor = [1] * len(symbols)
+        has_successor[-1] = 0
+        mask = [1] * len(symbols)
 
-        # each rule rhs is a tensor of (3, rhs_seq)
-        rhs_tensor = torch.tensor(list(zip(symbols, has_children, is_a_valid_successor))).t()
+        # each rule rhs is a tensor of (4, rhs_seq)
+        rhs_tensor = torch.tensor(list(zip(symbols, has_children, has_successor, mask))).t()
         return {'lhs_token': tokid(lhs), 'rhs_tensor': rhs_tensor}
 
     def batch_tensor(self, tensors: List[Mapping[str, torch.Tensor]]) -> Mapping[str, torch.Tensor]:

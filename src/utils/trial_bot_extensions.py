@@ -117,7 +117,7 @@ def init_tensorboard_writer(bot: TrialBot, interval: int = 32):
 def write_batch_info_to_tensorboard(bot: TrialBot):
     from allennlp.training.tensorboard_writer import TensorboardWriter
     bot.tbx_writer: TensorboardWriter
-    metrics = bot.model.get_metrics()
+    metrics = bot.model.get_metric()
     output = bot.state.output
     metrics['loss'] = output['loss'] if output is not None else 0
     batch_grad_norm = torch.norm(torch.stack([torch.norm(p.grad.detach())

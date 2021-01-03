@@ -169,11 +169,11 @@ class TensorBatchStack(BatchStack):
         # stack error is only triggered when the push action is required but the stack is full.
         # stack_error: (batch,)
         stack_error = (self._top_cur >= (self.max_stack_size - 1)) * push_mask
-        succ = 1 - stack_error
+        succ = (1 - stack_error) * push_mask
 
         batch_range = torch.arange(batch_sz, device=data.device)
         # increasing the stack top cursor only if the push action is valid
-        self._top_cur = self._top_cur + 1 * succ.long() * push_mask
+        self._top_cur = self._top_cur + succ.long()
         val_backup = self._storage[batch_range, self._top_cur]
         push_mask = push_mask.unsqueeze(-1)
         val_new = val_backup * push_mask.logical_not() + data * push_mask

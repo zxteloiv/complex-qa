@@ -27,6 +27,16 @@ class SeqCollector:
         else:
             return seq_data
 
+    def get_concatenated_tensor(self, tag, default=None, dim=-1):
+        import torch
+        seq_data = self.history[tag]
+        if len(seq_data) == 0:
+            return default
+
+        if isinstance(seq_data[0], torch.Tensor):
+            return torch.cat(seq_data, dim=dim)
+        else:
+            return seq_data
 
     def remember_func(self, input_tag=None, output_tag=None):
         def deco(func):

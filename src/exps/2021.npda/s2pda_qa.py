@@ -19,7 +19,7 @@ def cfq_pda():
     p = HyperParamSet.common_settings(ROOT)
     p.TRAINING_LIMIT = 5
     p.OPTIM = "RAdam"
-    p.batch_sz = 32
+    p.batch_sz = 64
     p.weight_decay = .2
 
     p.src_ns = 'questionPatternModEntities'
@@ -27,7 +27,7 @@ def cfq_pda():
 
     p.enc_attn = "bilinear"
     # transformer requires input embedding equal to hidden size
-    p.encoder = "transformer"
+    p.encoder = "bilstm"
     p.emb_sz = 128
     p.hidden_sz = 128
     p.num_heads = 8
@@ -40,10 +40,10 @@ def cfq_pda():
     p.max_derivation_step = 500
     p.max_expansion_len = 11
     p.tied_symbol_emb = True
-    p.symbol_quant_criterion = "distance"
+    p.symbol_quant_criterion = "projection"
     p.grammar_entry = "queryunit"
 
-    p.num_exact_token_mixture = 10
+    p.num_exact_token_mixture = 1
 
     return p
 
@@ -99,19 +99,10 @@ def get_model(p, vocab: NSVocabulary):
             p.emb_sz, p.hidden_sz, p.num_expander_layer, intermediate_dropout=p.dropout
         ),
         stack=TensorBatchStack(p.batch_sz, p.max_derivation_step, item_size=1, dtype=torch.long),
-        parental_predictor=nn.Sequential(
-            nn.Linear(p.hidden_sz, p.hidden_sz // 2),
-            Activation.by_name('mish')(),
-            nn.Linear(p.hidden_sz // 2, 1),
-        ),
-        fraternal_predictor=nn.Sequential(
-            nn.Linear(p.hidden_sz, p.hidden_sz // 2),
-            Activation.by_name('mish')(),
-            nn.Linear(p.hidden_sz // 2, 1),
-        ),
         symbol_predictor=symbol_predictor,
         exact_form_predictor=nn.Sequential(
-            MoSProjection(p.num_exact_token_mixture, p.hidden_sz + p.emb_sz, vocab.get_vocab_size(ns_et))
+
+            MoSProjection(p.num_exact_token_mixture, p.hidden_sz + p.emb_sz, vocab.get_vocab_size(ns_et), output_semantics="probs")
         ),
         query_attention_composer=ClassicMLPComposer(encoder.get_output_dim(), p.hidden_sz, p.hidden_sz),
         grammar_entry=vocab.get_token_index(p.grammar_entry, ns_s),
@@ -185,9 +176,9 @@ def main():
         bot.add_event_handler(Events.ITERATION_COMPLETED, end_with_nan_loss, 100)
         bot.add_event_handler(Events.EPOCH_COMPLETED, every_epoch_model_saver, 100)
 
-        from utils.trial_bot_extensions import init_tensorboard_writer
-        from utils.trial_bot_extensions import write_batch_info_to_tensorboard
-        from utils.trial_bot_extensions import close_tensorboard
+        # from utils.trial_bot_extensions import init_tensorboard_writer
+        # from utils.trial_bot_extensions import write_batch_info_to_tensorboard
+        # from utils.trial_bot_extensions import close_tensorboard
         # bot.add_event_handler(Events.STARTED, init_tensorboard_writer, 100)
         # bot.add_event_handler(Events.ITERATION_COMPLETED, write_batch_info_to_tensorboard, 100)
         # bot.add_event_handler(Events.COMPLETED, close_tensorboard, 100)
@@ -204,15 +195,6 @@ def main():
     bot.run()
 
 def prediction_analysis(bot: TrialBot):
-    # everything is (batch, derivation, rhs_seq - 1)
-    # except for lhs is (batch, derivation)
-    #
-    # { "error": [is_nt_err, nt_err, t_err],
-    #   "gold": [mask, out_is_nt, safe_nt_out, safe_t_out],
-    #   "all_lhs": derivation_tree[:, :, 0], }
-    #
-    # preds = (is_nt_prob > 0.5, nt_logits.argmax(dim=-1), t_logits.argmax(dim=-1))
-    #
     output = bot.state.output
     if output is None:
         return

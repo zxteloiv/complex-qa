@@ -73,7 +73,7 @@ class MidOrderTraversalField(Field):
         self.tree_key = tree_key
         self.namespaces = list(namespaces) or ('symbols', 'exact_token')
         self.output_keys = output_keys or (
-            'rhs_symbols', 'parental_growth', 'fraternal_growth', 'rhs_exact_symbols', 'target_tokens'
+            'rhs_symbols', 'parental_growth', 'fraternal_growth', 'rhs_exact_tokens', 'mask', 'target_tokens'
         )
         self.padding = padding
         self.max_derivation_symbols = max_derivation_symbols
@@ -122,6 +122,8 @@ class MidOrderTraversalField(Field):
                 parental_growth.append(1 if isinstance(s, Tree) else 0)
 
             fraternal_growth = [1] * len(rhs_symbol)
+            fraternal_growth[-1] = 0
+            mask = [1] * len(rhs_symbol)
 
             if len(rhs_symbol) < self.max_derivation_symbols:
                 padding_seq = [self.padding] * (self.max_derivation_symbols - len(rhs_symbol))
@@ -129,11 +131,12 @@ class MidOrderTraversalField(Field):
                 rhs_exact_token.extend(padding_seq)
                 parental_growth.extend(padding_seq)
                 fraternal_growth.extend(padding_seq)
+                mask.extend(padding_seq)
 
-            for k, l in zip(self.output_keys[:-1], (rhs_symbol, parental_growth, fraternal_growth, rhs_exact_token)):
+            for k, l in zip(self.output_keys[:-1], (rhs_symbol, parental_growth, fraternal_growth, rhs_exact_token, mask)):
                 left_most_derivation[k].extend(l)
 
-        target_tokens = list(filter(lambda x: x not in (self.padding,), left_most_derivation[self.output_keys[-2]]))
+        target_tokens = list(filter(lambda x: x not in (self.padding,), left_most_derivation[self.output_keys[-3]]))
 
         output = dict()
         for k, l in left_most_derivation.items():

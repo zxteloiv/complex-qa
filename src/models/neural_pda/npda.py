@@ -9,6 +9,7 @@ from .batched_stack import BatchStack
 from ..interfaces.unified_rnn import UnifiedRNN
 from ..modules.stacked_rnn_cell import StackedRNNCell
 from utils.seq_collector import SeqCollector
+from allennlp.nn.util import min_value_of_dtype
 
 from .tensor_typing_util import *
 
@@ -18,12 +19,9 @@ class NeuralPDA(nn.Module):
                  symbol_embedding: nn.Embedding,
 
                  grammar_tutor,
-                 # partial_tree_encoder,
-                 # node_selector: nn.Module,
                  rhs_expander: StackedRNNCell,
                  stack: BatchStack,
-                 parental_predictor: nn.Module,
-                 fraternal_predictor: nn.Module,
+
                  symbol_predictor: nn.Module,
                  exact_form_predictor: nn.Module,
 
@@ -39,8 +37,6 @@ class NeuralPDA(nn.Module):
         self._gt = grammar_tutor
         self._embedder = symbol_embedding
         self._symbol_predictor = symbol_predictor
-        self._parental_predictor = parental_predictor
-        self._fraternal_predictor = fraternal_predictor
         self._exact_form_predictor = exact_form_predictor
 
         self._query_attn_comp = query_attention_composer
@@ -54,16 +50,13 @@ class NeuralPDA(nn.Module):
         self._tree_state = None
         self._derivation_step = 0
 
-        self.mem_prob_keys = ("symbol_p", "parental_p", "fraternal_p", "exact_symbol_p")
 
-    def forward(self,
-                token_based=False,
-                ):
-        if self.training:
+    def forward(self, token_based=False):
+        if not token_based:
             return self._forward_derivation_step()
 
         else:
-            return self._forward_derivation_inference()
+            raise NotImplementedError
 
     def init_automata(self, batch_sz: int, device: torch.device, query_attn_fn: Callable):
         # init stack
@@ -84,24 +77,26 @@ class NeuralPDA(nn.Module):
         self._tree_state = None
         self._query_attn_fn = None
 
-    def _forward_derivation_inference(self):
-        mem = SeqCollector()
-        while self.continue_derivation():
-            rhs_p, lhs_mask = self._forward_derivation_step()
-            predictions = self.inference(rhs_p)
-            self.push_predictions_onto_stack(predictions, lhs_mask)
-            mem(probability=rhs_p, prediction=predictions, lhs_mask=lhs_mask)
-
-        return mem['probability'], mem['prediction'], mem['lhs_mask']
-
     def _forward_derivation_step(self):
+        """
+        :return: Tuple of 6 objects
+            lhs, lhs_mask: (batch,) ;
+            grammar_guide: (batch, opt_num, 4, max_seq) ;
+            opts_logp: (batch, opt_num) ;
+            topo_preds: Tuple[(batch, max_seq) * 4] ;
+            exact_token_p: [(batch, max_seq, V)]
+        """
         # lhs, lhs_mask: (batch,)
         # tree_state: (batch, hidden)
         lhs, lhs_mask = self._select_node()
         tree_state = self._encode_partial_tree()
+        # grammar_guide: (batch, opt_num, 4, max_seq)
+        grammar_guide = self._gt(lhs)
 
-        rhs_p = self._expand_rhs(lhs, tree_state)
-        return rhs_p, lhs_mask
+        opts_logp = self._expand_rhs(lhs, tree_state, grammar_guide)
+        topo_preds = self.inference_tree_topology(opts_logp, grammar_guide)
+        exact_token_p = self._predict_exact_form_after_derivation(topo_preds[0])
+        return lhs, lhs_mask, grammar_guide, opts_logp, topo_preds, exact_token_p
 
     def continue_derivation(self):
         if self._derivation_step >= self.max_derivation_step:
@@ -112,35 +107,46 @@ class NeuralPDA(nn.Module):
         batch_stack_is_not_empty = success.sum() > 0
         return batch_stack_is_not_empty
 
-    def _select_node(self) -> Tuple[Tensor, Tensor]:
+    def _select_node(self) -> Tuple[LT, LT]:
         node, success = self._stack.pop()
         return node.squeeze(-1).long(), success
 
     def _encode_partial_tree(self):
         return self._tree_state.detach() if self._tree_state is not None else None
 
-    def _expand_rhs(self, lhs, tree_state) -> T4F:
-        # grammar_guide: (batch, max_num, 4, max_seq)
-        grammar_guide = self._gt(lhs)
-
+    def _expand_rhs(self, lhs, tree_state, grammar_guide) -> FT:
         mem = SeqCollector()
         step_inp = lhs
         for step in range(grammar_guide.size()[-1]):
+            # Produce a locally-compliant step output and symbol distribution.
             # step_output: (batch, hid)
             # s_logits: (batch, V)
-            # p/f_logits: (batch,)
-            step_output, step_logits = self._predict_tree_symbol(step_inp, tree_state)
-            # step_grammar: List[(batch, max_num)]
-            step_grammar = map(lambda x: x.squeeze(), grammar_guide[:, :, :, step].split(1, dim=-1))
-            # topo_probs: Tuple[(batch, V), (batch,), (batch,)]
-            topology_probs = self._learn_from_tutor(step_logits, step_grammar)
-            exact_symbol_p = self._predict_exact_form(topology_probs[0].argmax(dim=-1))
-            step_inp = topology_probs[0].argmax(dim=-1)
-            mem(**dict(zip(self.mem_prob_keys, topology_probs + (exact_symbol_p,))))
+            step_output, symbol_logits = self._predict_tree_symbol(step_inp, tree_state)
 
-        return tuple(map(mem.get_stacked_tensor, self.mem_prob_keys))
+            self._update_partial_tree(step_output)
 
-    def _predict_tree_symbol(self, last_symbol, tree_state) -> Tuple[FT, T3F]:
+            # bias the logits with the step grammar
+            # symbol_opts, opt_mask: (batch, opts)
+            # compliant_logits: (batch, V)
+            symbol_opts, opt_mask = grammar_guide[:, :, 0, step], grammar_guide[:, :, -1, step]
+            compliant_logits = self._learn_step_symbol_from_tutor(symbol_logits, symbol_opts, opt_mask)
+            step_inp = compliant_logits.argmax(dim=-1)
+            mem(symbol_logits=compliant_logits)
+
+        # seq_logits, seq_logp: (batch, V, seq)
+        seq_logits = mem.get_stacked_tensor('symbol_logits', dim=-1)
+        seq_logp = F.log_softmax(seq_logits, dim=1)
+
+        # seq_opts, opt_mask: (batch, opt_num, seq_len)
+        # seq_opts_logp: (batch, opt_num, seq_len)
+        seq_opts, opt_mask = grammar_guide[:, :, 0, :], grammar_guide[:, :, -1, :]
+        seq_opts_logp = torch.gather(seq_logp, index=seq_opts, dim=1)
+
+        # opts_logp: (batch, opt_num)
+        opts_logp = (seq_opts_logp * opt_mask).sum(dim=-1)
+        return opts_logp
+
+    def _predict_tree_symbol(self, last_symbol, tree_state) -> Tuple[FT, FT]:
         # last_symbol: (batch,)
         # last_emb: (batch, emb)
         last_emb = self._embedder(last_symbol)
@@ -157,14 +163,8 @@ class NeuralPDA(nn.Module):
         step_out_att = self._query_attn_comp(query_context, step_out)
 
         # s_logits: (batch, V)
-        # p_logits: (batch,)
-        # f_logits: (batch,)
         symbol_logits = self._symbol_predictor(step_out_att)
-        parental_logits = self._parental_predictor(step_out_att).squeeze(-1)
-        fraternal_logits = self._fraternal_predictor(step_out_att).squeeze(-1)
-        self._update_partial_tree(step_out_att)
-
-        return step_out_att, (symbol_logits, parental_logits, fraternal_logits)
+        return step_out_att, symbol_logits
 
     def _update_partial_tree(self, rule) -> None:
         if self._tree_state is None:
@@ -172,60 +172,63 @@ class NeuralPDA(nn.Module):
         else:
             self._tree_state = self._tree_state + rule
 
-    def _learn_from_tutor(self, step_logits, step_grammar) -> T3F:
-        # step_logits: Tuple[(batch, V), (batch,), (batch,)]
-        symbol_logits, parental_logits, fraternal_logits = step_logits
-        # step_grammar: List[(batch, max_num)]
-        symbol_opts, parental_growth, fraternal_mask = step_grammar
-
-        symbol_prob = self._index_masked_prob(symbol_logits, symbol_opts, fraternal_mask)
-        parental_prob = self._index_masked_prob(parental_logits, parental_growth, fraternal_mask)
-        fraternal_prob = self._index_masked_prob(fraternal_logits, fraternal_mask, fraternal_mask)
-        return symbol_prob, parental_prob, fraternal_prob
-
     @staticmethod
-    def _index_masked_prob(logit, index, index_mask) -> FT:
-        if logit.ndim > 1:
-            # the default weight is 0; set all weights for the positions contained in opts to 1;
-            # reset the weights of 0 index with valid 0s
-            weights = torch.zeros_like(logit)
-            weights[torch.arange(logit.size()[0], device=weights.device).unsqueeze(-1), index] = 1
-            weights[:, 0] = (((index == 0) * index_mask).sum(-1) > 0)
-            prob = masked_softmax(logit, weights.bool(), memory_efficient=True)
+    def _learn_step_symbol_from_tutor(logit, compliance, compliance_mask) -> FT:
+        """
+        Adjust the symbol logits at current step.
+        Grammar Guide Mask is not required yet, but it will be used in the entire sequence.
 
-        else:
-            logit += 10 * (((index == 1) * index_mask).sum(-1) > 0)
-            logit -= 10 * (((index == 0) * index_mask).sum(-1) > 0)
-            prob = logit.sigmoid()
+        :param logit: (batch, V), the symbol logits at the current step
+        :param compliance: (batch, max_opts), the marginalized compliance at the current step
+        :return:
+        """
+        # the default weight is 0; set all weights for the positions contained in opts to 1;
+        # reset the weights of 0 index with valid 0s
+        weights = torch.zeros_like(logit).bool()
+        weights[torch.arange(logit.size()[0], device=logit.device).unsqueeze(-1), compliance] = 1
+        weights[:, 0] = (((compliance == 0) * compliance_mask).sum(-1) > 0) # the mask is ignored at the current step
+        masked_logit = logit.masked_fill(~weights, min_value_of_dtype(logit.dtype))
+        return masked_logit
 
-        return prob
+    def _predict_exact_form_after_derivation(self, symbols: LT) -> FT:
+        # symbol: (batch, seqlen)
+        expansion_len = symbols.size()[-1]
 
-    def _predict_exact_form(self, symbol) -> FT:
-        # symbol_emb: (batch, emb)
-        symbol_emb = self._embedder(symbol)
-        tree_state = self._encode_partial_tree()
+        # symbol_emb: (batch, *, emb)
+        symbol_emb = self._embedder(symbols)
+        # tree_state: (batch, expansion_len, hid) <- (batch, 1, hid) <- (batch, hid)
+        tree_state = self._encode_partial_tree().unsqueeze(1).expand(-1, expansion_len, -1)
         proj_inp = torch.cat([symbol_emb, tree_state], dim=-1)
-        exact_p = F.softmax(self._exact_form_predictor(proj_inp), dim=-1)
+        exact_p = self._exact_form_predictor(proj_inp)
         return exact_p
 
-    def push_predictions_onto_stack(self, predictions: T4L, lhs_mask: NullOrT):
-        symbol, p_growth, f_mask, exact_symbol = predictions
-        mask = f_mask if lhs_mask is None else f_mask * lhs_mask.unsqueeze(-1)
+    def push_predictions_onto_stack(self, topology_prediction: T3L, lhs_mask: LT):
+        symbol, p_growth, f_growth = topology_prediction
 
-        for step in range(symbol.size()[-1] - 1, -1, -1):
-            push_mask = mask[:, step] * p_growth[:, step]
+        # step 0 is never added to the stack
+        for step in range(symbol.size()[-1] - 1, 0, -1):
+            push_mask = lhs_mask * p_growth[:, step] * f_growth[:, step - 1]
+            assert push_mask.ndim == 1
             self._stack.push(symbol[:, step].unsqueeze(-1), push_mask.long())
 
     @staticmethod
-    def inference(rhs_p) -> T4L:
-        # *symbol_p: (batch, seq, V)
-        # p/f*_p: (batch, seq)
-        symbol_p, parental_p, fraternal_p, exact_symbol_p = rhs_p
+    def inference_tree_topology(opts_logp, grammar_guide) -> T4L:
+        """
+        Inference the tree topological structure of a derivation.
+        Exact token inference is not considered here.
+        :param opts_logp: (batch, opt_num)
+        :param grammar_guide: (batch, opt_num, 4, max_seq)
+        :return: Tuple[(batch, seq) * 4], symbol sequence, parental growth, fraternal growth, and mask respectively.
+        """
+        # best_opt: (batch,)
+        best_opt = opts_logp.argmax(dim=-1)
 
-        # all predictions: (batch, seq)
-        symbol = symbol_p.argmax(dim=-1)
-        p_growth = (parental_p > 0.5).long()
-        f_mask = (fraternal_p > 0.5).long().cumprod(dim=-1)
-        exact_symbol = exact_symbol_p.argmax(dim=-1)
+        # topo_pred: (batch, 4, max_seq)
+        topology_predictions = grammar_guide[torch.arange(best_opt.size()[0], device=best_opt.device), best_opt]
 
-        return symbol, p_growth, f_mask, exact_symbol
+        symbol = topology_predictions[:, 0, :]
+        p_growth = topology_predictions[:, 1, :]
+        f_growth = topology_predictions[:, 2, :]
+        mask = topology_predictions[:, 3, :]
+
+        return symbol, p_growth, f_growth, mask
