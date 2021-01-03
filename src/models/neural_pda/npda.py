@@ -129,7 +129,7 @@ class NeuralPDA(nn.Module):
             # symbol_opts, opt_mask: (batch, opts)
             # compliant_logits: (batch, V)
             symbol_opts, opt_mask = grammar_guide[:, :, 0, step], grammar_guide[:, :, -1, step]
-            compliant_logits = self._learn_step_symbol_from_tutor(symbol_logits, symbol_opts, opt_mask)
+            compliant_logits = self._learn_from_step_grammar_tutor(symbol_logits, symbol_opts, opt_mask)
             step_inp = compliant_logits.argmax(dim=-1)
             mem(symbol_logits=compliant_logits)
 
@@ -142,8 +142,8 @@ class NeuralPDA(nn.Module):
         seq_opts, opt_mask = grammar_guide[:, :, 0, :], grammar_guide[:, :, -1, :]
         seq_opts_logp = torch.gather(seq_logp, index=seq_opts, dim=1)
 
-        # opts_logp: (batch, opt_num)
-        opts_logp = (seq_opts_logp * opt_mask).sum(dim=-1)
+        # opts_logp: (batch, opt_num), the length of optional derivations should be taken out by computing the mean
+        opts_logp = (seq_opts_logp * opt_mask).sum(dim=-1) # / (opt_mask.sum(dim=-1) + 1)
         return opts_logp
 
     def _predict_tree_symbol(self, last_symbol, tree_state) -> Tuple[FT, FT]:
@@ -173,7 +173,7 @@ class NeuralPDA(nn.Module):
             self._tree_state = self._tree_state + rule
 
     @staticmethod
-    def _learn_step_symbol_from_tutor(logit, compliance, compliance_mask) -> FT:
+    def _learn_from_step_grammar_tutor(logit, compliance, compliance_mask) -> FT:
         """
         Adjust the symbol logits at current step.
         Grammar Guide Mask is not required yet, but it will be used in the entire sequence.
@@ -184,6 +184,7 @@ class NeuralPDA(nn.Module):
         """
         # the default weight is 0; set all weights for the positions contained in opts to 1;
         # reset the weights of 0 index with valid 0s
+        compliance = compliance * compliance_mask
         weights = torch.zeros_like(logit).bool()
         weights[torch.arange(logit.size()[0], device=logit.device).unsqueeze(-1), compliance] = 1
         weights[:, 0] = (((compliance == 0) * compliance_mask).sum(-1) > 0) # the mask is ignored at the current step

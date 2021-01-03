@@ -73,7 +73,8 @@ class Seq2PDA(nn.Module):
         enc_attn_fn = self._encode_source(source_tokens)
         self.npda.init_automata(source_tokens.size()[0], source_tokens.device, enc_attn_fn)
 
-        step = loss = 0
+        step = 0
+        loss = valid_derivation_num = 0
         exact_token_list = []
         while self.npda.continue_derivation() and step * self.max_expansion_len < mask.size()[1]:
             derivation = self.npda()
@@ -84,6 +85,8 @@ class Seq2PDA(nn.Module):
             loss = loss + derivation_loss.detach()
             step += 1
 
+            # any valid derivation must expand the RHS starting with a START token, and the mask is set to 1.
+            valid_derivation_num += gold[-1][:, 0]
             exact_token_list.append(self._arrange_target_tokens(derivation))
             self.npda.push_predictions_onto_stack(gold[:3], derivation[1])
 
@@ -94,8 +97,9 @@ class Seq2PDA(nn.Module):
         else:
             self.logger.warning('No exact token generated, which is impossible.')
 
-        self.ppl(loss)
-        output = {'loss': loss}
+        normalized_loss = loss / valid_derivation_num.float().mean()
+        self.ppl(normalized_loss)
+        output = {'loss': normalized_loss}
         self.npda.reset_automata()
         return output
 
@@ -132,9 +136,9 @@ class Seq2PDA(nn.Module):
         lhs, lhs_mask, grammar_guide, opts_logp, topo_preds, exact_token_p = derivation
         comp_len = grammar_guide.size()[-1]
 
-        symbol, p_growth, _, exact_token, mask = map(lambda t: t[:, :comp_len], gold)
+        symbol, p_growth, _, exact_token, seq_mask = map(lambda t: t[:, :comp_len], gold)
 
-        et_mask = mask * (p_growth == 0)
+        et_mask = seq_mask * (p_growth == 0)
         et_logp = (exact_token_p + 1e-13).log()
         et_loss = -et_logp.gather(dim=-1, index=exact_token.unsqueeze(-1)).squeeze(-1) * et_mask
         per_batch_loss = et_loss.sum(1) / (et_mask.sum(1) + 1e-13)
@@ -144,15 +148,18 @@ class Seq2PDA(nn.Module):
         # seq_symbol_opts: (batch, opt_num, comp_len)
         seq_symbol_opts = grammar_guide[:, :, 0, :]
 
-        # opt_weights: (batch, opt_num) <- (batch, opt_num, comp_len) <- (batch, 1, comp_len) <- symbol: (batch, comp_len)
         # seq_opt_weights: (batch, opt_num, comp_len)
-        seq_opt_weights = (symbol.unsqueeze(1) == seq_symbol_opts)  # target seq is the same with some derivation
-        seq_opt_weights = seq_opt_weights * mask.unsqueeze(1)   # the comparison is conducted only at valid locations
+        seq_opt_weights = (symbol.unsqueeze(1) == seq_symbol_opts)   # target seq is different with the option
+        seq_opt_weights = seq_opt_weights * seq_mask.unsqueeze(1)    # conducting comparisons only at valid locations
 
         # opt_weights: (batch, opt_num), only the correct opt is marked as 1
-        opt_weights = seq_opt_weights.sum(-1) > 0
+        opt_weights = seq_opt_weights.sum(-1) == seq_mask.sum(dim=-1).unsqueeze(1)
+        batch_mask = seq_mask.sum(dim=-1) > 0
+        topology_loss_per_batch = -(opt_weights * opts_logp).sum(-1) * batch_mask
 
-        topology_loss = -(opt_weights * opts_logp).sum(-1).mean()
+        # any valid derivation has a starting symbol by default and thus must be a non-empty sequence
+        topology_loss = topology_loss_per_batch.sum() / num_non_empty_sequences
+
         return token_loss + topology_loss
 
     def _arrange_target_tokens(self, derivation):

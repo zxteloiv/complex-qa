@@ -100,9 +100,8 @@ def get_model(p, vocab: NSVocabulary):
         ),
         stack=TensorBatchStack(p.batch_sz, p.max_derivation_step, item_size=1, dtype=torch.long),
         symbol_predictor=symbol_predictor,
-        exact_form_predictor=nn.Sequential(
-
-            MoSProjection(p.num_exact_token_mixture, p.hidden_sz + p.emb_sz, vocab.get_vocab_size(ns_et), output_semantics="probs")
+        exact_form_predictor=MoSProjection(
+            p.num_exact_token_mixture, p.hidden_sz + p.emb_sz, vocab.get_vocab_size(ns_et), output_semantics="probs"
         ),
         query_attention_composer=ClassicMLPComposer(encoder.get_output_dim(), p.hidden_sz, p.hidden_sz),
         grammar_entry=vocab.get_token_index(p.grammar_entry, ns_s),
@@ -171,10 +170,12 @@ def main():
         from trialbot.training.extensions import every_epoch_model_saver
         from utils.trial_bot_extensions import end_with_nan_loss
         from utils.trial_bot_extensions import evaluation_on_dev_every_epoch
+        from utils.trial_bot_extensions import save_model_every_num_iters
         bot.add_event_handler(Events.EPOCH_COMPLETED, evaluation_on_dev_every_epoch, 90)
 
         bot.add_event_handler(Events.ITERATION_COMPLETED, end_with_nan_loss, 100)
         bot.add_event_handler(Events.EPOCH_COMPLETED, every_epoch_model_saver, 100)
+        bot.add_event_handler(Events.ITERATION_COMPLETED, save_model_every_num_iters, 100, interval=100)
 
         # from utils.trial_bot_extensions import init_tensorboard_writer
         # from utils.trial_bot_extensions import write_batch_info_to_tensorboard
