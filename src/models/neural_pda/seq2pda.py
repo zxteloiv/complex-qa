@@ -61,6 +61,7 @@ class Seq2PDA(nn.Module):
                                     rhs_exact_tokens: LT,
                                     mask: LT,
                                     target_tokens: LT,
+                                    optim = None,
                                     ):
         """
         :param source_tokens: (batch, max_src_len)
@@ -77,11 +78,15 @@ class Seq2PDA(nn.Module):
         loss = valid_derivation_num = 0
         exact_token_list = []
         while self.npda.continue_derivation() and step * self.max_expansion_len < mask.size()[1]:
-            derivation = self.npda()
             # lhs, lhs_mask, grammar_guide, opts_logp, topo_preds, exact_token_p = derivation
             gold = self._get_step_gold(step, rhs_symbols, parental_growth, fraternal_growth, rhs_exact_tokens, mask)
+            derivation = self.npda(step_symbols=rhs_symbols)
+
             derivation_loss = self._compute_loss(derivation, gold)
             derivation_loss.backward(retain_graph=True)
+            if optim is not None:
+                optim.step()
+                optim.zero_grad()
             loss = loss + derivation_loss.detach()
             step += 1
 
@@ -138,8 +143,6 @@ class Seq2PDA(nn.Module):
 
         symbol, p_growth, _, exact_token, seq_mask = map(lambda t: t[:, :comp_len], gold)
 
-        # mask out the leading START token, which is useless but abundant
-        seq_mask[:, 0] = 0
         et_mask = seq_mask * (p_growth == 0)
         et_logp = (exact_token_p + 1e-13).log()
         et_loss = -et_logp.gather(dim=-1, index=exact_token.unsqueeze(-1)).squeeze(-1) * et_mask

@@ -56,10 +56,9 @@ class NeuralPDA(nn.Module):
         self._tree_state = None
         self._derivation_step = 0
 
-
-    def forward(self, token_based=False):
+    def forward(self, token_based=False, **kwargs):
         if not token_based:
-            return self._forward_derivation_step()
+            return self._forward_derivation_step(**kwargs)
 
         else:
             raise NotImplementedError
@@ -83,7 +82,7 @@ class NeuralPDA(nn.Module):
         self._tree_state = None
         self._query_attn_fn = None
 
-    def _forward_derivation_step(self):
+    def _forward_derivation_step(self, step_symbols=None):
         """
         :return: Tuple of 6 objects
             lhs, lhs_mask: (batch,) ;
@@ -99,9 +98,14 @@ class NeuralPDA(nn.Module):
         # grammar_guide: (batch, opt_num, 4, max_seq)
         grammar_guide = self._gt(lhs)
 
-        opts_logp = self._expand_rhs(lhs, tree_state, grammar_guide)
+        opts_logp = self._expand_rhs(lhs, tree_state, grammar_guide, step_symbols=step_symbols)
         topo_preds = self.inference_tree_topology(opts_logp, grammar_guide)
-        exact_token_p = self._predict_exact_token_after_derivation(topo_preds[0])
+        if step_symbols is None:
+            inferred_symbols = topo_preds[0]
+        else:
+            inferred_symbols = step_symbols[:, :grammar_guide.size()[-1]]
+
+        exact_token_p = self._predict_exact_token_after_derivation(inferred_symbols)
         return lhs, lhs_mask, grammar_guide, opts_logp, topo_preds, exact_token_p
 
     def continue_derivation(self):
@@ -120,10 +124,13 @@ class NeuralPDA(nn.Module):
     def _encode_partial_tree(self):
         return self._tree_state.detach() if self._tree_state is not None else None
 
-    def _expand_rhs(self, lhs, tree_state, grammar_guide) -> FT:
+    def _expand_rhs(self, lhs, tree_state, grammar_guide, step_symbols: NullOrLT) -> FT:
+
         mem = SeqCollector()
         step_inp = lhs
         for step in range(grammar_guide.size()[-1]):
+            if step > 0 and step_symbols is not None:
+                step_inp = step_symbols[:, step - 1]
             # Produce a locally-compliant step output and symbol distribution.
             # step_output: (batch, hid)
             # s_logits: (batch, V)
@@ -136,7 +143,9 @@ class NeuralPDA(nn.Module):
             # compliant_logits: (batch, V)
             symbol_opts, opt_mask = grammar_guide[:, :, 0, step], grammar_guide[:, :, -1, step]
             compliant_logits = self._learn_from_step_grammar_tutor(symbol_logits, symbol_opts, opt_mask)
-            step_inp = compliant_logits.argmax(dim=-1)
+            if step_symbols is None:
+                step_inp = compliant_logits.argmax(dim=-1)
+
             mem(symbol_logits=compliant_logits)
 
         # seq_logits, seq_logp: (batch, V, seq)
@@ -148,21 +157,21 @@ class NeuralPDA(nn.Module):
         seq_opts, opt_mask = grammar_guide[:, :, 0, :], grammar_guide[:, :, -1, :]
         seq_opts_logp = torch.gather(seq_logp, index=seq_opts, dim=1)
 
-        # opts_logp: (batch, opt_num), the length of optional derivations should be taken out by computing the mean
-        opts_logp = (seq_opts_logp * opt_mask).sum(dim=-1) # / (opt_mask.sum(dim=-1) + 1)
+        # opts_logp: (batch, opt_num)
+        opts_logp = (seq_opts_logp * opt_mask).sum(dim=-1)
         return opts_logp
 
-    def _predict_tree_symbol(self, last_symbol, tree_state) -> Tuple[FT, FT]:
-        # last_symbol: (batch,)
-        # last_emb: (batch, emb)
-        last_emb = self._dropout(self._embedder(last_symbol))
+    def _predict_tree_symbol(self, symbol, tree_state) -> Tuple[FT, FT]:
+        # symbol: (batch,)
+        # emb: (batch, emb)
+        emb = self._dropout(self._embedder(symbol))
 
         # tree_state: (batch, hidden)
         # the hidden state is discarded each time, hidden inputs of the RNN is constructed from the tree
         hx = None
         if tree_state is not None:
             hx, _ = self._expander.init_hidden_states([tree_state for _ in range(self._expander.get_layer_num())])
-        _, step_out = self._expander(last_emb, hx)
+        _, step_out = self._expander(emb, hx)
 
         # attention computation and compose the context vector with the symbol hidden states
         query_context = self._query_attn_fn(step_out)
@@ -222,6 +231,7 @@ class NeuralPDA(nn.Module):
         Exact token inference is not considered here.
         :param opts_logp: (batch, opt_num)
         :param grammar_guide: (batch, opt_num, 4, max_seq)
+        :param step_symbols: (batch, max_derivation_len), Nullable
         :return: Tuple[(batch, seq) * 4], symbol sequence, parental growth, fraternal growth, and mask respectively.
         """
         # best_opt: (batch,)

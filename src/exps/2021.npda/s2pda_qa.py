@@ -165,7 +165,7 @@ class Seq2PDATrainingUpdater(TrainingUpdater):
         if device >= 0:
             batch = move_to_device(batch, device)
 
-        output = model(**batch)
+        output = model(optim=optim, **batch)
         optim.step()
 
         return output
