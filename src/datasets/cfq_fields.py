@@ -99,7 +99,7 @@ class MidOrderTraversalField(Field):
                 if isinstance(c, lark.Token):
                     if self.grammar_token_generation:
                         yield ns_s, c.type
-                    yield ns_et, c.value
+                    yield ns_et, c.value.lower()
 
     def to_tensor(self, example) -> Mapping[str, torch.Tensor]:
         Tree, Token = lark.Tree, lark.Token
@@ -118,7 +118,7 @@ class MidOrderTraversalField(Field):
             rhs_symbol, rhs_exact_token, parental_growth = [tokid(START_SYMBOL, ns_s)], [tokid(START_SYMBOL, ns_et)], [0]
             for s in children:
                 rhs_symbol.append(tokid(s.data, ns_s) if isinstance(s, Tree) else tokid(s.type, ns_s))
-                rhs_exact_token.append(tokid(s.value, ns_et) if isinstance(s, Token) else self.padding)
+                rhs_exact_token.append(tokid(s.value.lower(), ns_et) if isinstance(s, Token) else self.padding)
                 parental_growth.append(1 if isinstance(s, Tree) else 0)
 
             fraternal_growth = [1] * len(rhs_symbol)

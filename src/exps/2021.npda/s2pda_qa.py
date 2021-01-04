@@ -2,6 +2,7 @@ from typing import Dict
 import sys, os.path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 import logging
+from collections import defaultdict
 
 from trialbot.training import TrialBot, Registry
 from trialbot.data import NSVocabulary
@@ -51,13 +52,27 @@ def cfq_pda():
 
 def get_grammar_tutor(vocab, ns_symbol):
     from models.neural_pda.grammar_tutor import GrammarTutorForGeneration
+    from datasets.lark_translator import UnifiedLarkTranslator
     grammar_dataset, _, _ = datasets.cfq.sparql_pattern_grammar()
-    grammar_translator = datasets.cfq_translator.UnifiedLarkTranslator()
+    grammar_translator = UnifiedLarkTranslator(datasets.cfq_translator.UNIFIED_TREE_NS)
     grammar_translator.index_with_vocab(vocab)
     rule_list = [grammar_translator.to_tensor(r) for r in grammar_dataset]
     rule_repr = grammar_translator.batch_tensor(rule_list)
     gt = GrammarTutorForGeneration(vocab.get_vocab_size(ns_symbol), {int(k): v for k, v in rule_repr.items()})
     return gt
+
+def get_exact_token_tutor(vocab, ns_symbol, ns_exact_token):
+    from datasets.lark_translator import LarkExactTokenReader
+    from models.neural_pda.token_tutor import ExactTokenTutor
+    reader = LarkExactTokenReader(vocab=vocab, ns=(ns_symbol, ns_exact_token))
+    grammar_dataset, _, _ = datasets.cfq.sparql_pattern_grammar()
+    pair_set = set()
+    for r in grammar_dataset:
+        for p in reader.generate_symbol_token_pair(r):
+            pair_set.add(p)
+    valid_token_lookup = reader.merge_the_pairs(pair_set)
+    ett = ExactTokenTutor(vocab.get_vocab_size(ns_symbol), vocab.get_vocab_size(ns_exact_token), valid_token_lookup)
+    return ett
 
 def get_model(p, vocab: NSVocabulary):
     import torch
@@ -94,16 +109,15 @@ def get_model(p, vocab: NSVocabulary):
     if p.exact_token_predictor == "linear":
         exact_token_predictor = nn.Sequential(
             nn.Linear(p.hidden_sz + p.emb_sz, vocab.get_vocab_size(ns_et)),
-            nn.Softmax(dim=-1),
         )
     elif p.exact_token_predictor == "quant":
         exact_token_predictor = QuantTokenPredictor(
-            vocab.get_vocab_size(ns_et), p.hidden_sz + p.emb_sz, output_semantics="probs",
+            vocab.get_vocab_size(ns_et), p.hidden_sz + p.emb_sz,
             quant_criterion=p.exact_token_quant_criterion,
         )
     else:
         exact_token_predictor = MoSProjection(
-            p.num_exact_token_mixture, p.hidden_sz + p.emb_sz, vocab.get_vocab_size(ns_et), output_semantics="probs"
+            p.num_exact_token_mixture, p.hidden_sz + p.emb_sz, vocab.get_vocab_size(ns_et),
         )
 
     npda = NeuralPDA(
@@ -124,6 +138,7 @@ def get_model(p, vocab: NSVocabulary):
             nn.Hardtanh()
         ),
         exact_token_predictor=exact_token_predictor,
+        token_tutor=get_exact_token_tutor(vocab, p.tgt_ns[0], p.tgt_ns[1]),
         tree_state_updater=OrthogonalAddTSU(),
         grammar_entry=vocab.get_token_index(p.grammar_entry, ns_s),
         max_derivation_step=p.max_derivation_step,

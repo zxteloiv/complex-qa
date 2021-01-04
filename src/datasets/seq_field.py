@@ -12,7 +12,7 @@ class SeqField(Field):
 
         seq_raw = example.get(self.source_key)
         if seq_raw is not None:
-            yield from product([self.ns], self.split(seq_raw))
+            yield from product([self.ns], (x.lower() if self.lower_case else x for x in self.split(seq_raw)))
 
     def to_tensor(self, example) -> Mapping[str, torch.Tensor]:
         seq_raw = example.get(self.source_key)
@@ -26,6 +26,9 @@ class SeqField(Field):
         if self.max_seq_len > 0:
             seq_toks = seq_toks[:self.max_seq_len]
 
+        if self.lower_case:
+            seq_toks = [x.lower() if self.lower_case else x for x in seq_toks]
+
         if self.add_start_end_toks:
             seq_toks = [START_SYMBOL] + seq_toks + [END_SYMBOL]
 
@@ -38,7 +41,6 @@ class SeqField(Field):
         batch_tensor = pad_sequence(tensor_list, batch_first=True, padding_value=self.padding)
         return {self.renamed_key: batch_tensor}
 
-
     def __init__(self, source_key: str,
                  renamed_key: str = None,
                  namespace: str = None,
@@ -46,6 +48,7 @@ class SeqField(Field):
                  add_start_end_toks: bool = True,
                  padding_id: int = 0,
                  max_seq_len: int = 0,
+                 use_lower_case: bool = True,
                  ):
         super().__init__()
         self.split = split_fn or (lambda s: s if isinstance(s, list) else s.split())
@@ -55,3 +58,4 @@ class SeqField(Field):
         self.add_start_end_toks = add_start_end_toks
         self.padding = padding_id
         self.max_seq_len = max_seq_len
+        self.lower_case = use_lower_case

@@ -78,20 +78,17 @@ class Seq2PDA(nn.Module):
         loss = valid_derivation_num = 0
         exact_token_list = []
         while self.npda.continue_derivation() and step * self.max_expansion_len < mask.size()[1]:
-            # lhs, lhs_mask, grammar_guide, opts_logp, topo_preds, exact_token_p = derivation
+            # lhs, lhs_mask, grammar_guide, opts_logp, topo_preds, exact_token_logit = derivation
             gold = self._get_step_gold(step, rhs_symbols, parental_growth, fraternal_growth, rhs_exact_tokens, mask)
             derivation = self.npda(step_symbols=rhs_symbols)
 
-            derivation_loss = self._compute_loss(derivation, gold)
-            derivation_loss.backward(retain_graph=True)
-            if optim is not None:
-                optim.step()
-                optim.zero_grad()
-            loss = loss + derivation_loss.detach()
+            token_loss, topo_loss = self._compute_loss(derivation, gold)
+            derivation_loss = self._efficiently_optimize([token_loss, topo_loss], optim)
+            loss += derivation_loss
             step += 1
-
             # any valid derivation must expand the RHS starting with a START token, and the mask is set to 1.
             valid_derivation_num += gold[-1].sum(-1) > 0
+
             exact_token_list.append(self._arrange_target_tokens(derivation))
             self.npda.push_predictions_onto_stack(gold[:3], derivation[1])
 
@@ -107,6 +104,16 @@ class Seq2PDA(nn.Module):
         output = {'loss': normalized_loss}
         self.npda.reset_automata()
         return output
+
+    def _efficiently_optimize(self, loss_list, optim):
+        filtered_loss = list(filter(lambda l: l > 1e-13, loss_list))
+        loss = 0
+        if len(filtered_loss) > 0:
+            for l in filtered_loss:
+                loss = loss + l
+            loss.backward(retain_graph=True)
+            optim.step()
+        return loss.detach() if isinstance(loss, torch.Tensor) else loss
 
     def _encode_source(self, source_tokens):
         source_tokens, source_mask = prepare_input_mask(source_tokens, padding_val=self.tok_pad)
@@ -129,7 +136,7 @@ class Seq2PDA(nn.Module):
             grammar_guide: (batch, opt_num, 4, max_seq) ;
             opts_logp: (batch, opt_num) ;
             topo_preds: Tuple[(batch, max_seq) * 4] ;
-            exact_token_p: [(batch, max_seq, V)]
+            exact_token_logit: [(batch, max_seq, V)]
         :param gold:
             symbol: (batch, max_derivation_len), separated by every max_derivation_symbols
             parental_growth: (batch, max_derivation_len)
@@ -138,13 +145,13 @@ class Seq2PDA(nn.Module):
             mask: (batch, max_derivation_len)
         :return:
         """
-        lhs, lhs_mask, grammar_guide, opts_logp, topo_preds, exact_token_p = derivation
+        lhs, lhs_mask, grammar_guide, opts_logp, topo_preds, exact_token_logit = derivation
         comp_len = grammar_guide.size()[-1]
 
         symbol, p_growth, _, exact_token, seq_mask = map(lambda t: t[:, :comp_len], gold)
 
         et_mask = seq_mask * (p_growth == 0)
-        et_logp = (exact_token_p + 1e-13).log()
+        et_logp = (torch.nn.functional.softmax(exact_token_logit, dim=-1) + 1e-13).log()
         et_loss = -et_logp.gather(dim=-1, index=exact_token.unsqueeze(-1)).squeeze(-1) * et_mask
         per_batch_loss = et_loss.sum(1) / (et_mask.sum(1) + 1e-13)
         num_non_empty_sequences = (et_mask.sum(1) > 0).float().sum() + 1
@@ -165,14 +172,14 @@ class Seq2PDA(nn.Module):
         # any valid derivation has a starting symbol by default and thus must be a non-empty sequence
         topology_loss = topology_loss_per_batch.sum() / num_non_empty_sequences
 
-        return token_loss + topology_loss
+        return token_loss, topology_loss
         # return topology_loss
 
     def _arrange_target_tokens(self, derivation):
-        lhs, lhs_mask, grammar_guide, opts_logp, topo_preds, exact_token_p = derivation
+        lhs, lhs_mask, grammar_guide, opts_logp, topo_preds, exact_token_logit = derivation
         p_growth, mask = topo_preds[1], topo_preds[3]
         # target_hats: (batch, seq)
-        target_hats = exact_token_p.argmax(dim=-1) * p_growth.logical_not() * mask * lhs_mask.unsqueeze(-1)
+        target_hats = exact_token_logit.argmax(dim=-1) * p_growth.logical_not() * mask * lhs_mask.unsqueeze(-1)
         return target_hats
 
     def _compute_err(self, batch_exact_tokens, batch_target_tokens):

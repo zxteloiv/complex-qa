@@ -20,6 +20,7 @@ class NeuralPDA(nn.Module):
                  symbol_embedding: nn.Embedding,
 
                  grammar_tutor,
+                 token_tutor,
                  rhs_expander: StackedRNNCell,
                  stack: BatchStack,
 
@@ -39,6 +40,7 @@ class NeuralPDA(nn.Module):
         self._expander = rhs_expander
         self._stack = stack
         self._gt = grammar_tutor
+        self._tt = token_tutor
         self._embedder = symbol_embedding
         self._symbol_predictor = symbol_predictor
         self._exact_token_predictor = exact_token_predictor
@@ -105,8 +107,8 @@ class NeuralPDA(nn.Module):
         else:
             inferred_symbols = step_symbols[:, :grammar_guide.size()[-1]]
 
-        exact_token_p = self._predict_exact_token_after_derivation(inferred_symbols)
-        return lhs, lhs_mask, grammar_guide, opts_logp, topo_preds, exact_token_p
+        exact_token_logit = self._predict_exact_token_after_derivation(inferred_symbols)
+        return lhs, lhs_mask, grammar_guide, opts_logp, topo_preds, exact_token_logit
 
     def continue_derivation(self):
         if self._derivation_step >= self.max_derivation_step:
@@ -207,13 +209,18 @@ class NeuralPDA(nn.Module):
         # symbol: (batch, seqlen)
         expansion_len = symbols.size()[-1]
 
+        # compliant_weights: (batch, seqlen, V)
+        compliant_weights = self._tt(symbols)
+
         # symbol_emb: (batch, *, emb)
         symbol_emb = self._dropout(self._embedder(symbols))
         # tree_state: (batch, expansion_len, hid) <- (batch, 1, hid) <- (batch, hid)
         tree_state = self._encode_partial_tree().unsqueeze(1).expand(-1, expansion_len, -1)
         proj_inp = torch.cat([symbol_emb, tree_state], dim=-1)
-        exact_p = self._exact_token_predictor(proj_inp)
-        return exact_p
+        # exact_logit: (batch, *, V)
+        exact_logit = self._exact_token_predictor(proj_inp)
+        exact_logit = exact_logit + (compliant_weights + tiny_value_of_dtype(exact_logit.dtype)).log()
+        return exact_logit
 
     def push_predictions_onto_stack(self, topology_prediction: T3L, lhs_mask: LT):
         symbol, p_growth, f_growth = topology_prediction

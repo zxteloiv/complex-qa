@@ -7,12 +7,12 @@ def main():
     build_cfq_pda_vocab(sys.argv[1])
 
 def build_cfq_pda_vocab(name):
-    from datasets import cfq, cfq_translator
+    from datasets import cfq, cfq_translator, lark_translator
     grammar_ds, _, _ = cfq.sparql_pattern_grammar()
     cfq_ds, _, _ = cfq.cfq_mcd1()
 
     print("counting grammar tokens...")
-    counter = get_ns_counter(grammar_ds, cfq_translator.UnifiedLarkTranslator())
+    counter = get_ns_counter(grammar_ds, lark_translator.UnifiedLarkTranslator(cfq_translator.UNIFIED_TREE_NS))
     print("counting cfq tokens...")
     counter.update(get_ns_counter(cfq_ds, cfq_translator.CFQFlatDerivations()))
 
