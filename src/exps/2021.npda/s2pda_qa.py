@@ -36,15 +36,16 @@ def cfq_pda():
     p.attn_use_tanh_activation = False
     p.num_enc_layers = 2
     p.dropout = .2
-    p.num_expander_layer = 1
+    p.num_expander_layer = 2
     p.max_derivation_step = 500
     p.max_expansion_len = 11
     p.tied_symbol_emb = False
     p.symbol_quant_criterion = "projection"
     p.grammar_entry = "queryunit"
 
-    p.exact_token_predictor = "linear" # linear, mos
-    p.num_exact_token_mixture = 5
+    p.exact_token_predictor = "quant" # linear, mos, quant
+    p.num_exact_token_mixture = 1
+    p.exact_token_quant_criterion = "projection"
 
     return p
 
@@ -65,6 +66,7 @@ def get_model(p, vocab: NSVocabulary):
     from models.neural_pda.npda import NeuralPDA
     from models.neural_pda.batched_stack import TensorBatchStack
     from models.neural_pda.grammar_tutor import GrammarTutorForGeneration
+    from models.neural_pda.tree_state_updater import BoundedAddTSU, OrthogonalAddTSU
     from models.modules.stacked_encoder import StackedEncoder
     from models.modules.attention_wrapper import get_wrapped_attention
     from models.modules.quantized_token_predictor import QuantTokenPredictor
@@ -94,6 +96,11 @@ def get_model(p, vocab: NSVocabulary):
             nn.Linear(p.hidden_sz + p.emb_sz, vocab.get_vocab_size(ns_et)),
             nn.Softmax(dim=-1),
         )
+    elif p.exact_token_predictor == "quant":
+        exact_token_predictor = QuantTokenPredictor(
+            vocab.get_vocab_size(ns_et), p.hidden_sz + p.emb_sz, output_semantics="probs",
+            quant_criterion=p.exact_token_quant_criterion,
+        )
     else:
         exact_token_predictor = MoSProjection(
             p.num_exact_token_mixture, p.hidden_sz + p.emb_sz, vocab.get_vocab_size(ns_et), output_semantics="probs"
@@ -104,20 +111,23 @@ def get_model(p, vocab: NSVocabulary):
         grammar_tutor=get_grammar_tutor(vocab, ns_s),
         rhs_expander=StackedRNNCell(
             [
-                SymTypedRNNCell(input_dim=p.emb_sz if floor == 0 else p.hidden_sz, output_dim=p.hidden_sz, nonlinearity="mish")
+                SymTypedRNNCell(input_dim=p.emb_sz if floor == 0 else p.hidden_sz, output_dim=p.hidden_sz,
+                                nonlinearity="mish")
                 for floor in range(p.num_expander_layer)
             ],
             p.emb_sz, p.hidden_sz, p.num_expander_layer, intermediate_dropout=p.dropout
         ),
         stack=TensorBatchStack(p.batch_sz, p.max_derivation_step, item_size=1, dtype=torch.long),
         symbol_predictor=symbol_predictor,
-        exact_token_predictor=exact_token_predictor,
         query_attention_composer=MultiInputsSequential(
-            ClassicMLPComposer(encoder.get_output_dim(), p.hidden_sz, p.hidden_sz, use_tanh=False),
+            ClassicMLPComposer(encoder.get_output_dim(), p.hidden_sz, p.hidden_sz, use_tanh=True),
             nn.Hardtanh()
         ),
+        exact_token_predictor=exact_token_predictor,
+        tree_state_updater=OrthogonalAddTSU(),
         grammar_entry=vocab.get_token_index(p.grammar_entry, ns_s),
         max_derivation_step=p.max_derivation_step,
+        dropout=p.dropout,
     )
 
     enc_attn_net = get_wrapped_attention(p.enc_attn, p.hidden_sz, encoder.get_output_dim(),

@@ -86,7 +86,7 @@ class Seq2PDA(nn.Module):
             step += 1
 
             # any valid derivation must expand the RHS starting with a START token, and the mask is set to 1.
-            valid_derivation_num += gold[-1][:, 0]
+            valid_derivation_num += gold[-1].sum(-1) > 0
             exact_token_list.append(self._arrange_target_tokens(derivation))
             self.npda.push_predictions_onto_stack(gold[:3], derivation[1])
 
@@ -138,11 +138,13 @@ class Seq2PDA(nn.Module):
 
         symbol, p_growth, _, exact_token, seq_mask = map(lambda t: t[:, :comp_len], gold)
 
+        # mask out the leading START token, which is useless but abundant
+        seq_mask[:, 0] = 0
         et_mask = seq_mask * (p_growth == 0)
         et_logp = (exact_token_p + 1e-13).log()
         et_loss = -et_logp.gather(dim=-1, index=exact_token.unsqueeze(-1)).squeeze(-1) * et_mask
         per_batch_loss = et_loss.sum(1) / (et_mask.sum(1) + 1e-13)
-        num_non_empty_sequences = ((et_mask.sum(1) > 0).float().sum() + 1e-13)
+        num_non_empty_sequences = (et_mask.sum(1) > 0).float().sum() + 1
         token_loss = per_batch_loss.sum() / num_non_empty_sequences
 
         # seq_symbol_opts: (batch, opt_num, comp_len)
@@ -161,6 +163,7 @@ class Seq2PDA(nn.Module):
         topology_loss = topology_loss_per_batch.sum() / num_non_empty_sequences
 
         return token_loss + topology_loss
+        # return topology_loss
 
     def _arrange_target_tokens(self, derivation):
         lhs, lhs_mask, grammar_guide, opts_logp, topo_preds, exact_token_p = derivation

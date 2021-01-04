@@ -10,6 +10,7 @@ from ..interfaces.unified_rnn import UnifiedRNN
 from ..modules.stacked_rnn_cell import StackedRNNCell
 from utils.seq_collector import SeqCollector
 from allennlp.nn.util import min_value_of_dtype, tiny_value_of_dtype
+from .tree_state_updater import TreeStateUpdater
 
 from .tensor_typing_util import *
 
@@ -22,10 +23,12 @@ class NeuralPDA(nn.Module):
                  rhs_expander: StackedRNNCell,
                  stack: BatchStack,
 
-                 symbol_predictor: nn.Module,
-                 exact_token_predictor: nn.Module,
+                 tree_state_updater: TreeStateUpdater,
 
+                 symbol_predictor: nn.Module,
                  query_attention_composer: VectorContextComposer,
+
+                 exact_token_predictor: nn.Module,
 
                  # configuration
                  grammar_entry: int,
@@ -41,6 +44,7 @@ class NeuralPDA(nn.Module):
         self._exact_token_predictor = exact_token_predictor
 
         self._query_attn_comp = query_attention_composer
+        self._tree_state_udpater: TreeStateUpdater = tree_state_updater
         self._dropout = nn.Dropout(dropout)
 
         # configurations
@@ -137,7 +141,7 @@ class NeuralPDA(nn.Module):
 
         # seq_logits, seq_logp: (batch, V, seq)
         seq_logits = mem.get_stacked_tensor('symbol_logits', dim=-1)
-        seq_logp = (F.softmax(seq_logits, dim=1) + 1e-15).log()
+        seq_logp = (F.softmax(seq_logits, dim=1) + 1e-13).log()
 
         # seq_opts, opt_mask: (batch, opt_num, seq_len)
         # seq_opts_logp: (batch, opt_num, seq_len)
@@ -168,11 +172,8 @@ class NeuralPDA(nn.Module):
         symbol_logits = self._symbol_predictor(step_out_att)
         return step_out_att, symbol_logits
 
-    def _update_partial_tree(self, rule) -> None:
-        if self._tree_state is None:
-            self._tree_state = rule
-        else:
-            self._tree_state = self._tree_state + rule
+    def _update_partial_tree(self, incremental) -> None:
+        self._tree_state = self._tree_state_udpater(self._tree_state, incremental)
 
     @staticmethod
     def _learn_from_step_grammar_tutor(logit, compliance, compliance_mask) -> FT:
