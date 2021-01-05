@@ -136,7 +136,8 @@ class MidOrderTraversalField(Field):
             for k, l in zip(self.output_keys[:-1], (rhs_symbol, parental_growth, fraternal_growth, rhs_exact_token, mask)):
                 left_most_derivation[k].extend(l)
 
-        target_tokens = list(filter(lambda x: x not in (self.padding,), left_most_derivation[self.output_keys[-3]]))
+        target_tokens = list(filter(lambda x: x not in (self.padding, tokid(START_SYMBOL, ns_et)),
+                                    left_most_derivation[self.output_keys[-3]]))
 
         output = dict()
         for k, l in left_most_derivation.items():

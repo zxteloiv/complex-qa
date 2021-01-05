@@ -8,18 +8,16 @@ class ExactTokenTutor(nn.Module):
                  symbol_unspecified_could_lead_to_any_token: bool = True):
         super().__init__()
 
-        t = torch.empty(symbol_num, exact_token_num)
+        t = torch.zeros(symbol_num, exact_token_num)
         if symbol_unspecified_could_lead_to_any_token:
-            torch.fill_(t, 1)
-        else:
-            torch.fill_(t, 0)
+            torch.fill_(t, 1.)
 
         for sid, tid_list in symbol_token_lookup.items():
             t[sid] = 0
             for tid in tid_list:
                 t[sid, tid] = 1
 
-        self._t = nn.Parameter(t)
+        self._t = nn.Parameter(t, requires_grad=False)
 
     def forward(self, symbols):
         """
