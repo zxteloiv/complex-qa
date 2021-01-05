@@ -1,6 +1,10 @@
 from typing import Optional, Tuple
 import torch
 
+class DumpBatchStack:
+    def dump(self):
+        raise NotImplementedError
+
 class BatchStack:
     def reset(self, batch_size, default_device = None):
         raise NotImplementedError
@@ -122,12 +126,14 @@ class ListedBatchStack(BatchStack):
         return data, succ
 
 
-class TensorBatchStack(BatchStack):
+class TensorBatchStack(BatchStack, DumpBatchStack):
+
     def __init__(self,
                  max_batch_size: int,
                  max_stack_size: int = 0,
                  item_size: int = 1,
                  dtype=torch.float,
+                 device=None,
                  ):
         self.max_batch_size = max_batch_size
         self.max_stack_size = max_stack_size
@@ -136,7 +142,7 @@ class TensorBatchStack(BatchStack):
         self._top_cur: Optional[torch.Tensor] = None
         self.inplace = False
         self.dtype = dtype
-        self.reset(max_batch_size)
+        self.reset(max_batch_size, device)
 
     def describe(self):
         stat = {
@@ -149,6 +155,7 @@ class TensorBatchStack(BatchStack):
         self._storage = torch.zeros(batch_size, self.max_stack_size, self.item_size, device=default_device, dtype=self.dtype)
         self._top_cur = torch.full((batch_size,), fill_value=-1, dtype=torch.long, device=default_device)
         self.max_batch_size = batch_size
+        return self
 
     def push(self, data: torch.Tensor, push_mask: Optional[torch.Tensor]) -> torch.Tensor:
         """
@@ -219,17 +226,33 @@ class TensorBatchStack(BatchStack):
 
         return top_val, succ
 
+    def dump(self) -> Tuple[torch.Tensor, torch.LongTensor]:
+        # top_cur: (batch,)
+        max_width = torch.max(self._top_cur)
+        if max_width < 0:
+            return (self._storage.new_zeros(self._storage.size()[0], 1),
+                    self._storage.new_zeros(self._storage.size()[0]))  # empty stack
+
+        upper_bound = max_width + 1
+        value = self._storage[:, :upper_bound]
+        mask = self._top_cur.new_ones(upper_bound, upper_bound).tril()[self._top_cur]
+        return value, mask
+
 if __name__ == '__main__':
     stack = TensorBatchStack(10, 3, 5)
     _, succ = stack.top(batch_size=10)
     assert (succ == torch.zeros(10)).all()
     print("empty stack:", stack._top_cur)
+    print(stack.dump())
 
     # first push
     data = torch.randint(100, 200, (10, 5))
     succ = stack.push(data, torch.ones(10, dtype=torch.long))
     assert (succ == torch.ones(10)).all()
     print("after 1st push:", stack._top_cur)
+    dump, mask = stack.dump()
+    print(dump, mask)
+    print(dump.size(), mask.size())
 
     # read the value from the first push
     val, succ = stack.top(batch_size=10)
@@ -249,17 +272,20 @@ if __name__ == '__main__':
     succ = stack.push(data, torch.ones(10, dtype=torch.long))
     assert (succ == torch.zeros(10)).all()
     print("4rd push:", stack._top_cur)
+    print(stack.dump())
 
     # pop out then, must be successful
     val, succ = stack.pop(batch_size=10)
     assert (val == data).all()
     assert (succ == torch.ones(10)).all()
     print("pop out:", stack._top_cur)
+    print(stack.dump())
 
     # forth push again, which would be successful
     succ = stack.push(data, torch.ones(10, dtype=torch.long))
     assert (succ == torch.ones(10)).all()
     print("4rd push again:", stack._top_cur)
+    print(stack.dump())
 
     # pop out for 3 times
     val, succ = stack.pop(batch_size=10)
@@ -274,9 +300,11 @@ if __name__ == '__main__':
     assert (val == data).all()
     assert (succ == torch.ones(10)).all()
     print("3rd pop:", stack._top_cur)
+    print(stack.dump())
 
     # read value from empty stack -> must be failed
     _, succ = stack.top(batch_size=10)
     assert (succ == torch.zeros(10)).all()
     print("empty stack again:", stack._top_cur)
+    print(stack.dump())
 

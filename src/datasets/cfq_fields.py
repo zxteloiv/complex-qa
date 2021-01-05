@@ -73,7 +73,7 @@ class MidOrderTraversalField(Field):
         self.tree_key = tree_key
         self.namespaces = list(namespaces) or ('symbols', 'exact_token')
         self.output_keys = output_keys or (
-            'rhs_symbols', 'parental_growth', 'fraternal_growth', 'rhs_exact_tokens', 'mask', 'target_tokens'
+            'rhs_symbols', 'parental_growth', 'rhs_exact_tokens', 'mask', 'target_tokens'
         )
         self.padding = padding
         self.max_derivation_symbols = max_derivation_symbols
@@ -113,16 +113,12 @@ class MidOrderTraversalField(Field):
         for subtree in tree.iter_subtrees_topdown():
             children: List[Union[Tree, Token]] = subtree.children
 
-            # fraternal_growth indicates rather the token validity than its direct right sibling's existence.
-            # this setting is very helpful to build a mask matrix.
             rhs_symbol, rhs_exact_token, parental_growth = [tokid(START_SYMBOL, ns_s)], [tokid(START_SYMBOL, ns_et)], [0]
             for s in children:
                 rhs_symbol.append(tokid(s.data, ns_s) if isinstance(s, Tree) else tokid(s.type, ns_s))
                 rhs_exact_token.append(tokid(s.value.lower(), ns_et) if isinstance(s, Token) else self.padding)
                 parental_growth.append(1 if isinstance(s, Tree) else 0)
 
-            fraternal_growth = [1] * len(rhs_symbol)
-            fraternal_growth[-1] = 0
             mask = [1] * len(rhs_symbol)
 
             if len(rhs_symbol) < self.max_derivation_symbols:
@@ -130,14 +126,12 @@ class MidOrderTraversalField(Field):
                 rhs_symbol.extend(padding_seq)
                 rhs_exact_token.extend(padding_seq)
                 parental_growth.extend(padding_seq)
-                fraternal_growth.extend(padding_seq)
                 mask.extend(padding_seq)
 
-            for k, l in zip(self.output_keys[:-1], (rhs_symbol, parental_growth, fraternal_growth, rhs_exact_token, mask)):
+            for k, l in zip(self.output_keys[:-1], (rhs_symbol, parental_growth, rhs_exact_token, mask)):
                 left_most_derivation[k].extend(l)
 
-        target_tokens = list(filter(lambda x: x not in (self.padding, tokid(START_SYMBOL, ns_et)),
-                                    left_most_derivation[self.output_keys[-3]]))
+        target_tokens = list(filter(lambda x: x not in (self.padding,), left_most_derivation[self.output_keys[-3]]))
 
         output = dict()
         for k, l in left_most_derivation.items():

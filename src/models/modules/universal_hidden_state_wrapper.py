@@ -39,9 +39,9 @@ class TorchRNNWrapper(UnifiedRNN):
             return self._get_output_fn(hidden)
 
         rnn_type = type(self._rnn_cell)
-        if rnn_type in (RNNType.VanillaRNN, RNNType.GRU, IndRNNCell, ):
+        if rnn_type in (RNNType.VanillaRNN.value, RNNType.GRU.value, IndRNNCell, ):
             return hidden
-        elif rnn_type == RNNType.LSTM:
+        elif rnn_type == RNNType.LSTM.value:
             return hidden[0]
         else:
             raise NotImplementedError

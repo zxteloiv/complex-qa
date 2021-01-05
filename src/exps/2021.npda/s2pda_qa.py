@@ -26,7 +26,7 @@ def cfq_pda():
     p.src_ns = 'questionPatternModEntities'
     p.tgt_ns = datasets.cfq_translator.UNIFIED_TREE_NS
 
-    p.enc_attn = "bilinear"
+    p.enc_attn = "generalized_bilinear"
     # transformer requires input embedding equal to hidden size
     p.encoder = "bilstm"
     p.emb_sz = 128
@@ -47,6 +47,10 @@ def cfq_pda():
     p.exact_token_predictor = "quant" # linear, mos, quant
     p.num_exact_token_mixture = 1
     p.exact_token_quant_criterion = "projection"
+
+    p.tree_state_updater = "orthogonal_add"   # lstm, orthogonal_add, bounded_add
+    p.tsu_bound = 4.
+    p.tsu_num_layers = 1    # valid for lstm
 
     return p
 
@@ -73,6 +77,24 @@ def get_exact_token_tutor(vocab, ns_symbol, ns_exact_token):
     valid_token_lookup = reader.merge_the_pairs(pair_set)
     ett = ExactTokenTutor(vocab.get_vocab_size(ns_symbol), vocab.get_vocab_size(ns_exact_token), valid_token_lookup)
     return ett
+
+def get_tree_state_updater(p):
+    from models.neural_pda.tree_state_updater import BoundedAddTSU, OrthogonalAddTSU, SeqRNNTSU
+    if p.tree_state_updater == "lstm":
+        from models.modules.universal_hidden_state_wrapper import RNNType, TorchRNNWrapper
+        tsu = SeqRNNTSU(TorchRNNWrapper(RNNType.LSTM.value(p.hidden_sz, p.hidden_sz),
+                                        get_output_fn=(lambda hx: hx[0])))
+
+    elif p.tree_state_updater == "orthogonal_add":
+        tsu = OrthogonalAddTSU(-p.tsu_bound, p.tsu_bound)
+
+    elif p.tree_state_updater == "bounded_add":
+        tsu = BoundedAddTSU(-p.tsu_bound, p.tsu_bound)
+
+    else:
+        raise NotImplementedError
+
+    return tsu
 
 def get_model(p, vocab: NSVocabulary):
     import torch
@@ -139,7 +161,7 @@ def get_model(p, vocab: NSVocabulary):
         ),
         exact_token_predictor=exact_token_predictor,
         token_tutor=get_exact_token_tutor(vocab, p.tgt_ns[0], p.tgt_ns[1]),
-        tree_state_updater=OrthogonalAddTSU(),
+        tree_state_updater=get_tree_state_updater(p),
         grammar_entry=vocab.get_token_index(p.grammar_entry, ns_s),
         max_derivation_step=p.max_derivation_step,
         dropout=p.dropout,
@@ -208,11 +230,14 @@ def main():
         from utils.trial_bot_extensions import end_with_nan_loss
         from utils.trial_bot_extensions import evaluation_on_dev_every_epoch
         from utils.trial_bot_extensions import save_model_every_num_iters
+        from utils.trial_bot_extensions import collect_garbage
         bot.add_event_handler(Events.EPOCH_COMPLETED, evaluation_on_dev_every_epoch, 90)
 
         bot.add_event_handler(Events.ITERATION_COMPLETED, end_with_nan_loss, 100)
         bot.add_event_handler(Events.EPOCH_COMPLETED, every_epoch_model_saver, 100)
         bot.add_event_handler(Events.ITERATION_COMPLETED, save_model_every_num_iters, 100, interval=100)
+        bot.add_event_handler(Events.ITERATION_COMPLETED, collect_garbage, 80)
+        bot.add_event_handler(Events.EPOCH_COMPLETED, collect_garbage, 80)
 
         @bot.attach_extension(Events.ITERATION_COMPLETED)
         def iteration_metric(bot: TrialBot):

@@ -9,16 +9,22 @@ from ..interfaces.unified_rnn import UnifiedRNN
 class SymTypedRNNCell(UnifiedRNN):
     def _forward_internal(self, inputs, hidden: Optional[torch.Tensor]) -> Tuple[Any, torch.Tensor]:
         """
-        :param inputs: (batch, in_dim - sum(some_dim))
+        :param inputs: (batch, *, in_dim)
         :param hidden: (batch, out_dim)
         :return:
         """
-        out = self._input_mapping(inputs)
+        out = self._input_mapping(inputs)   # (batch, *, out_dim)
         if hidden is not None:
             # h_weight: (out_dim, out_dim)
             h_weight = torch.matmul(self._sym_h_weight.t(), self._sym_h_weight)
-            # out: (batch, out_dim)
-            out = out + torch.matmul(hidden, h_weight)
+            # projected_h: (batch, out_dim)
+            projected_h = torch.matmul(hidden, h_weight)
+
+            while projected_h.ndim < out.ndim:
+                projected_h = projected_h.unsqueeze(-2)
+
+            # out: (batch, *, out_dim)
+            out = out + projected_h
 
         out = self._activation(out)
         return out, out

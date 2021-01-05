@@ -3,14 +3,28 @@ import torch
 import torch.nn as nn
 from models.modules.stacked_encoder import StackedEncoder
 from allennlp.training.metrics.perplexity import Perplexity, Average
-from utils.nn import prepare_input_mask
+from utils.nn import prepare_input_mask, seq_cross_ent
 from .npda import NeuralPDA
 from utils.seq_collector import SeqCollector
 from utils.text_tool import make_human_readable_text
+from .batched_stack import TensorBatchStack
 import logging
+import gc
 
 # from .tensor_typing_util import ( T3T, T3L, T3F, T4T, T4L, T4F, T5T, T5L, T5F, )
 from .tensor_typing_util import *
+
+
+def _efficiently_optimize(loss_list, optim):
+    filtered_loss = list(filter(lambda l: l > 1e-13, loss_list))
+    loss = 0
+    if len(filtered_loss) > 0:
+        for l in filtered_loss:
+            loss = loss + l
+        loss.backward(retain_graph=True)
+        optim.step()
+    return loss.detach() if isinstance(loss, torch.Tensor) else loss
+
 
 class Seq2PDA(nn.Module):
     def __init__(self,
@@ -57,7 +71,6 @@ class Seq2PDA(nn.Module):
                                     source_tokens: LT,
                                     rhs_symbols: LT,
                                     parental_growth: LT,
-                                    fraternal_growth: LT,
                                     rhs_exact_tokens: LT,
                                     mask: LT,
                                     target_tokens: LT,
@@ -67,7 +80,6 @@ class Seq2PDA(nn.Module):
         :param source_tokens: (batch, max_src_len)
         :param rhs_symbols: (batch, max_tgt_len), separated by every max_derivation_symbols
         :param parental_growth: (batch, max_tgt_len)
-        :param fraternal_growth: (batch, max_tgt_len)
         :param rhs_exact_tokens: (batch, max_tgt_len)
         :return:
         """
@@ -76,44 +88,41 @@ class Seq2PDA(nn.Module):
 
         step = 0
         loss = valid_derivation_num = 0
-        exact_token_list = []
+        token_stack = TensorBatchStack(source_tokens.size()[0], 1000,
+                                       item_size=1, dtype=torch.long, device=source_tokens.device)
         while self.npda.continue_derivation() and step * self.max_expansion_len < mask.size()[1]:
-            # lhs, lhs_mask, grammar_guide, opts_logp, topo_preds, exact_token_logit = derivation
-            gold = self._get_step_gold(step, rhs_symbols, parental_growth, fraternal_growth, rhs_exact_tokens, mask)
-            derivation = self.npda(step_symbols=rhs_symbols)
+            (full_step_symbols,) = self._get_step_gold(step, self.max_expansion_len, rhs_symbols)
+            lhs, lhs_mask, grammar_guide, opt_prob, exact_token_logit = self.npda(step_symbols=full_step_symbols)
 
-            token_loss, topo_loss = self._compute_loss(derivation, gold)
-            derivation_loss = self._efficiently_optimize([token_loss, topo_loss], optim)
+            step_symbols, step_p_growth, step_exact_tokens, step_mask = self._get_step_gold(
+                step, grammar_guide.size()[-1], rhs_symbols, parental_growth, rhs_exact_tokens, mask
+            )
+
+            token_loss, topo_loss = self._compute_loss(grammar_guide, opt_prob, exact_token_logit,
+                                                       step_symbols, step_p_growth, step_exact_tokens, step_mask,)
+            derivation_loss = _efficiently_optimize([token_loss, topo_loss], optim)
             loss += derivation_loss
             step += 1
             # any valid derivation must expand the RHS starting with a START token, and the mask is set to 1.
-            valid_derivation_num += gold[-1].sum(-1) > 0
+            valid_derivation_num += step_mask.sum(-1) > 0
+            self.npda.push_predictions_onto_stack(step_symbols, step_p_growth, step_mask, lhs_mask=None)
 
-            exact_token_list.append(self._arrange_target_tokens(derivation))
-            self.npda.push_predictions_onto_stack(gold[:3], derivation[1])
+            # if source_tokens.is_cuda:
+            #     torch.cuda.empty_cache()
+            #     gc.collect()
+            #
+
+            predicted_symbol, predicted_p_growth, predicted_mask = self._infer_topology_greedily(opt_prob, grammar_guide)
+            self._arrange_predicted_tokens(token_stack, exact_token_logit, lhs_mask, predicted_p_growth, predicted_mask)
 
         # compute metrics
-        if len(exact_token_list) > 0:
-            exact_tokens = torch.cat(exact_token_list, dim=-1)
-            self._compute_err(exact_tokens, target_tokens)
-        else:
-            self.logger.warning('No exact token generated, which is impossible.')
+        self._compute_err(token_stack, target_tokens)
 
-        normalized_loss = loss / valid_derivation_num.float().mean()
+        normalized_loss = loss / (valid_derivation_num.float().mean() + 1e-15)
         self.ppl(normalized_loss)
         output = {'loss': normalized_loss}
         self.npda.reset_automata()
         return output
-
-    def _efficiently_optimize(self, loss_list, optim):
-        filtered_loss = list(filter(lambda l: l > 1e-13, loss_list))
-        loss = 0
-        if len(filtered_loss) > 0:
-            for l in filtered_loss:
-                loss = loss + l
-            loss.backward(retain_graph=True)
-            optim.step()
-        return loss.detach() if isinstance(loss, torch.Tensor) else loss
 
     def _encode_source(self, source_tokens):
         source_tokens, source_mask = prepare_input_mask(source_tokens, padding_val=self.tok_pad)
@@ -122,76 +131,81 @@ class Seq2PDA(nn.Module):
         enc_attn_fn = lambda out: self.enc_attn_net(out, source_hidden, source_mask)
         return enc_attn_fn
 
-    def _get_step_gold(self, step_id: int, *args):
-        step_size = self.max_expansion_len
-        step_starts = step_id * step_size
-        step_ends = step_starts + step_size
+    def _get_step_gold(self, step_id: int, compatible_len: int, *args):
+        max_size = self.max_expansion_len
+        step_starts = step_id * max_size
+        step_ends = step_starts + min(compatible_len, max_size)
         clip = lambda t: t[:, step_starts:step_ends]
         return tuple(map(clip, args))
 
-    def _compute_loss(self, derivation, gold):
+    def _compute_loss(self,
+                      grammar_guide, opt_prob, exact_token_logit,   # derivation output
+                      step_symbols, step_p_growth, step_exact_tokens, step_mask,    # clipped gold target
+                      ):
         """
-        :param derivation: Tuple of 6 objects
-            lhs, lhs_mask: (batch,) ;
-            grammar_guide: (batch, opt_num, 4, max_seq) ;
-            opts_logp: (batch, opt_num) ;
-            topo_preds: Tuple[(batch, max_seq) * 4] ;
-            exact_token_logit: [(batch, max_seq, V)]
-        :param gold:
-            symbol: (batch, max_derivation_len), separated by every max_derivation_symbols
-            parental_growth: (batch, max_derivation_len)
-            fraternal_growth: (batch, max_derivation_len)
-            exact_token: (batch, max_derivation_len)
-            mask: (batch, max_derivation_len)
+        :param grammar_guide: (batch, opt_num, 4, max_seq)
+        :param opt_prob: (batch, opt_num)
+        :param exact_token_logit: [(batch, max_seq, V)]
+        :param step_symbols: (batch, compatible_len), separated by every max_derivation_symbols
+        :param step_p_growth: (batch, compatible_len)
+        :param step_exact_tokens: (batch, compatible_len)
+        :param step_mask: (batch, compatible_len)
         :return:
         """
-        lhs, lhs_mask, grammar_guide, opts_logp, topo_preds, exact_token_logit = derivation
-        comp_len = grammar_guide.size()[-1]
+        # symbol, p_growth, exact_token, seq_mask = map(lambda t: t[:, :comp_len], gold)
 
-        symbol, p_growth, _, exact_token, seq_mask = map(lambda t: t[:, :comp_len], gold)
+        token_loss = seq_cross_ent(exact_token_logit,
+                                   step_exact_tokens,
+                                   (step_mask * (step_p_growth == 0)).float(),
+                                   average="batch")
 
-        et_mask = seq_mask * (p_growth == 0)
-        et_logp = (torch.nn.functional.softmax(exact_token_logit, dim=-1) + 1e-13).log()
-        et_loss = -et_logp.gather(dim=-1, index=exact_token.unsqueeze(-1)).squeeze(-1) * et_mask
-        per_batch_loss = et_loss.sum(1) / (et_mask.sum(1) + 1e-13)
-        num_non_empty_sequences = (et_mask.sum(1) > 0).float().sum() + 1
-        token_loss = per_batch_loss.sum() / num_non_empty_sequences
-
-        # seq_symbol_opts: (batch, opt_num, comp_len)
-        seq_symbol_opts = grammar_guide[:, :, 0, :]
-
-        # seq_opt_weights: (batch, opt_num, comp_len)
-        seq_opt_weights = (symbol.unsqueeze(1) == seq_symbol_opts)   # target seq is different with the option
-        seq_opt_weights = seq_opt_weights * seq_mask.unsqueeze(1)    # conducting comparisons only at valid locations
-
-        # opt_weights: (batch, opt_num), only the correct opt is marked as 1
-        opt_weights = seq_opt_weights.sum(-1) == seq_mask.sum(dim=-1).unsqueeze(1)
-        batch_mask = seq_mask.sum(dim=-1) > 0
-        topology_loss_per_batch = -(opt_weights * opts_logp).sum(-1) * batch_mask
-
-        # any valid derivation has a starting symbol by default and thus must be a non-empty sequence
-        topology_loss = topology_loss_per_batch.sum() / num_non_empty_sequences
-
+        # gold_choice: (batch, 1)
+        gold_choice = self.npda.find_choice_by_symbols(step_symbols, grammar_guide).unsqueeze(-1)
+        opt_logp = (opt_prob + 1e-15).log()                                 # opt_logp: (batch, opt_num)
+        topology_batch_loss = opt_logp.gather(dim=-1, index=gold_choice)    # topo_batch_loss: (batch,)
+        non_empty_seq = step_mask.sum(dim=-1) > 0                           # non_empty_seq: (batch,)
+        topology_loss = topology_batch_loss.sum() / (non_empty_seq.sum() + 1e-15)
         return token_loss, topology_loss
-        # return topology_loss
 
-    def _arrange_target_tokens(self, derivation):
-        lhs, lhs_mask, grammar_guide, opts_logp, topo_preds, exact_token_logit = derivation
-        p_growth, mask = topo_preds[1], topo_preds[3]
-        # target_hats: (batch, seq)
-        target_hats = exact_token_logit.argmax(dim=-1) * p_growth.logical_not() * mask * lhs_mask.unsqueeze(-1)
-        return target_hats
+    def _arrange_predicted_tokens(self, stack: TensorBatchStack,
+                                  exact_token_logit, lhs_mask,
+                                  predicted_p_growth, predicted_mask,
+                                  ):
+        # predicted_tokens: (batch, seq)
+        predicted_tokens = exact_token_logit.argmax(dim=-1)
 
-    def _compute_err(self, batch_exact_tokens, batch_target_tokens):
+        for step in range(predicted_tokens.size()[-1]):
+            push_mask = (predicted_p_growth[:, step] == 0) * predicted_mask[:, step] * lhs_mask
+            stack.push(predicted_tokens[:, step].unsqueeze(-1), push_mask.long())
+
+    def _infer_topology_greedily(self, opt_prob, grammar_guide):
+        greedy_choice = opt_prob.argmax(dim=-1)
+        (
+            predicted_symbol, predicted_p_growth, predicted_mask
+        ) = self.npda.retrieve_the_chosen_structure(greedy_choice, grammar_guide)
+        return predicted_symbol, predicted_p_growth, predicted_mask
+
+    def _compute_err(self, exact_tokens_stack: TensorBatchStack, batch_target_tokens):
         """
-        :param batch_exact_tokens: (batch, seq1)
+        :param exact_tokens_stack: the stack
         :param batch_target_tokens: (batch, seq2)
         :return:
         """
-        for instance_pair in zip(batch_exact_tokens, batch_target_tokens):
-            exact_tokens, target_tokens = list(map(lambda t: list(filter(lambda x: x != self.tok_pad, t.tolist())), instance_pair))
-            if len(exact_tokens) == len(target_tokens) and all(x == y for x, y in zip(exact_tokens, target_tokens)):
+        # pred_token: (batch, max_len, 1), the last dimension is the symbol length, and is always 1 in our case
+        # pred_mask: (batch, max_len)
+        pred_tokens, pred_masks = exact_tokens_stack.dump()
+        pred_tokens = pred_tokens.unsqueeze(-1)
+        gold_tokens, gold_masks = prepare_input_mask(batch_target_tokens, padding_val=self.tok_pad)
+
+        for p_tok, p_m, g_tok, g_m in zip(pred_tokens, pred_masks, gold_tokens, gold_masks):
+            if p_m.sum() != g_m.sum():
+                self.err(1.)
+                continue
+
+            min_len = min(p_m.size()[-1], g_m.size()[-1])
+            if ((p_tok * p_m)[:min_len] == (g_tok * g_m)[:min_len]).all():
                 self.err(0.)
+
             else:
                 self.err(1.)
 
@@ -199,7 +213,6 @@ class Seq2PDA(nn.Module):
                            source_tokens: LT,
                            rhs_symbols: NullOrLT,
                            parental_growth: NullOrLT,
-                           fraternal_growth: NullOrLT,
                            rhs_exact_tokens: NullOrLT,
                            mask: LT,
                            target_tokens: NullOrLT,
@@ -207,24 +220,31 @@ class Seq2PDA(nn.Module):
         enc_attn_fn = self._encode_source(source_tokens)
         self.npda.init_automata(source_tokens.size()[0], source_tokens.device, enc_attn_fn)
 
-        step = 0
-        exact_token_list = []
+        token_stack = TensorBatchStack(source_tokens.size()[0], 1000,
+                                       item_size=1, dtype=torch.long, device=source_tokens.device)
         while self.npda.continue_derivation():
-            derivation = self.npda()
-            lhs_mask, topo_preds = derivation[1], derivation[-2]
-            step += 1
-            exact_token_list.append(self._arrange_target_tokens(derivation))
-            self.npda.push_predictions_onto_stack(topo_preds[:3], derivation[1])
+            lhs, lhs_mask, grammar_guide, opt_prob, exact_token_logit = self.npda()
+
+            self._arrange_predicted_tokens_onto_stack(token_stack, exact_token_logit, lhs_mask, opt_prob, grammar_guide)
+
+            predicted_symbol, predicted_p_growth, predicted_mask = self._infer_topology_greedily(opt_prob, grammar_guide)
+            self._arrange_predicted_tokens(token_stack, exact_token_logit, lhs_mask, predicted_p_growth, predicted_mask)
+
+            self.npda.push_predictions_onto_stack(predicted_symbol, predicted_p_growth, predicted_mask, lhs_mask)
 
         # compute metrics
-        assert len(exact_token_list) > 0
-        exact_tokens = torch.cat(exact_token_list, dim=-1)
-        self._compute_err(exact_tokens, target_tokens)
+        self._compute_err(token_stack, target_tokens)
+
+        exact_tokens, token_mask = token_stack.dump()
+        exact_tokens = exact_tokens.unsqueeze(-1)
+
         output = {
             "source": source_tokens,
             "target": target_tokens,
-            "prediction": exact_tokens,
+            "prediction": exact_tokens * token_mask,
         }
+
+        self.npda.reset_automata()
         return output
 
     def make_human_readable_output(self, output):

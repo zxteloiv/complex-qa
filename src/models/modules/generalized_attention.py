@@ -138,7 +138,7 @@ class GeneralizedBilinearAttention(Attention):
         rs_aM = torch.matmul(rs_a, self.bi_weight)
 
         # rs_inputs: (...a..., -1, vec_dim)
-        rs_inputs = inputs.reshape(*attn_prefix_dims, -1, input_size[-1])
+        rs_inputs = inputs.view(*attn_prefix_dims, -1, input_size[-1])
 
         # rs_aMb: (...a..., -1, num_tensors, 1)
         rs_aMb = torch.matmul(rs_aM, rs_inputs.unsqueeze(-1))
@@ -171,7 +171,7 @@ class GeneralizedBilinearAttention(Attention):
         # rs_context: (...a..., -1, attn_dim)
         # context: (...a..., ...b..., attn_dim)
         rs_context = (attn_weights * rs_a).sum(-2)
-        context = rs_context.reshape(*attn_prefix_dims, *input_suffix_dims, -1)
+        context = rs_context.view(*attn_prefix_dims, *input_suffix_dims, -1)
 
         return context
 

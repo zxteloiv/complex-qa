@@ -1,4 +1,4 @@
-from typing import List, Tuple, Dict, Mapping, Optional
+from typing import List, Tuple, Dict, Mapping, Optional, Literal
 import torch
 import torch.nn
 import re
@@ -97,11 +97,11 @@ def seq_likelihood(logits: torch.FloatTensor,
                    weights: torch.FloatTensor,
                    ):
     # shape : (batch, ..., num_classes)
-    logits_flat = logits.view(-1, logits.size(-1))
+    logits_flat = logits.reshape(-1, logits.size(-1))
     # shape : (batch, ..., num_classes)
     probs_flat = torch.nn.functional.softmax(logits_flat, dim=-1)
     # shape : (batch, ..., 1)
-    targets_flat = targets.view(-1, 1).long()
+    targets_flat = targets.reshape(-1, 1).long()
 
     # Contribution to the negative log likelihood only comes from the exact indices
     # of the targets, as the target distributions are one-hot. Here we use torch.gather
@@ -109,7 +109,7 @@ def seq_likelihood(logits: torch.FloatTensor,
     # shape : (batch * ..., 1)
     likelihood_flat = torch.gather(probs_flat, dim=1, index=targets_flat)
     # shape : (batch, ...,)
-    likelihood = likelihood_flat.view(*targets.size())
+    likelihood = likelihood_flat.reshape(*targets.size())
     # shape : (batch, ...,)
     likelihood = likelihood * weights.float()
 
@@ -136,11 +136,11 @@ def seq_cross_ent(logits: torch.FloatTensor,
                          "None, 'token', or 'batch'")
 
     # shape : (batch * sequence_length, num_classes)
-    logits_flat = logits.view(-1, logits.size(-1))
+    logits_flat = logits.reshape(-1, logits.size(-1))
     # shape : (batch * sequence_length, num_classes)
     log_probs_flat = torch.nn.functional.log_softmax(logits_flat, dim=-1)
     # shape : (batch * max_len, 1)
-    targets_flat = targets.view(-1, 1).long()
+    targets_flat = targets.reshape(-1, 1).long()
 
     # Contribution to the negative log likelihood only comes from the exact indices
     # of the targets, as the target distributions are one-hot. Here we use torch.gather
@@ -148,7 +148,7 @@ def seq_cross_ent(logits: torch.FloatTensor,
     # shape : (batch * sequence_length, 1)
     negative_log_likelihood_flat = - torch.gather(log_probs_flat, dim=1, index=targets_flat)
     # shape : (batch, sequence_length)
-    negative_log_likelihood = negative_log_likelihood_flat.view(*targets.size())
+    negative_log_likelihood = negative_log_likelihood_flat.reshape(*targets.size())
     # shape : (batch, sequence_length)
     negative_log_likelihood = negative_log_likelihood * weights.float()
 
@@ -305,12 +305,20 @@ def get_decoder_initial_states(layer_state: List[torch.Tensor],
         else:
             src_agg = forward_by_layer
 
-    if assign_stg == "lowest": # use the top layer aggregated state for the decoder bottom, zero for others
-        decoder_hidden = [src_agg[-1]] + [source_mask.new_zeros((batch, hidden_dim), dtype=torch.float32)
-                                          for _ in range(num_decoder_layers - 1)]
-    elif assign_stg == "all": # use the same top layer state for all decoder layers
-        decoder_hidden = [src_agg[-1] for _ in range(num_decoder_layers)]
-    else: # parallel, each encoder is used for the appropriate decoder layer
-        decoder_hidden = src_agg
+    init_state = init_state_for_stacked_rnn_with_source(src_agg, num_decoder_layers, assign_stg)
+    return init_state
 
-    return decoder_hidden
+def init_state_for_stacked_rnn_with_source(src_agg: List[torch.Tensor],
+                                           num_layers: int,
+                                           policy: Literal["lowest", "all", "parallel"]):
+    if policy == "lowest": # use the top layer aggregated state for the decoder bottom, zero for others
+        init_state = [src_agg[-1]] + [torch.zeros_like(src_agg[-1]) for _ in range(num_layers - 1)]
+
+    elif policy == "all": # use the same top layer state for all decoder layers
+        init_state = [src_agg[-1] for _ in range(num_layers)]
+
+    else: # parallel, each encoder is used for the appropriate decoder layer
+        assert len(src_agg) == num_layers
+        init_state = src_agg
+
+    return init_state

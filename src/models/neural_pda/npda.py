@@ -11,6 +11,7 @@ from ..modules.stacked_rnn_cell import StackedRNNCell
 from utils.seq_collector import SeqCollector
 from allennlp.nn.util import min_value_of_dtype, tiny_value_of_dtype
 from .tree_state_updater import TreeStateUpdater
+from utils.nn import init_state_for_stacked_rnn_with_source
 
 from .tensor_typing_util import *
 
@@ -53,17 +54,12 @@ class NeuralPDA(nn.Module):
         self.grammar_entry = grammar_entry
         self.max_derivation_step = max_derivation_step  # a very large upper limit for the runtime storage
 
+        self.choice_prob_policy = "normalized_logp"
+
         # the helpful storage for runtime forwarding
         self._query_attn_fn = None
         self._tree_state = None
         self._derivation_step = 0
-
-    def forward(self, token_based=False, **kwargs):
-        if not token_based:
-            return self._forward_derivation_step(**kwargs)
-
-        else:
-            raise NotImplementedError
 
     def init_automata(self, batch_sz: int, device: torch.device, query_attn_fn: Callable):
         # init stack
@@ -77,6 +73,15 @@ class NeuralPDA(nn.Module):
         # since the automata independently runs for every batch, the query attention is also initialized every batch.
         self._query_attn_fn = query_attn_fn
 
+    def continue_derivation(self):
+        if self._derivation_step >= self.max_derivation_step:
+            return False
+        self._derivation_step += 1
+
+        _, success = self._stack.top()
+        batch_stack_is_not_empty = success.sum() > 0
+        return batch_stack_is_not_empty
+
     def reset_automata(self):
         # init derivation counter
         self._derivation_step = 0
@@ -84,8 +89,19 @@ class NeuralPDA(nn.Module):
         self._tree_state = None
         self._query_attn_fn = None
 
+    def forward(self, token_based=False, **kwargs):
+        if not token_based:
+            return self._forward_derivation_step(**kwargs)
+
+        else:
+            raise NotImplementedError
+
     def _forward_derivation_step(self, step_symbols=None):
         """
+        :param step_symbols: (batch, max_seq), Optional, the gold symbol used,
+            the corresponding mask is not given and should be referred to the grammar_guide,
+            even though the step_symbol is inconsistent with the grammar, which is hardly possible.
+
         :return: Tuple of 6 objects
             lhs, lhs_mask: (batch,) ;
             grammar_guide: (batch, opt_num, 4, max_seq) ;
@@ -97,27 +113,22 @@ class NeuralPDA(nn.Module):
         # tree_state: (batch, hidden)
         lhs, lhs_mask = self._select_node()
         tree_state = self._encode_partial_tree()
+
         # grammar_guide: (batch, opt_num, 4, max_seq)
         grammar_guide = self._gt(lhs)
 
-        opts_logp = self._expand_rhs(lhs, tree_state, grammar_guide, step_symbols=step_symbols)
-        topo_preds = self.inference_tree_topology(opts_logp, grammar_guide)
-        if step_symbols is None:
-            inferred_symbols = topo_preds[0]
-        else:
-            inferred_symbols = step_symbols[:, :grammar_guide.size()[-1]]
+        # opt_prob: (batch, opt_num)
+        # rhs_output: (batch, opt_num, hid, seq)
+        opt_prob, rhs_output = self._get_topological_choice_distribution(lhs, tree_state, grammar_guide)
 
-        exact_token_logit = self._predict_exact_token_after_derivation(inferred_symbols)
-        return lhs, lhs_mask, grammar_guide, opts_logp, topo_preds, exact_token_logit
+        # best_choice: (batch,)
+        best_choice = self._make_a_topological_choice(opt_prob, step_symbols, grammar_guide)
+        chosen_symbols, chosen_p_growth, chosen_mask = self.retrieve_the_chosen_structure(best_choice, grammar_guide)
 
-    def continue_derivation(self):
-        if self._derivation_step >= self.max_derivation_step:
-            return False
-        self._derivation_step += 1
+        self._update_tree_state(self._retrieve_the_chosen_seq_output(best_choice, rhs_output), chosen_mask)
+        exact_token_logit = self._predict_exact_token_after_derivation(chosen_symbols)
 
-        _, success = self._stack.top()
-        batch_stack_is_not_empty = success.sum() > 0
-        return batch_stack_is_not_empty
+        return lhs, lhs_mask, grammar_guide, opt_prob, exact_token_logit
 
     def _select_node(self) -> Tuple[LT, LT]:
         node, success = self._stack.pop()
@@ -126,53 +137,58 @@ class NeuralPDA(nn.Module):
     def _encode_partial_tree(self):
         return self._tree_state.detach() if self._tree_state is not None else None
 
-    def _expand_rhs(self, lhs, tree_state, grammar_guide, step_symbols: NullOrLT) -> FT:
-
+    def _get_topological_choice_distribution(self, lhs, tree_state, grammar_guide):
+        """
+        get the topological choice distribution for the current derivation, conditioning on the given LHS and Tree States
+        :param lhs: (batch,)
+        :param tree_state: (batch, hid_dim)
+        :param grammar_guide: (batch, opt_num, 4, max_seq)
+        :return: tuple of 2:
+                (batch, opt_num) choice probabilities,
+                (batch, opt_num, hid, seq) hidden states of every option route
+        """
         mem = SeqCollector()
-        step_inp = lhs
-        for step in range(grammar_guide.size()[-1]):
-            if step > 0 and step_symbols is not None:
-                step_inp = step_symbols[:, step - 1]
+        valid_symbols = grammar_guide[:, :, 0]  # valid_symbols: (batch, opt_num, max_seq)
+        batch, opt_num, max_symbol_len = valid_symbols.size()
+        step_inp = lhs.unsqueeze(-1).expand(batch, opt_num)
+
+        for step in range(max_symbol_len):
+            if step > 0:    # grammar guide is always available
+                step_inp = valid_symbols[:, :, step - 1]
+
             # Produce a locally-compliant step output and symbol distribution.
-            # step_output: (batch, hid)
-            # s_logits: (batch, V)
+            # step_output: (batch, opt_num, hid), to be used to update the tree state
+            # symbol_logits: (batch, opt_num, V), to be used to compute the choice log-likelihoods
             step_output, symbol_logits = self._predict_tree_symbol(step_inp, tree_state)
+            mem(symbol_logits=symbol_logits, step_output=step_output)
 
-            self._update_partial_tree(step_output)
+        # rhs_logits: (batch, opt_num, V, seq)
+        rhs_logits = mem.get_stacked_tensor('symbol_logits', dim=-1)
 
-            # bias the logits with the step grammar
-            # symbol_opts, opt_mask: (batch, opts)
-            # compliant_logits: (batch, V)
-            symbol_opts, opt_mask = grammar_guide[:, :, 0, step], grammar_guide[:, :, -1, step]
-            compliant_logits = self._learn_from_step_grammar_tutor(symbol_logits, symbol_opts, opt_mask)
-            if step_symbols is None:
-                step_inp = compliant_logits.argmax(dim=-1)
+        # opt_prob: (batch, opt_num)
+        opt_prob = self._gather_and_merge_option_seq(valid_symbols, grammar_guide[:, :, -1], rhs_logits)
 
-            mem(symbol_logits=compliant_logits)
+        # the hidden output is already fed with valid symbols from every option route
+        # rhs_output: (batch, opt_num, hid, seq)
+        rhs_output = mem.get_stacked_tensor('step_output', dim=-1)
 
-        # seq_logits, seq_logp: (batch, V, seq)
-        seq_logits = mem.get_stacked_tensor('symbol_logits', dim=-1)
-        seq_logp = (F.softmax(seq_logits, dim=1) + 1e-13).log()
-
-        # seq_opts, opt_mask: (batch, opt_num, seq_len)
-        # seq_opts_logp: (batch, opt_num, seq_len)
-        seq_opts, opt_mask = grammar_guide[:, :, 0, :], grammar_guide[:, :, -1, :]
-        seq_opts_logp = torch.gather(seq_logp, index=seq_opts, dim=1)
-
-        # opts_logp: (batch, opt_num)
-        opts_logp = (seq_opts_logp * opt_mask).sum(dim=-1)
-        return opts_logp
+        return opt_prob, rhs_output
 
     def _predict_tree_symbol(self, symbol, tree_state) -> Tuple[FT, FT]:
-        # symbol: (batch,)
-        # emb: (batch, emb)
-        emb = self._dropout(self._embedder(symbol))
+        """
+        :param symbol: (batch, opt_num)
+        :param tree_state: (batch, hid_sz)
+        :return: output (batch, opt_num, hid_sz), step_symbol_logit (batch, opt_num, V)
+        """
+        emb = self._dropout(self._embedder(symbol)) # (batch, opt_num, emb_sz)
 
-        # tree_state: (batch, hidden)
         # the hidden state is discarded each time, hidden inputs of the RNN is constructed from the tree
+        # TODO: make sure the expander accepts (batch, opt_num, emb_sz) as input
         hx = None
         if tree_state is not None:
-            hx, _ = self._expander.init_hidden_states([tree_state for _ in range(self._expander.get_layer_num())])
+            # use_lowest_for_all
+            init_state = init_state_for_stacked_rnn_with_source([tree_state], self._expander.get_layer_num(), "lowest")
+            hx, _ = self._expander.init_hidden_states(init_state)
         _, step_out = self._expander(emb, hx)
 
         # attention computation and compose the context vector with the symbol hidden states
@@ -183,30 +199,81 @@ class NeuralPDA(nn.Module):
         symbol_logits = self._symbol_predictor(step_out_att)
         return step_out_att, symbol_logits
 
-    def _update_partial_tree(self, incremental) -> None:
-        self._tree_state = self._tree_state_udpater(self._tree_state, incremental)
+    def _gather_and_merge_option_seq(self, valid_rhs: LT, rhs_mask: LT, rhs_logits: FT) -> FT:
+        """
+        :param valid_rhs: (batch, opt_num, max_symbol_len)
+        :param rhs_mask: (batch, opt_num, max_symbol_len)
+        :param rhs_logits: (batch, opt_num, V, max_symbol_len)
+        :return: (batch, opt_num), the probability over the valid derivation options
+        """
+        # logprob is required s.t. the logits at individual steps are comparable(with prob.) and could be added together(with log)
+        # the logit is never manually reset to near -inf, so it's safe to use without an eps.
+        rhs_logp = F.log_softmax(rhs_logits, dim=-2)    # (batch, opt_num, V, max_symbol_len)
+
+        # valid_seq_logp: (batch, opt_num, max_symbol_len)
+        valid_seq_logp = torch.gather(rhs_logp, dim=2, index=valid_rhs.unsqueeze(2)).squeeze(2)
+        # choice_logp: (batch, opt_num)
+        choice_logp = (valid_seq_logp * rhs_mask).sum(dim=-1)
+        return self._choice_logp_to_choice_distribution(choice_logp)
+
+    def _choice_logp_to_choice_distribution(self, choice_logp: FT) -> FT:
+        # choice_logp: (batch, opt_num)
+        # the longer the better for the uniform case
+        if self.choice_prob_policy == "normalized_logp":
+            return choice_logp / (choice_logp.sum(-1, keepdim=True) + 1e-15)
+
+        else:
+            raise NotImplementedError
+
+    def _make_a_topological_choice(self, opt_prob, step_symbols: NullOrLT, grammar_guide: NullOrLT) -> LT:
+        """
+        Choose a route from the options.
+        During training the gold option is chosen based on the equality
+        between the step_symbols and the option in grammar_guide.
+        For evaluation, the greedy search is simply adopted.
+
+        :param opt_prob: (batch, opt_num)
+        :param step_symbols: (batch, max_seq)
+        :param grammar_guide: (batch, opt_num, 4, seq)
+        :return: (batch,) indicating the chosen option id
+        """
+        if step_symbols is None:    # greedy choice during inference
+            best_choice = opt_prob.argmax(dim=-1)
+
+        else:   # find gold choice during training
+            best_choice = self.find_choice_by_symbols(step_symbols, grammar_guide)
+
+        return best_choice
 
     @staticmethod
-    def _learn_from_step_grammar_tutor(logit, compliance, compliance_mask) -> FT:
-        """
-        Adjust the symbol logits at current step.
-        Grammar Guide Mask is not required yet, but it will be used in the entire sequence.
+    def find_choice_by_symbols(step_symbols: LT, grammar_guide: LT) -> LT:
+        opt_symbols = grammar_guide[:, :, 0, :]  # (batch, opt_num, max_steps)
+        opt_mask = grammar_guide[:, :, -1, :]  # (batch, opt_num, max_steps)
 
-        :param logit: (batch, V), the symbol logits at the current step
-        :param compliance: (batch, max_opts), the marginalized compliance at the current step
+        comp_len = grammar_guide.size()[-1]
+        gold_symbols = step_symbols[:, :comp_len]
+
+        # seq_comp: (batch, opt_num, compatible_len)
+        seq_comp = (opt_symbols == gold_symbols.unsqueeze(1)) * opt_mask
+        _choice = (seq_comp.sum(dim=-1) == opt_mask.sum(dim=-1))  # _choice: (batch, opt_num)
+        # there must be some choice found for all batch, otherwise the data is inconsistent
+        assert (_choice.sum(dim=1) > 0).all()
+
+        # argmax is forbidden on bool storage, but max is ok
+        return _choice.max(dim=-1)[1]
+
+    def _update_tree_state(self, rhs_output, rhs_mask) -> None:
+        """
+        :param rhs_output: (batch, hid, seq)
+        :param rhs_mask: (batch, seq)
         :return:
         """
-        # the default weight is 0; set all weights for the positions contained in opts to 1;
-        # reset the weights of 0 index with valid 0s
-        compliance = compliance * compliance_mask
-        weights = torch.zeros_like(logit).bool()
-        weights[torch.arange(logit.size()[0], device=logit.device).unsqueeze(-1), compliance] = 1
-        weights[:, 0] = (((compliance == 0) * compliance_mask).sum(-1) > 0) # the mask is ignored at the current step
-        masked_logit = logit + (weights + tiny_value_of_dtype(logit.dtype)).log()
-        return masked_logit
+        # tree_state: (batch, hid)
+        tree_state = self._tree_state
+        self._tree_state = self._tree_state_udpater(tree_state, rhs_output, rhs_mask).detach()
 
     def _predict_exact_token_after_derivation(self, symbols: LT) -> FT:
-        # symbol: (batch, seqlen)
+        # symbols: (batch, expansion_len)
         expansion_len = symbols.size()[-1]
 
         # compliant_weights: (batch, seqlen, V)
@@ -222,34 +289,49 @@ class NeuralPDA(nn.Module):
         exact_logit = exact_logit + (compliant_weights + tiny_value_of_dtype(exact_logit.dtype)).log()
         return exact_logit
 
-    def push_predictions_onto_stack(self, topology_prediction: T3L, lhs_mask: LT):
-        symbol, p_growth, f_growth = topology_prediction
+    def push_predictions_onto_stack(self, symbol: LT, p_growth: LT, symbol_mask: LT, lhs_mask: NullOrLT):
+        """
+        Iterate the symbols backwards and push them onto the stack based on topological information.
 
-        # step 0 is never added to the stack
-        for step in range(symbol.size()[-1] - 1, 0, -1):
-            push_mask = lhs_mask * p_growth[:, step] * f_growth[:, step - 1]
+        :param symbol: (batch, max_seq)
+        :param p_growth: (batch, max_seq), 1 if the symbol is a non-terminal and will grow a subtree, 0 otherwise.
+        :param symbol_mask: (batch, max_seq)
+        :param lhs_mask: (batch,), will be absent if the symbols are gold, and otherwise must be provided.
+        :return:
+        """
+        for step in reversed(range(symbol.size()[-1])):
+            push_mask = p_growth[:, step] * symbol_mask[:, step]
+            if lhs_mask is not None:
+                push_mask *= lhs_mask
             assert push_mask.ndim == 1
             self._stack.push(symbol[:, step].unsqueeze(-1), push_mask.long())
 
     @staticmethod
-    def inference_tree_topology(opts_logp, grammar_guide) -> T4L:
+    def retrieve_the_chosen_structure(choice, grammar_guide) -> T3L:
         """
         Inference the tree topological structure of a derivation.
         Exact token inference is not considered here.
-        :param opts_logp: (batch, opt_num)
+        :param choice: (batch,)
         :param grammar_guide: (batch, opt_num, 4, max_seq)
-        :param step_symbols: (batch, max_derivation_len), Nullable
         :return: Tuple[(batch, seq) * 4], symbol sequence, parental growth, fraternal growth, and mask respectively.
         """
-        # best_opt: (batch,)
-        best_opt = opts_logp.argmax(dim=-1)
+        batch_index = torch.arange(choice.size()[0], device=choice.device)
 
         # topo_pred: (batch, 4, max_seq)
-        topology_predictions = grammar_guide[torch.arange(best_opt.size()[0], device=best_opt.device), best_opt]
+        topology_predictions = grammar_guide[batch_index, choice]
 
         symbol = topology_predictions[:, 0, :]
         p_growth = topology_predictions[:, 1, :]
-        f_growth = topology_predictions[:, 2, :]
-        mask = topology_predictions[:, 3, :]
+        symbol_mask = topology_predictions[:, -1, :]
 
-        return symbol, p_growth, f_growth, mask
+        return symbol, p_growth, symbol_mask
+
+    @staticmethod
+    def _retrieve_the_chosen_seq_output(choice, rhs_output):
+        """
+        :param choice: (batch, )
+        :param rhs_output: (batch, opt_num, hid, seq_len)
+        :return:
+        """
+        batch_index = torch.arange(choice.size()[0], device=choice.device)
+        return rhs_output[batch_index, choice]
