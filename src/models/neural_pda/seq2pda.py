@@ -21,6 +21,7 @@ def _efficiently_optimize(loss_list, optim):
     if len(filtered_loss) > 0:
         for l in filtered_loss:
             loss = loss + l
+        optim.zero_grad()
         loss.backward(retain_graph=True)
         optim.step()
     return loss.detach() if isinstance(loss, torch.Tensor) else loss
