@@ -48,7 +48,7 @@ def cfq_pda():
     p.num_exact_token_mixture = 1
     p.exact_token_quant_criterion = "projection"
 
-    p.tree_state_updater = "max_add"   # orthogonal_add, bounded_add, max_add, avg_add
+    p.tree_state_updater = "orthogonal_add"   # orthogonal_add, bounded_add, max_add, avg_add
     p.tsu_bound = 4.
     p.tsu_num_layers = 1    # valid for lstm
 
@@ -174,6 +174,7 @@ def get_model(p, vocab: NSVocabulary):
         grammar_entry=vocab.get_token_index(p.grammar_entry, ns_s),
         max_derivation_step=p.max_derivation_step,
         dropout=p.dropout,
+
     )
 
     enc_attn_net = get_wrapped_attention(p.enc_attn, p.hidden_sz, encoder.get_output_dim(),

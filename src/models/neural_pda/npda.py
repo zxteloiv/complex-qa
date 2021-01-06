@@ -1,4 +1,4 @@
-from typing import Any, Callable, Optional, Tuple
+from typing import Any, Callable, Optional, Tuple, Literal
 import torch
 from torch import nn
 from torch.nn import functional as F
@@ -36,6 +36,7 @@ class NeuralPDA(nn.Module):
                  grammar_entry: int,
                  max_derivation_step: int = 1000,
                  dropout: float = 0.2,
+                 choice_prob_policy: Literal["noramlized_logp", "length_normalized"] = "length_normalized",
                  ):
         super().__init__()
         self._expander = rhs_expander
@@ -54,7 +55,7 @@ class NeuralPDA(nn.Module):
         self.grammar_entry = grammar_entry
         self.max_derivation_step = max_derivation_step  # a very large upper limit for the runtime storage
 
-        self.choice_prob_policy = "normalized_logp"
+        self.choice_prob_policy = choice_prob_policy
 
         # the helpful storage for runtime forwarding
         self._query_attn_fn = None
@@ -214,12 +215,14 @@ class NeuralPDA(nn.Module):
         valid_seq_logp = torch.gather(rhs_logp, dim=2, index=valid_rhs.unsqueeze(2)).squeeze(2)
         # choice_logp: (batch, opt_num)
         choice_logp = (valid_seq_logp * rhs_mask).sum(dim=-1)
-        return self._choice_logp_to_choice_distribution(choice_logp)
 
-    def _choice_logp_to_choice_distribution(self, choice_logp: FT) -> FT:
         # choice_logp: (batch, opt_num)
         # the longer the better for the uniform case
         if self.choice_prob_policy == "normalized_logp":
+            return choice_logp / (choice_logp.sum(-1, keepdim=True) + 1e-15)
+
+        elif self.choice_prob_policy == "length_normalized":
+            choice_logp = choice_logp / (rhs_mask.sum(-1) + 1e-15)
             return choice_logp / (choice_logp.sum(-1, keepdim=True) + 1e-15)
 
         else:
