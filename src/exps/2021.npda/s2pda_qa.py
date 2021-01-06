@@ -259,9 +259,9 @@ def main():
         from utils.trial_bot_extensions import end_with_nan_loss
         from utils.trial_bot_extensions import evaluation_on_dev_every_epoch
         from utils.trial_bot_extensions import save_model_every_num_iters
-        from utils.trial_bot_extensions import collect_garbage
+        from utils.trial_bot_extensions import collect_garbage, print_hyperparameters
         bot.add_event_handler(Events.EPOCH_COMPLETED, evaluation_on_dev_every_epoch, 90)
-
+        bot.add_event_handler(Events.STARTED, print_hyperparameters, 100)
         bot.add_event_handler(Events.ITERATION_COMPLETED, end_with_nan_loss, 100)
         bot.add_event_handler(Events.EPOCH_COMPLETED, every_epoch_model_saver, 100)
         bot.add_event_handler(Events.ITERATION_COMPLETED, save_model_every_num_iters, 100, interval=100)
