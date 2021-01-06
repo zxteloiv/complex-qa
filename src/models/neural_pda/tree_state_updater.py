@@ -47,8 +47,9 @@ class BoundedAddTSU(TreeStateUpdater):
         return self._activation(tree_state + (seq_states * seq_mask.unsqueeze(dim=1)).sum(dim=-1))
 
 class OrthogonalAddTSU(TreeStateUpdater):
-    def __init__(self, min_val: float = 1., max_val: float = 1.):
+    def __init__(self, min_val: float = 1., max_val: float = 1., focus_on_new_symbols: bool = True):
         super().__init__()
+        self.focus_on_the_new = focus_on_new_symbols
         self._activation = nn.Hardtanh(min_val=min_val, max_val=max_val)
 
     def forward_with_empty_tree(self, seq_states, seq_mask):
@@ -62,7 +63,10 @@ class OrthogonalAddTSU(TreeStateUpdater):
 
             if h is not None:
                 cos_theta = F.cosine_similarity(h, step_state).unsqueeze(-1)    # cos_theta: (batch, 1)
-                h = self._activation(h + (step_state - h * cos_theta) * step_mask)
+                if self.focus_on_the_new:
+                    h = self._activation(h + (step_state - h * cos_theta) * step_mask)
+                else:
+                    h = self._activation(h + (step_state - step_state * cos_theta) * step_mask)
             else:
                 h = step_state
 

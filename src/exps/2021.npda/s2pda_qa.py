@@ -51,6 +51,7 @@ def cfq_pda():
     p.tree_state_updater = "orthogonal_add"   # orthogonal_add, bounded_add, max_add, avg_add
     p.tsu_bound = 4.
     p.tsu_num_layers = 1    # valid for lstm
+    p.tsu_focus_on_new_symbols = False
 
     return p
 
@@ -95,7 +96,7 @@ def get_tree_state_updater(p):
         tsu = AvgAddTSU()
 
     elif p.tree_state_updater == "orthogonal_add":
-        tsu = OrthogonalAddTSU(-p.tsu_bound, p.tsu_bound)
+        tsu = OrthogonalAddTSU(-p.tsu_bound, p.tsu_bound, p.tsu_focus_on_new_symbols)
 
     elif p.tree_state_updater == "bounded_add":
         tsu = BoundedAddTSU(-p.tsu_bound, p.tsu_bound)
