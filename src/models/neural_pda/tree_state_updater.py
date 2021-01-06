@@ -46,7 +46,6 @@ class BoundedAddTSU(TreeStateUpdater):
     def forward_with_available_tree(self, tree_state, seq_states, seq_mask):
         return self._activation(tree_state + (seq_states * seq_mask.unsqueeze(dim=1)).sum(dim=-1))
 
-
 class OrthogonalAddTSU(TreeStateUpdater):
     def __init__(self, min_val: float = 1., max_val: float = 1.):
         super().__init__()
@@ -68,6 +67,30 @@ class OrthogonalAddTSU(TreeStateUpdater):
                 h = step_state
 
         return h
+
+class MaxPoolingAddTSU(TreeStateUpdater):
+    def forward_with_empty_tree(self, seq_states, seq_mask):
+        return self.forward_with_available_tree(0, seq_states, seq_mask)
+
+    def forward_with_available_tree(self, tree_state, seq_states, seq_mask):
+        """
+        :param tree_state: (batch, hid)
+        :param seq_states: (batch, hid, seq)
+        :param seq_mask: (batch, seq)
+        :return: an updated tree_state: (batch, hid)
+        """
+        seq_mask = -100 * (1 - seq_mask)    # low cost min value, (batch, seq)
+        pool_out, _ = (seq_states + seq_mask.unsqueeze(1)).max(dim=-1)   # pool_out: (batch, hid)
+        return torch.tanh(pool_out + tree_state)
+
+class AvgAddTSU(TreeStateUpdater):
+    def forward_with_empty_tree(self, seq_states, seq_mask):
+        out = (seq_mask.unsqueeze(1) * seq_states).sum(-1) / (seq_mask.sum(-1, keepdim=True) + 1e-13)
+        return out.tanh()
+
+    def forward_with_available_tree(self, tree_state, seq_states, seq_mask):
+        out = (seq_mask.unsqueeze(1) * seq_states).sum(-1) / (seq_mask.sum(-1, keepdim=True) + 1e-13)
+        return (tree_state + out).tanh()
 
 class SeqRNNTSU(TreeStateUpdater):
     def __init__(self, rnn_cell: UnifiedRNN):

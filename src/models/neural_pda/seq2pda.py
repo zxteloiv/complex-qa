@@ -107,11 +107,6 @@ class Seq2PDA(nn.Module):
             valid_derivation_num += step_mask.sum(-1) > 0
             self.npda.push_predictions_onto_stack(step_symbols, step_p_growth, step_mask, lhs_mask=None)
 
-            # if source_tokens.is_cuda:
-            #     torch.cuda.empty_cache()
-            #     gc.collect()
-            #
-
             predicted_symbol, predicted_p_growth, predicted_mask = self._infer_topology_greedily(opt_prob, grammar_guide)
             self._arrange_predicted_tokens(token_stack, exact_token_logit, lhs_mask, predicted_p_growth, predicted_mask)
 
@@ -178,6 +173,12 @@ class Seq2PDA(nn.Module):
             push_mask = (predicted_p_growth[:, step] == 0) * predicted_mask[:, step] * lhs_mask
             stack.push(predicted_tokens[:, step].unsqueeze(-1), push_mask.long())
 
+    def _arrange_predicted_symbols(self, stack: TensorBatchStack, lhs_mask, predicted_symbols, predicted_mask):
+        # predicted_symbols: (batch, seq)
+        for step in range(predicted_symbols.size()[-1]):
+            push_mask = predicted_mask[:, step] * lhs_mask
+            stack.push(predicted_symbols[:, step].unsqueeze(-1), push_mask.long())
+
     def _infer_topology_greedily(self, opt_prob, grammar_guide):
         greedy_choice = opt_prob.argmax(dim=-1)
         (
@@ -194,7 +195,8 @@ class Seq2PDA(nn.Module):
         # pred_token: (batch, max_len, 1), the last dimension is the symbol length, and is always 1 in our case
         # pred_mask: (batch, max_len)
         pred_tokens, pred_masks = exact_tokens_stack.dump()
-        pred_tokens = pred_tokens.unsqueeze(-1)
+
+        pred_tokens = pred_tokens.squeeze(-1)
         gold_tokens, gold_masks = prepare_input_mask(batch_target_tokens, padding_val=self.tok_pad)
 
         for p_tok, p_m, g_tok, g_m in zip(pred_tokens, pred_masks, gold_tokens, gold_masks):
@@ -220,37 +222,43 @@ class Seq2PDA(nn.Module):
         enc_attn_fn = self._encode_source(source_tokens)
         self.npda.init_automata(source_tokens.size()[0], source_tokens.device, enc_attn_fn)
 
-        token_stack = TensorBatchStack(source_tokens.size()[0], 1000,
-                                       item_size=1, dtype=torch.long, device=source_tokens.device)
+        batch_sz = source_tokens.size()[0]
+        token_stack = TensorBatchStack(batch_sz, 1000, item_size=1, dtype=torch.long, device=source_tokens.device)
+        symbol_stack = TensorBatchStack(batch_sz, 5000, item_size=1, dtype=torch.long, device=source_tokens.device)
         while self.npda.continue_derivation():
             lhs, lhs_mask, grammar_guide, opt_prob, exact_token_logit = self.npda()
 
-            self._arrange_predicted_tokens_onto_stack(token_stack, exact_token_logit, lhs_mask, opt_prob, grammar_guide)
-
             predicted_symbol, predicted_p_growth, predicted_mask = self._infer_topology_greedily(opt_prob, grammar_guide)
             self._arrange_predicted_tokens(token_stack, exact_token_logit, lhs_mask, predicted_p_growth, predicted_mask)
-
+            self._arrange_predicted_symbols(symbol_stack, lhs_mask, predicted_symbol, predicted_mask)
             self.npda.push_predictions_onto_stack(predicted_symbol, predicted_p_growth, predicted_mask, lhs_mask)
 
         # compute metrics
         self._compute_err(token_stack, target_tokens)
 
         exact_tokens, token_mask = token_stack.dump()
-        exact_tokens = exact_tokens.unsqueeze(-1)
+        exact_tokens = exact_tokens.squeeze(-1)
+
+        symbols, symbol_mask = symbol_stack.dump()
+        symbols = symbols.squeeze(-1)
 
         output = {
             "source": source_tokens,
             "target": target_tokens,
             "prediction": exact_tokens * token_mask,
+            "symbols": symbols * symbol_mask,
+            "rhs_symbols": rhs_symbols,
         }
 
         self.npda.reset_automata()
         return output
 
     def make_human_readable_output(self, output):
-        output['source_tokens'] = make_human_readable_text(output['source'], self.vocab, self.src_ns)
-        output['target_tokens'] = make_human_readable_text(output['target'], self.vocab, self.tgt_ns[1])
-        output['predicted_tokens'] = make_human_readable_text(output['prediction'], self.vocab, self.tgt_ns[1])
+        output['source_surface'] = make_human_readable_text(output['source'], self.vocab, self.src_ns)
+        output['target_surface'] = make_human_readable_text(output['target'], self.vocab, self.tgt_ns[1])
+        output['prediction_surface'] = make_human_readable_text(output['prediction'], self.vocab, self.tgt_ns[1])
+        output['symbol_surface'] = make_human_readable_text(output['symbols'], self.vocab, self.tgt_ns[0])
+        output['rhs_symbol_surface'] = make_human_readable_text(output['rhs_symbols'], self.vocab, self.tgt_ns[0])
         return output
 
 

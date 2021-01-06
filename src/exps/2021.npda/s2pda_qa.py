@@ -48,11 +48,19 @@ def cfq_pda():
     p.num_exact_token_mixture = 1
     p.exact_token_quant_criterion = "projection"
 
-    p.tree_state_updater = "orthogonal_add"   # lstm, orthogonal_add, bounded_add
+    p.tree_state_updater = "max_add"   # orthogonal_add, bounded_add, max_add, avg_add
     p.tsu_bound = 4.
     p.tsu_num_layers = 1    # valid for lstm
 
     return p
+
+from trialbot.utils.grid_search_helper import import_grid_search_parameters
+import_grid_search_parameters(
+    grid_conf={
+        "tree_state_updater": ["max_add", "avg_add"],
+    },
+    base_param_fn=cfq_pda,
+)
 
 def get_grammar_tutor(vocab, ns_symbol):
     from models.neural_pda.grammar_tutor import GrammarTutorForGeneration
@@ -79,11 +87,12 @@ def get_exact_token_tutor(vocab, ns_symbol, ns_exact_token):
     return ett
 
 def get_tree_state_updater(p):
-    from models.neural_pda.tree_state_updater import BoundedAddTSU, OrthogonalAddTSU, SeqRNNTSU
-    if p.tree_state_updater == "lstm":
-        from models.modules.universal_hidden_state_wrapper import RNNType, TorchRNNWrapper
-        tsu = SeqRNNTSU(TorchRNNWrapper(RNNType.LSTM.value(p.hidden_sz, p.hidden_sz),
-                                        get_output_fn=(lambda hx: hx[0])))
+    from models.neural_pda.tree_state_updater import BoundedAddTSU, OrthogonalAddTSU, MaxPoolingAddTSU, AvgAddTSU
+    if p.tree_state_updater == "max_add":
+        tsu = MaxPoolingAddTSU()
+
+    elif p.tree_state_updater == "avg_add":
+        tsu = AvgAddTSU()
 
     elif p.tree_state_updater == "orthogonal_add":
         tsu = OrthogonalAddTSU(-p.tsu_bound, p.tsu_bound)
@@ -156,7 +165,7 @@ def get_model(p, vocab: NSVocabulary):
         stack=TensorBatchStack(p.batch_sz, p.max_derivation_step, item_size=1, dtype=torch.long),
         symbol_predictor=symbol_predictor,
         query_attention_composer=MultiInputsSequential(
-            ClassicMLPComposer(encoder.get_output_dim(), p.hidden_sz, p.hidden_sz, use_tanh=True),
+            ClassicMLPComposer(encoder.get_output_dim(), p.hidden_sz, p.hidden_sz, use_tanh=False),
             nn.Hardtanh()
         ),
         exact_token_predictor=exact_token_predictor,
@@ -268,15 +277,19 @@ def prediction_analysis(bot: TrialBot):
         return
 
     output = bot.model.make_human_readable_output(output)
-    batch_src = output['source_tokens']
-    batch_pred = output['predicted_tokens']
-    batch_gold = output['target_tokens']
+    batch_src = output['source_surface']
+    batch_pred = output['prediction_surface']
+    batch_gold = output['target_surface']
+    batch_symbol = output['symbol_surface']
+    batch_gold_symbol = output['rhs_symbol_surface']
 
-    for src, pred, gold in zip(batch_src, batch_pred, batch_gold):
+    for src, pred, gold, p_s, g_s in zip(batch_src, batch_pred, batch_gold, batch_symbol, batch_gold_symbol):
         print('---' * 30)
         print("SRC:  " + " ".join(src))
         print("PRED: " + " ".join(pred))
         print("GOLD: " + " ".join(gold))
+        print("PRED_symbol: " + " ".join(p_s))
+        print("GOLD_symbol: " + " ".join(g_s))
 
 if __name__ == '__main__':
     main()
