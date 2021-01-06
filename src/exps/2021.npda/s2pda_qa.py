@@ -48,6 +48,10 @@ def cfq_pda():
     p.num_exact_token_mixture = 1
     p.exact_token_quant_criterion = "projection"
 
+    p.tree_state_policy = "pre_expansion"   # pre_expansion, post_expansion
+    p.choice_prob_policy = "length_normalized"  # length_normalized, normalized_logp
+    p.stack_node_updater = "lstm"   # lstm, gru, typed_rnn
+
     p.tree_state_updater = "orthogonal_add"   # orthogonal_add, bounded_add, max_add, avg_add
     p.tsu_bound = 4.
     p.tsu_num_layers = 1    # valid for lstm
@@ -87,6 +91,22 @@ def get_exact_token_tutor(vocab, ns_symbol, ns_exact_token):
     ett = ExactTokenTutor(vocab.get_vocab_size(ns_symbol), vocab.get_vocab_size(ns_exact_token), valid_token_lookup)
     return ett
 
+def get_stack_node_updater(p):
+    from models.neural_pda.partial_tree_encoder import UnifiedRNNNodeComposer
+    from models.modules.universal_hidden_state_wrapper import TorchRNNWrapper
+    from models.modules.sym_typed_rnn_cell import SymTypedRNNCell
+    from torch import nn
+    if p.stack_node_updater == "lstm":
+        cell = TorchRNNWrapper(nn.LSTMCell(p.emb_sz, p.hidden_sz))
+    elif p.stack_node_updater == "typed_rnn":
+        cell = SymTypedRNNCell(p.emb_sz, p.hidden_sz)
+    elif p.stack_node_updater == "gru":
+        cell = TorchRNNWrapper(nn.GRUCell(p.emb_sz, p.hidden_sz))
+    else:
+        raise NotImplementedError
+
+    return UnifiedRNNNodeComposer(cell)
+
 def get_tree_state_updater(p):
     from models.neural_pda.tree_state_updater import BoundedAddTSU, OrthogonalAddTSU, MaxPoolingAddTSU, AvgAddTSU
     if p.tree_state_updater == "max_add":
@@ -112,8 +132,6 @@ def get_model(p, vocab: NSVocabulary):
     from models.neural_pda.seq2pda import Seq2PDA
     from models.neural_pda.npda import NeuralPDA
     from models.neural_pda.batched_stack import TensorBatchStack
-    from models.neural_pda.grammar_tutor import GrammarTutorForGeneration
-    from models.neural_pda.tree_state_updater import BoundedAddTSU, OrthogonalAddTSU
     from models.modules.stacked_encoder import StackedEncoder
     from models.modules.attention_wrapper import get_wrapped_attention
     from models.modules.quantized_token_predictor import QuantTokenPredictor
@@ -123,7 +141,6 @@ def get_model(p, vocab: NSVocabulary):
     from models.modules.mixture_softmax import MoSProjection
     from models.modules.attention_composer import ClassicMLPComposer, CatComposer, AddComposer
     from trialbot.data import START_SYMBOL, PADDING_TOKEN, END_SYMBOL
-    from allennlp.modules.matrix_attention import DotProductMatrixAttention
     from allennlp.nn.activations import Activation
 
     encoder = StackedEncoder.get_encoder(p)
@@ -172,10 +189,12 @@ def get_model(p, vocab: NSVocabulary):
         exact_token_predictor=exact_token_predictor,
         token_tutor=get_exact_token_tutor(vocab, p.tgt_ns[0], p.tgt_ns[1]),
         tree_state_updater=get_tree_state_updater(p),
+        stack_node_composer=get_stack_node_updater(p),
         grammar_entry=vocab.get_token_index(p.grammar_entry, ns_s),
         max_derivation_step=p.max_derivation_step,
         dropout=p.dropout,
-
+        choice_prob_policy=p.choice_prob_policy,
+        tree_state_policy=p.tree_state_policy,
     )
 
     enc_attn_net = get_wrapped_attention(p.enc_attn, p.hidden_sz, encoder.get_output_dim(),

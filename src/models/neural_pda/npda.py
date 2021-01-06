@@ -5,7 +5,7 @@ from torch.nn import functional as F
 
 from allennlp.nn.util import masked_softmax
 from ..interfaces.attention import VectorContextComposer
-from .batched_stack import BatchStack
+from .batched_stack import BatchStack, TensorBatchStack
 from ..interfaces.unified_rnn import UnifiedRNN
 from ..modules.stacked_rnn_cell import StackedRNNCell
 from utils.seq_collector import SeqCollector
@@ -23,9 +23,10 @@ class NeuralPDA(nn.Module):
                  grammar_tutor,
                  token_tutor,
                  rhs_expander: StackedRNNCell,
-                 stack: BatchStack,
+                 stack: TensorBatchStack,
 
                  tree_state_updater: TreeStateUpdater,
+                 stack_node_composer,
 
                  symbol_predictor: nn.Module,
                  query_attention_composer: VectorContextComposer,
@@ -37,6 +38,7 @@ class NeuralPDA(nn.Module):
                  max_derivation_step: int = 1000,
                  dropout: float = 0.2,
                  choice_prob_policy: Literal["noramlized_logp", "length_normalized"] = "length_normalized",
+                 tree_state_policy: Literal["pre_expansion", "post_expansion"] = "post_expansion",
                  ):
         super().__init__()
         self._expander = rhs_expander
@@ -51,11 +53,14 @@ class NeuralPDA(nn.Module):
         self._tree_state_udpater: TreeStateUpdater = tree_state_updater
         self._dropout = nn.Dropout(dropout)
 
+        self._stack_node_composer = stack_node_composer
+
         # configurations
         self.grammar_entry = grammar_entry
         self.max_derivation_step = max_derivation_step  # a very large upper limit for the runtime storage
 
         self.choice_prob_policy = choice_prob_policy
+        self.tree_state_policy = tree_state_policy
 
         # the helpful storage for runtime forwarding
         self._query_attn_fn = None
@@ -136,7 +141,14 @@ class NeuralPDA(nn.Module):
         return node.squeeze(-1).long(), success
 
     def _encode_partial_tree(self):
-        return self._tree_state.detach() if self._tree_state is not None else None
+        if self.tree_state_policy == "pre_expansion":
+            symbols, symbol_mask = self._stack.dump()   # mask: (batch, max_cur)
+            symbols = symbols.squeeze(-1)               # symbols: (batch, max_cur)
+            symbol_emb = self._embedder(symbols)        # symbol_emb: (batch, max_cur, emb_sz)
+            return self._stack_node_composer(symbol_emb, symbol_mask)
+
+        else:
+            return self._tree_state.detach() if self._tree_state is not None else None
 
     def _get_topological_choice_distribution(self, lhs, tree_state, grammar_guide):
         """
@@ -271,9 +283,10 @@ class NeuralPDA(nn.Module):
         :param rhs_mask: (batch, seq)
         :return:
         """
-        # tree_state: (batch, hid)
-        tree_state = self._tree_state
-        self._tree_state = self._tree_state_udpater(tree_state, rhs_output, rhs_mask).detach()
+        if self.tree_state_policy == "post_expansion":
+            # tree_state: (batch, hid)
+            tree_state = self._tree_state
+            self._tree_state = self._tree_state_udpater(tree_state, rhs_output, rhs_mask).detach()
 
     def _predict_exact_token_after_derivation(self, symbols: LT) -> FT:
         # symbols: (batch, expansion_len)

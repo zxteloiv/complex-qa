@@ -230,8 +230,8 @@ class TensorBatchStack(BatchStack, DumpBatchStack):
         # top_cur: (batch,)
         max_width = torch.max(self._top_cur)
         if max_width < 0:
-            return (self._storage.new_zeros(self._storage.size()[0], 1),
-                    self._storage.new_zeros(self._storage.size()[0]))  # empty stack
+            return (self._storage.new_zeros(self.max_batch_size, 1, self.item_size),
+                    self._storage.new_zeros(self.max_batch_size, 1))  # empty stack
 
         upper_bound = max_width + 1
         value = self._storage[:, :upper_bound]
