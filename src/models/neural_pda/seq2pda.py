@@ -88,7 +88,9 @@ class Seq2PDA(nn.Module):
         self.npda.init_automata(source_tokens.size()[0], source_tokens.device, enc_attn_fn)
 
         step = 0
-        loss = 0
+        loss = []
+        derivation_loss = []
+        valid_derivation_num = 0
         token_stack = TensorBatchStack(source_tokens.size()[0], 1000,
                                        item_size=1, dtype=torch.long, device=source_tokens.device)
         while self.npda.continue_derivation() and step * self.max_expansion_len < mask.size()[1]:
@@ -101,19 +103,20 @@ class Seq2PDA(nn.Module):
 
             token_loss, topo_loss = self._compute_loss(grammar_guide, opt_prob, exact_token_logit,
                                                        step_symbols, step_p_growth, step_exact_tokens, step_mask,)
-            derivation_loss = _efficiently_optimize([token_loss, topo_loss], optim)
-            loss += derivation_loss
+            derivation_loss.append(_efficiently_optimize([token_loss, topo_loss], optim))
+            loss.append((token_loss.item(), topo_loss.item()))
             step += 1
             # any valid derivation must expand the RHS starting with a START token, and the mask is set to 1.
-            valid_derivation_num = (step_mask.sum(-1) > 0).float().mean()
+            valid_derivation_num += (step_mask.sum(-1) > 0).float().mean()
             self.npda.push_predictions_onto_stack(step_symbols, step_p_growth, step_mask, lhs_mask=None)
 
             predicted_symbol, predicted_p_growth, predicted_mask = self._infer_topology_greedily(opt_prob, grammar_guide)
             self._arrange_predicted_tokens(token_stack, exact_token_logit, lhs_mask, predicted_p_growth, predicted_mask)
 
         # compute metrics
+        print(loss)
         self._compute_err(token_stack, target_tokens)
-        normalized_loss = loss / (valid_derivation_num.float().mean() + 1e-15)
+        normalized_loss = sum(derivation_loss) / (valid_derivation_num + 1e-15)
         self.loss(normalized_loss)
         output = {'loss': normalized_loss}
         self.npda.reset_automata()
@@ -156,10 +159,10 @@ class Seq2PDA(nn.Module):
 
         # gold_choice: (batch, 1)
         gold_choice = self.npda.find_choice_by_symbols(step_symbols, grammar_guide).unsqueeze(-1)
-        opt_logp = (opt_prob + 1e-15).log()                                 # opt_logp: (batch, opt_num)
-        topology_batch_loss = -opt_logp.gather(dim=-1, index=gold_choice)   # topo_batch_loss: (batch,)
         non_empty_seq = step_mask.sum(dim=-1) > 0                           # non_empty_seq: (batch,)
-        topology_loss = topology_batch_loss.sum() / (non_empty_seq.sum() + 1e-15)
+        opt_logp = (opt_prob + 1e-15).log()                                 # opt_logp: (batch, opt_num)
+        topology_batch_loss = -opt_logp.gather(dim=-1, index=gold_choice)   # topo_batch_loss: (batch, 1)
+        topology_loss = (topology_batch_loss.squeeze(-1) * non_empty_seq).sum() / (non_empty_seq.sum() + 1e-15)
         return token_loss, topology_loss
 
     def _arrange_predicted_tokens(self, stack: TensorBatchStack,
