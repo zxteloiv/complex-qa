@@ -47,7 +47,7 @@ class Seq2PDA(nn.Module):
         self.enc_attn_net = enc_attn_net
         self.npda = npda
 
-        self.ppl = Perplexity()
+        self.loss = Average()
         self.err = Average()
         self.tok_pad = 0
         self.max_expansion_len = max_expansion_len
@@ -57,9 +57,9 @@ class Seq2PDA(nn.Module):
         self.vocab = vocab
 
     def get_metric(self, reset=False):
-        ppl = self.ppl.get_metric(reset)
+        loss = self.loss.get_metric(reset)
         err = self.err.get_metric(reset)
-        return {"PPL": ppl, "ERR": err}
+        return {"Amortized_loss": loss, "ERR": err}
 
     def forward(self, *args, **kwargs):
         if self.training:
@@ -88,7 +88,7 @@ class Seq2PDA(nn.Module):
         self.npda.init_automata(source_tokens.size()[0], source_tokens.device, enc_attn_fn)
 
         step = 0
-        loss = valid_derivation_num = 0
+        loss = 0
         token_stack = TensorBatchStack(source_tokens.size()[0], 1000,
                                        item_size=1, dtype=torch.long, device=source_tokens.device)
         while self.npda.continue_derivation() and step * self.max_expansion_len < mask.size()[1]:
@@ -105,7 +105,7 @@ class Seq2PDA(nn.Module):
             loss += derivation_loss
             step += 1
             # any valid derivation must expand the RHS starting with a START token, and the mask is set to 1.
-            valid_derivation_num += step_mask.sum(-1) > 0
+            valid_derivation_num = (step_mask.sum(-1) > 0).float().mean()
             self.npda.push_predictions_onto_stack(step_symbols, step_p_growth, step_mask, lhs_mask=None)
 
             predicted_symbol, predicted_p_growth, predicted_mask = self._infer_topology_greedily(opt_prob, grammar_guide)
@@ -113,9 +113,8 @@ class Seq2PDA(nn.Module):
 
         # compute metrics
         self._compute_err(token_stack, target_tokens)
-
         normalized_loss = loss / (valid_derivation_num.float().mean() + 1e-15)
-        self.ppl(normalized_loss)
+        self.loss(normalized_loss)
         output = {'loss': normalized_loss}
         self.npda.reset_automata()
         return output
