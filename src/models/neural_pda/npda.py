@@ -205,7 +205,7 @@ class NeuralPDA(nn.Module):
 
         # option rule score
         scores = self._rule_scorer(opt_repr)    # (batch, opt_num, 1)
-        opt_prob = F.softmax(scores.squeeze(-1), dim=-1)    # (batch, opt_num)
+        opt_prob = masked_softmax(scores.squeeze(-1), (symbol_mask.sum(-1) > 0))    # (batch, opt_num)
         return opt_prob, opt_repr
 
     def _make_a_topological_choice(self, opt_prob, step_symbols: NullOrLT, grammar_guide: NullOrLT) -> LT:
