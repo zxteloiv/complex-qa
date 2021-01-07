@@ -158,7 +158,7 @@ class Seq2PDA(nn.Module):
         # gold_choice: (batch, 1)
         gold_choice = self.npda.find_choice_by_symbols(step_symbols, grammar_guide).unsqueeze(-1)
         opt_logp = (opt_prob + 1e-15).log()                                 # opt_logp: (batch, opt_num)
-        topology_batch_loss = opt_logp.gather(dim=-1, index=gold_choice)    # topo_batch_loss: (batch,)
+        topology_batch_loss = -opt_logp.gather(dim=-1, index=gold_choice)   # topo_batch_loss: (batch,)
         non_empty_seq = step_mask.sum(dim=-1) > 0                           # non_empty_seq: (batch,)
         topology_loss = topology_batch_loss.sum() / (non_empty_seq.sum() + 1e-15)
         return token_loss, topology_loss
