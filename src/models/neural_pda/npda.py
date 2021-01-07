@@ -11,7 +11,7 @@ from ..modules.stacked_rnn_cell import StackedRNNCell
 from utils.seq_collector import SeqCollector
 from allennlp.nn.util import min_value_of_dtype, tiny_value_of_dtype
 from .tree_state_updater import TreeStateUpdater
-from utils.nn import init_state_for_stacked_rnn_with_source
+from utils.nn import init_state_for_stacked_rnn, get_final_encoder_states
 
 from .tensor_typing_util import *
 
@@ -28,8 +28,8 @@ class NeuralPDA(nn.Module):
                  tree_state_updater: TreeStateUpdater,
                  stack_node_composer,
 
-                 symbol_predictor: nn.Module,
                  query_attention_composer: VectorContextComposer,
+                 rule_representation_scorer,
 
                  exact_token_predictor: nn.Module,
 
@@ -37,7 +37,6 @@ class NeuralPDA(nn.Module):
                  grammar_entry: int,
                  max_derivation_step: int = 1000,
                  dropout: float = 0.2,
-                 choice_prob_policy: Literal["noramlized_logp", "length_normalized"] = "length_normalized",
                  tree_state_policy: Literal["pre_expansion", "post_expansion"] = "post_expansion",
                  ):
         super().__init__()
@@ -46,7 +45,6 @@ class NeuralPDA(nn.Module):
         self._gt = grammar_tutor
         self._tt = token_tutor
         self._embedder = symbol_embedding
-        self._symbol_predictor = symbol_predictor
         self._exact_token_predictor = exact_token_predictor
 
         self._query_attn_comp = query_attention_composer
@@ -54,12 +52,12 @@ class NeuralPDA(nn.Module):
         self._dropout = nn.Dropout(dropout)
 
         self._stack_node_composer = stack_node_composer
+        self._rule_scorer = rule_representation_scorer
 
         # configurations
         self.grammar_entry = grammar_entry
         self.max_derivation_step = max_derivation_step  # a very large upper limit for the runtime storage
 
-        self.choice_prob_policy = choice_prob_policy
         self.tree_state_policy = tree_state_policy
 
         # the helpful storage for runtime forwarding
@@ -124,14 +122,14 @@ class NeuralPDA(nn.Module):
         grammar_guide = self._gt(lhs)
 
         # opt_prob: (batch, opt_num)
-        # rhs_output: (batch, opt_num, hid, seq)
-        opt_prob, rhs_output = self._get_topological_choice_distribution(lhs, tree_state, grammar_guide)
+        # rhs_output: (batch, opt_num, hid)
+        opt_prob, opt_repr = self._get_topological_choice_distribution(lhs, tree_state, grammar_guide)
 
         # best_choice: (batch,)
         best_choice = self._make_a_topological_choice(opt_prob, step_symbols, grammar_guide)
-        chosen_symbols, chosen_p_growth, chosen_mask = self.retrieve_the_chosen_structure(best_choice, grammar_guide)
+        chosen_symbols, _, _ = self.retrieve_the_chosen_structure(best_choice, grammar_guide)
 
-        self._update_tree_state(self._retrieve_the_chosen_seq_output(best_choice, rhs_output), chosen_mask)
+        self._update_tree_state(self._retrieve_the_selected_option_repr(best_choice, opt_repr))
         exact_token_logit = self._predict_exact_token_after_derivation(chosen_symbols)
 
         return lhs, lhs_mask, grammar_guide, opt_prob, exact_token_logit
@@ -158,87 +156,57 @@ class NeuralPDA(nn.Module):
         :param grammar_guide: (batch, opt_num, 4, max_seq)
         :return: tuple of 2:
                 (batch, opt_num) choice probabilities,
-                (batch, opt_num, hid, seq) hidden states of every option route
+                (batch, opt_num, hid) compositional representation of each rule option
         """
         mem = SeqCollector()
-        valid_symbols = grammar_guide[:, :, 0]  # valid_symbols: (batch, opt_num, max_seq)
+        valid_symbols = grammar_guide[:, :, 0]      # valid_symbols: (batch, opt_num, max_seq)
+        parental_growth = grammar_guide[:, :, 1]    # p_growth: (batch, opt_num, max_seq)
+        fraternal_growth = grammar_guide[:, :, 2]   # f_growth: (batch, opt_num, max_seq)
         batch, opt_num, max_symbol_len = valid_symbols.size()
-        step_inp = lhs.unsqueeze(-1).expand(batch, opt_num)
 
-        for step in range(max_symbol_len):
-            if step > 0:    # grammar guide is always available
-                step_inp = valid_symbols[:, :, step - 1]
-
-            # Produce a locally-compliant step output and symbol distribution.
-            # step_output: (batch, opt_num, hid), to be used to update the tree state
-            # symbol_logits: (batch, opt_num, V), to be used to compute the choice log-likelihoods
-            step_output, symbol_logits = self._predict_tree_symbol(step_inp, tree_state)
-            mem(symbol_logits=symbol_logits, step_output=step_output)
-
-        # rhs_logits: (batch, opt_num, V, seq)
-        rhs_logits = mem.get_stacked_tensor('symbol_logits', dim=-1)
-
-        # opt_prob: (batch, opt_num)
-        opt_prob = self._gather_and_merge_option_seq(valid_symbols, grammar_guide[:, :, -1], rhs_logits)
-
-        # the hidden output is already fed with valid symbols from every option route
-        # rhs_output: (batch, opt_num, hid, seq)
-        rhs_output = mem.get_stacked_tensor('step_output', dim=-1)
-
-        return opt_prob, rhs_output
-
-    def _predict_tree_symbol(self, symbol, tree_state) -> Tuple[FT, FT]:
-        """
-        :param symbol: (batch, opt_num)
-        :param tree_state: (batch, hid_sz)
-        :return: output (batch, opt_num, hid_sz), step_symbol_logit (batch, opt_num, V)
-        """
-        emb = self._dropout(self._embedder(symbol)) # (batch, opt_num, emb_sz)
-
-        # the hidden state is discarded each time, hidden inputs of the RNN is constructed from the tree
-        # TODO: make sure the expander accepts (batch, opt_num, emb_sz) as input
         hx = None
         if tree_state is not None:
-            # use_lowest_for_all
-            init_state = init_state_for_stacked_rnn_with_source([tree_state], self._expander.get_layer_num(), "lowest")
+            init_state = init_state_for_stacked_rnn([tree_state], self._expander.get_layer_num(), "all")
             hx, _ = self._expander.init_hidden_states(init_state)
-        _, step_out = self._expander(emb, hx)
 
-        # attention computation and compose the context vector with the symbol hidden states
-        query_context = self._query_attn_fn(step_out)
-        step_out_att = self._query_attn_comp(query_context, step_out)
+        for step in range(-1, max_symbol_len):
+            if step < 0:
+                step_symbol = lhs.unsqueeze(-1).expand(batch, opt_num)
+                step_p_growth = torch.ones_like(step_symbol).unsqueeze(-1)
+                step_f_growth = step_p_growth
+            else:
+                # grammar guide is always available
+                step_symbol = valid_symbols[:, :, step]
+                step_p_growth = parental_growth[:, :, step].unsqueeze(-1)
+                step_f_growth = fraternal_growth[:, :, step].unsqueeze(-1)
 
-        # s_logits: (batch, V)
-        symbol_logits = self._symbol_predictor(step_out_att)
-        return step_out_att, symbol_logits
+            emb = self._dropout(self._embedder(step_symbol))  # (batch, opt_num, emb_sz)
+            cell_input = torch.cat([emb, step_p_growth, step_f_growth], dim=-1)
+            # step_output: (batch, opt_num, hid)
+            hx, step_out = self._expander(cell_input, hx)
 
-    def _gather_and_merge_option_seq(self, valid_rhs: LT, rhs_mask: LT, rhs_logits: FT) -> FT:
-        """
-        :param valid_rhs: (batch, opt_num, max_symbol_len)
-        :param rhs_mask: (batch, opt_num, max_symbol_len)
-        :param rhs_logits: (batch, opt_num, V, max_symbol_len)
-        :return: (batch, opt_num), the probability over the valid derivation options
-        """
-        # logprob is required s.t. the logits at individual steps are comparable(with prob.) and could be added together(with log)
-        # the logit is never manually reset to near -inf, so it's safe to use without an eps.
-        rhs_logp = F.log_softmax(rhs_logits, dim=-2)    # (batch, opt_num, V, max_symbol_len)
+            if step >= 0:
+                # attention computation and compose the context vector with the symbol hidden states
+                query_context = self._query_attn_fn(step_out)
+                # step_output_att: (batch, opt_num, hid)
+                step_out_att = self._query_attn_comp(query_context, step_out)
+                mem(step_output=step_out_att)
 
-        # valid_seq_logp: (batch, opt_num, max_symbol_len)
-        valid_seq_logp = torch.gather(rhs_logp, dim=2, index=valid_rhs.unsqueeze(2)).squeeze(2)
-        # choice_logp: (batch, opt_num)
-        choice_logp = (valid_seq_logp * rhs_mask).sum(dim=-1)
+        # rhs_output: (batch, opt_num, max_seq, hid)
+        rhs_output = mem.get_stacked_tensor('step_output', dim=-2)
+        # symbol_mask: (batch, opt_num, max_seq)
+        symbol_mask = grammar_guide[:, :, 3]
 
-        # choice_logp: (batch, opt_num)
-        # the longer the better for the uniform case
-        if self.choice_prob_policy == "normalized_logp":
-            return choice_logp / (choice_logp.sum(-1, keepdim=True) + 1e-15)
+        # opt_repr: (batch, opt_num, hid)
+        opt_repr = get_final_encoder_states(
+            rhs_output.reshape(batch * opt_num, max_symbol_len, -1),
+            symbol_mask.reshape(batch * opt_num, max_symbol_len)
+        ).reshape(batch, opt_num, -1)
 
-        elif self.choice_prob_policy == "length_normalized":
-            choice_logp = choice_logp / (rhs_mask.sum(-1) + 1e-15)
-            return choice_logp / (choice_logp.sum(-1, keepdim=True) + 1e-15)
-
-        else:
-            raise NotImplementedError
+        # option rule score
+        scores = self._rule_scorer(opt_repr)    # (batch, opt_num, 1)
+        opt_prob = F.softmax(scores.squeeze(-1), dim=-1)    # (batch, opt_num)
+        return opt_prob, opt_repr
 
     def _make_a_topological_choice(self, opt_prob, step_symbols: NullOrLT, grammar_guide: NullOrLT) -> LT:
         """
@@ -277,16 +245,18 @@ class NeuralPDA(nn.Module):
         # argmax is forbidden on bool storage, but max is ok
         return _choice.max(dim=-1)[1]
 
-    def _update_tree_state(self, rhs_output, rhs_mask) -> None:
+    def _update_tree_state(self, opt_repr) -> None:
         """
-        :param rhs_output: (batch, hid, seq)
+        :param opt_repr: (batch, hid, seq)
         :param rhs_mask: (batch, seq)
         :return:
         """
         if self.tree_state_policy == "post_expansion":
             # tree_state: (batch, hid)
             tree_state = self._tree_state
-            self._tree_state = self._tree_state_udpater(tree_state, rhs_output, rhs_mask).detach()
+            batch = opt_repr.size()[0]
+            self._tree_state = self._tree_state_udpater(tree_state, opt_repr.unsqueeze(-1),
+                                                        opt_repr.new_ones(batch, 1)).detach()
 
     def _predict_exact_token_after_derivation(self, symbols: LT) -> FT:
         # symbols: (batch, expansion_len)
@@ -343,11 +313,11 @@ class NeuralPDA(nn.Module):
         return symbol, p_growth, symbol_mask
 
     @staticmethod
-    def _retrieve_the_chosen_seq_output(choice, rhs_output):
+    def _retrieve_the_selected_option_repr(choice, opt_repr):
         """
         :param choice: (batch, )
-        :param rhs_output: (batch, opt_num, hid, seq_len)
-        :return:
+        :param opt_repr: (batch, opt_num, hid)
+        :return: (batch, hid)
         """
         batch_index = torch.arange(choice.size()[0], device=choice.device)
-        return rhs_output[batch_index, choice]
+        return opt_repr[batch_index, choice]

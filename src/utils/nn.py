@@ -305,12 +305,12 @@ def get_decoder_initial_states(layer_state: List[torch.Tensor],
         else:
             src_agg = forward_by_layer
 
-    init_state = init_state_for_stacked_rnn_with_source(src_agg, num_decoder_layers, assign_stg)
+    init_state = init_state_for_stacked_rnn(src_agg, num_decoder_layers, assign_stg)
     return init_state
 
-def init_state_for_stacked_rnn_with_source(src_agg: List[torch.Tensor],
-                                           num_layers: int,
-                                           policy: Literal["lowest", "all", "parallel"]):
+def init_state_for_stacked_rnn(src_agg: List[torch.Tensor],
+                                num_layers: int,
+                                policy: Literal["lowest", "all", "parallel"]):
     if policy == "lowest": # use the top layer aggregated state for the decoder bottom, zero for others
         init_state = [src_agg[-1]] + [torch.zeros_like(src_agg[-1]) for _ in range(num_layers - 1)]
 

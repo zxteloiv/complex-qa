@@ -40,8 +40,6 @@ def cfq_pda():
     p.num_expander_layer = 2
     p.max_derivation_step = 500
     p.max_expansion_len = 11
-    p.tied_symbol_emb = False
-    p.symbol_quant_criterion = "projection"
     p.grammar_entry = "queryunit"
 
     p.exact_token_predictor = "quant" # linear, mos, quant
@@ -49,7 +47,6 @@ def cfq_pda():
     p.exact_token_quant_criterion = "projection"
 
     p.tree_state_policy = "pre_expansion"   # pre_expansion, post_expansion
-    p.choice_prob_policy = "length_normalized"  # length_normalized, normalized_logp
     p.stack_node_updater = "lstm"   # lstm, gru, typed_rnn
 
     p.tree_state_updater = "orthogonal_add"   # orthogonal_add, bounded_add, max_add, avg_add
@@ -58,14 +55,6 @@ def cfq_pda():
     p.tsu_focus_on_new_symbols = False
 
     return p
-
-from trialbot.utils.grid_search_helper import import_grid_search_parameters
-import_grid_search_parameters(
-    grid_conf={
-        "tree_state_updater": ["max_add", "avg_add"],
-    },
-    base_param_fn=cfq_pda,
-)
 
 def get_grammar_tutor(vocab, ns_symbol):
     from models.neural_pda.grammar_tutor import GrammarTutorForGeneration
@@ -148,12 +137,6 @@ def get_model(p, vocab: NSVocabulary):
 
     ns_s, ns_et = p.tgt_ns
     emb_s = nn.Embedding(vocab.get_vocab_size(ns_s), p.emb_sz)
-    symbol_predictor = QuantTokenPredictor(
-        num_toks=vocab.get_vocab_size(ns_s),
-        tok_dim=p.emb_sz,
-        shared_embedding=emb_s.weight if p.tied_symbol_emb else None,
-        quant_criterion=p.symbol_quant_criterion,
-    )
 
     if p.exact_token_predictor == "linear":
         exact_token_predictor = nn.Sequential(
@@ -174,18 +157,19 @@ def get_model(p, vocab: NSVocabulary):
         grammar_tutor=get_grammar_tutor(vocab, ns_s),
         rhs_expander=StackedRNNCell(
             [
-                SymTypedRNNCell(input_dim=p.emb_sz if floor == 0 else p.hidden_sz, output_dim=p.hidden_sz,
+                SymTypedRNNCell(input_dim=p.emb_sz + 2 if floor == 0 else p.hidden_sz,
+                                output_dim=p.hidden_sz,
                                 nonlinearity="mish")
                 for floor in range(p.num_expander_layer)
             ],
             p.emb_sz, p.hidden_sz, p.num_expander_layer, intermediate_dropout=p.dropout
         ),
         stack=TensorBatchStack(p.batch_sz, p.max_derivation_step, item_size=1, dtype=torch.long),
-        symbol_predictor=symbol_predictor,
         query_attention_composer=MultiInputsSequential(
             ClassicMLPComposer(encoder.get_output_dim(), p.hidden_sz, p.hidden_sz, use_tanh=False),
             nn.Hardtanh()
         ),
+        rule_representation_scorer=nn.Linear(p.hidden_sz, 1),
         exact_token_predictor=exact_token_predictor,
         token_tutor=get_exact_token_tutor(vocab, p.tgt_ns[0], p.tgt_ns[1]),
         tree_state_updater=get_tree_state_updater(p),
@@ -193,7 +177,6 @@ def get_model(p, vocab: NSVocabulary):
         grammar_entry=vocab.get_token_index(p.grammar_entry, ns_s),
         max_derivation_step=p.max_derivation_step,
         dropout=p.dropout,
-        choice_prob_policy=p.choice_prob_policy,
         tree_state_policy=p.tree_state_policy,
     )
 
