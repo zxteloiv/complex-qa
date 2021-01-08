@@ -48,7 +48,7 @@ class NeuralPDA(nn.Module):
         self._exact_token_predictor = exact_token_predictor
 
         self._query_attn_comp = query_attention_composer
-        self._tree_state_udpater: TreeStateUpdater = tree_state_updater
+        self._tree_state_updater: TreeStateUpdater = tree_state_updater
         self._dropout = nn.Dropout(dropout)
 
         self._stack_node_composer = stack_node_composer
@@ -170,27 +170,22 @@ class NeuralPDA(nn.Module):
             hx, _ = self._expander.init_hidden_states(init_state)
 
         for step in range(-1, max_symbol_len):
+            # prepare ranking features
             if step < 0:
                 step_symbol = lhs.unsqueeze(-1).expand(batch, opt_num)
-                step_p_growth = torch.ones_like(step_symbol).unsqueeze(-1)
-                step_f_growth = step_p_growth
+                step_f_growth = same_as_lhs = step_p_growth = torch.zeros_like(step_symbol).unsqueeze(-1)
             else:
-                # grammar guide is always available
                 step_symbol = valid_symbols[:, :, step]
                 step_p_growth = parental_growth[:, :, step].unsqueeze(-1)
                 step_f_growth = fraternal_growth[:, :, step].unsqueeze(-1)
+                same_as_lhs = (step_symbol == lhs.unsqueeze(-1)).unsqueeze(-1)
 
             emb = self._dropout(self._embedder(step_symbol))  # (batch, opt_num, emb_sz)
-            cell_input = torch.cat([emb, step_p_growth, step_f_growth], dim=-1)
             # step_output: (batch, opt_num, hid)
-            hx, step_out = self._expander(cell_input, hx)
+            hx, step_out = self._expander(emb, hx, input_aux=[step_p_growth, step_f_growth, same_as_lhs])
 
             if step >= 0:
-                # attention computation and compose the context vector with the symbol hidden states
-                query_context = self._query_attn_fn(step_out)
-                # step_output_att: (batch, opt_num, hid)
-                step_out_att = self._query_attn_comp(query_context, step_out)
-                mem(step_output=step_out_att)
+                mem(step_output=step_out)
 
         # rhs_output: (batch, opt_num, max_seq, hid)
         rhs_output = mem.get_stacked_tensor('step_output', dim=-2)
@@ -203,9 +198,14 @@ class NeuralPDA(nn.Module):
             symbol_mask.reshape(batch * opt_num, max_symbol_len)
         ).reshape(batch, opt_num, -1)
 
+        # attention computation and compose the context vector with the symbol hidden states
+        query_context = self._query_attn_fn(opt_repr)
+        opt_repr = self._query_attn_comp(query_context, opt_repr)   # opt_repr: (batch, opt_num, hid)
+        opt_mask = symbol_mask.sum(-1) > 0
+
         # option rule score
         scores = self._rule_scorer(opt_repr)    # (batch, opt_num, 1)
-        opt_prob = masked_softmax(scores.squeeze(-1), (symbol_mask.sum(-1) > 0))    # (batch, opt_num)
+        opt_prob = masked_softmax(scores.squeeze(-1), opt_mask) # (batch, opt_num)
         return opt_prob, opt_repr
 
     def _make_a_topological_choice(self, opt_prob, step_symbols: NullOrLT, grammar_guide: NullOrLT) -> LT:
@@ -247,16 +247,23 @@ class NeuralPDA(nn.Module):
 
     def _update_tree_state(self, opt_repr) -> None:
         """
-        :param opt_repr: (batch, hid, seq)
+        :param opt_repr: (batch, hid)
         :param rhs_mask: (batch, seq)
         :return:
         """
         if self.tree_state_policy == "post_expansion":
             # tree_state: (batch, hid)
-            tree_state = self._tree_state
+            ts = self._tree_state
             batch = opt_repr.size()[0]
-            self._tree_state = self._tree_state_udpater(tree_state, opt_repr.unsqueeze(-1),
-                                                        opt_repr.new_ones(batch, 1)).detach()
+            self._tree_state = self._tree_state_updater(ts, opt_repr.unsqueeze(-1), opt_repr.new_ones(batch, 1))
+
+    @property
+    def tree_state(self):
+        return self._tree_state
+
+    def stop_gradient_for_tree_state(self):
+        if self._tree_state is not None:
+            self._tree_state = self._tree_state.detach()
 
     def _predict_exact_token_after_derivation(self, symbols: LT) -> FT:
         # symbols: (batch, expansion_len)

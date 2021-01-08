@@ -3,11 +3,12 @@ import torch
 import torch.nn as nn
 from models.modules.stacked_encoder import StackedEncoder
 from allennlp.training.metrics.perplexity import Perplexity, Average
-from utils.nn import prepare_input_mask, seq_cross_ent
+from utils.nn import prepare_input_mask, seq_cross_ent, init_state_for_stacked_rnn
 from .npda import NeuralPDA
 from utils.seq_collector import SeqCollector
 from utils.text_tool import make_human_readable_text
 from .batched_stack import TensorBatchStack
+from ..base_s2s.rnn_lm import RNNModel
 import logging
 import gc
 
@@ -35,6 +36,8 @@ class Seq2PDA(nn.Module):
                  enc_attn_net: nn.Module,
                  npda: NeuralPDA,
 
+                 src_lm: RNNModel,
+
                  # configuration
                  max_expansion_len: int,
                  src_ns: str,
@@ -46,6 +49,7 @@ class Seq2PDA(nn.Module):
         self.src_embedder = src_embedding
         self.enc_attn_net = enc_attn_net
         self.npda = npda
+        self.lm = src_lm
 
         self.loss = Average()
         self.err = Average()
@@ -88,7 +92,7 @@ class Seq2PDA(nn.Module):
         self.npda.init_automata(source_tokens.size()[0], source_tokens.device, enc_attn_fn)
 
         step = 0
-        loss = []
+        separate_loss = []
         derivation_loss = []
         valid_derivation_num = 0
         token_stack = TensorBatchStack(source_tokens.size()[0], 1000,
@@ -97,14 +101,22 @@ class Seq2PDA(nn.Module):
             (full_step_symbols,) = self._get_step_gold(step, self.max_expansion_len, rhs_symbols)
             lhs, lhs_mask, grammar_guide, opt_prob, exact_token_logit = self.npda(step_symbols=full_step_symbols)
 
+            src_hx = self.lm.get_hx_with_initial_state(
+                init_state_for_stacked_rnn([self.npda.tree_state], self.lm.rnn.get_layer_num(), "all")
+            )
+
+            z2x_loss = self.lm(source_tokens, src_hx)['loss']
+
             step_symbols, step_p_growth, step_exact_tokens, step_mask = self._get_step_gold(
                 step, grammar_guide.size()[-1], rhs_symbols, parental_growth, rhs_exact_tokens, mask
             )
 
             token_loss, topo_loss = self._compute_loss(grammar_guide, opt_prob, exact_token_logit,
                                                        step_symbols, step_p_growth, step_exact_tokens, step_mask,)
-            derivation_loss.append(_efficiently_optimize([token_loss, topo_loss], optim))
-            loss.append((token_loss.item(), topo_loss.item()))
+            derivation_loss.append(_efficiently_optimize([z2x_loss, token_loss, topo_loss], optim))
+
+            separate_loss.append((z2x_loss.item(), token_loss.item(), topo_loss.item()))
+
             step += 1
             # any valid derivation must expand the RHS starting with a START token, and the mask is set to 1.
             valid_derivation_num += (step_mask.sum(-1) > 0).float().mean()
@@ -112,9 +124,10 @@ class Seq2PDA(nn.Module):
 
             predicted_symbol, predicted_p_growth, predicted_mask = self._infer_topology_greedily(opt_prob, grammar_guide)
             self._arrange_predicted_tokens(token_stack, exact_token_logit, lhs_mask, predicted_p_growth, predicted_mask)
+            self.npda.stop_gradient_for_tree_state()
 
         # compute metrics
-        print(loss)
+        print(separate_loss)
         self._compute_err(token_stack, target_tokens)
         normalized_loss = sum(derivation_loss) / (valid_derivation_num + 1e-15)
         self.loss(normalized_loss)

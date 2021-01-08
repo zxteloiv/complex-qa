@@ -105,7 +105,7 @@ class SeqRNNTSU(TreeStateUpdater):
         return self.forward_with_available_tree(None, seq_states, seq_mask)
 
     def forward_with_available_tree(self, tree_state, seq_states, seq_mask):
-        hx = None if tree_state is None else self._rnn.init_hidden_states(tree_state)
+        hx = None if tree_state is None else self._rnn.init_hidden_states(tree_state)[0]
         rnn_out_list = []
         for i in range(seq_states.size()[-1]):
             hx, out = self._rnn(seq_states[:, :, i], hx)
@@ -113,5 +113,17 @@ class SeqRNNTSU(TreeStateUpdater):
 
         # (batch, seq, hid)
         rnn_out = torch.stack(rnn_out_list, dim=1)
+        # (batch, hid)
         return get_final_encoder_states(rnn_out, seq_mask)
 
+class SingleTimestepTSU(TreeStateUpdater):
+    def __init__(self, rnn_cell: UnifiedRNN):
+        super().__init__()
+        self._rnn= rnn_cell
+
+    def forward_with_empty_tree(self, seq_states, seq_mask):
+        return self.forward_with_available_tree(None, seq_states, seq_mask)
+
+    def forward_with_available_tree(self, tree_state, seq_states, seq_mask):
+        _, out = self._rnn(seq_states[:, :, 0], self._rnn.init_hidden_states(tree_state)[0])
+        return out

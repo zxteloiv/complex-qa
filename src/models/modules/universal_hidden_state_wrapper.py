@@ -59,7 +59,7 @@ class TorchRNNWrapper(UnifiedRNN):
 
         # weight: (batch, total=len(hidden_list) )
         rnn_type = type(self._rnn_cell)
-        if rnn_type in (RNNType.VanillaRNN, RNNType.GRU, IndRNNCell, ):
+        if rnn_type in (RNNType.VanillaRNN.value, RNNType.GRU.value, IndRNNCell, ):
             return self.weighted_sum_single_var(hidden_list, weight)
 
         elif rnn_type == RNNType.LSTM:
@@ -77,7 +77,7 @@ class TorchRNNWrapper(UnifiedRNN):
         initial_context = torch.zeros_like(initial_hidden)
 
         # returns (hidden, output) or ((hidden, context), output)
-        if type(self._rnn_cell) == RNNType.LSTM:
+        if type(self._rnn_cell) == RNNType.LSTM.value:
             return (initial_hidden, initial_context), initial_hidden
         else:
             return initial_hidden, initial_hidden

@@ -46,10 +46,11 @@ def cfq_pda():
     p.num_exact_token_mixture = 1
     p.exact_token_quant_criterion = "projection"
 
-    p.tree_state_policy = "pre_expansion"   # pre_expansion, post_expansion
+    p.tree_state_policy = "post_expansion"   # pre_expansion, post_expansion
+    # pre_expansion only
     p.stack_node_updater = "lstm"   # lstm, gru, typed_rnn
 
-    p.tree_state_updater = "orthogonal_add"   # orthogonal_add, bounded_add, max_add, avg_add
+    p.tree_state_updater = "single_rnn"   # orthogonal_add, bounded_add, max_add, avg_add, single_rnn
     p.tsu_bound = 4.
     p.tsu_num_layers = 1    # valid for lstm
     p.tsu_focus_on_new_symbols = False
@@ -98,6 +99,8 @@ def get_stack_node_updater(p):
 
 def get_tree_state_updater(p):
     from models.neural_pda.tree_state_updater import BoundedAddTSU, OrthogonalAddTSU, MaxPoolingAddTSU, AvgAddTSU
+    from models.neural_pda.tree_state_updater import SingleTimestepTSU
+    from models.modules.sym_typed_rnn_cell import SymTypedRNNCell
     if p.tree_state_updater == "max_add":
         tsu = MaxPoolingAddTSU()
 
@@ -109,6 +112,9 @@ def get_tree_state_updater(p):
 
     elif p.tree_state_updater == "bounded_add":
         tsu = BoundedAddTSU(-p.tsu_bound, p.tsu_bound)
+
+    elif p.tree_state_updater == "single_rnn":
+        tsu = SingleTimestepTSU(SymTypedRNNCell(p.hidden_sz, p.hidden_sz))
 
     else:
         raise NotImplementedError
@@ -124,13 +130,11 @@ def get_model(p, vocab: NSVocabulary):
     from models.modules.stacked_encoder import StackedEncoder
     from models.modules.attention_wrapper import get_wrapped_attention
     from models.modules.quantized_token_predictor import QuantTokenPredictor
-    from models.modules.stacked_rnn_cell import StackedRNNCell
+    from models.modules.stacked_rnn_cell import StackedRNNCell, StackedLSTMCell, RNNType
     from models.modules.sym_typed_rnn_cell import SymTypedRNNCell
     from models.modules.container import MultiInputsSequential
     from models.modules.mixture_softmax import MoSProjection
     from models.modules.attention_composer import ClassicMLPComposer, CatComposer, AddComposer
-    from trialbot.data import START_SYMBOL, PADDING_TOKEN, END_SYMBOL
-    from allennlp.nn.activations import Activation
 
     encoder = StackedEncoder.get_encoder(p)
     emb_src = nn.Embedding(vocab.get_vocab_size(p.src_ns), embedding_dim=p.emb_sz)
@@ -157,7 +161,7 @@ def get_model(p, vocab: NSVocabulary):
         grammar_tutor=get_grammar_tutor(vocab, ns_s),
         rhs_expander=StackedRNNCell(
             [
-                SymTypedRNNCell(input_dim=p.emb_sz + 2 if floor == 0 else p.hidden_sz,
+                SymTypedRNNCell(input_dim=p.emb_sz + 3 if floor == 0 else p.hidden_sz,
                                 output_dim=p.hidden_sz,
                                 nonlinearity="mish")
                 for floor in range(p.num_expander_layer)
@@ -187,11 +191,19 @@ def get_model(p, vocab: NSVocabulary):
                                          use_tanh_activation=p.attn_use_tanh_activation,
                                          )
 
+
+    from models.base_s2s.rnn_lm import RNNModel
     model = Seq2PDA(
         encoder=encoder,
         src_embedding=emb_src,
         enc_attn_net=enc_attn_net,
         npda=npda,
+        src_lm=RNNModel(embedding=emb_src,
+                        rnn=StackedLSTMCell(input_dim=p.emb_sz,
+                                            hidden_dim=p.hidden_sz,
+                                            n_layers=p.num_enc_layers,
+                                            intermediate_dropout=p.dropout,),
+                        prediction=nn.Linear(p.hidden_sz, vocab.get_vocab_size(p.src_ns))),
         max_expansion_len=p.max_expansion_len,
         src_ns=p.src_ns,
         tgt_ns=p.tgt_ns,

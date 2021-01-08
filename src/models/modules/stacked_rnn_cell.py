@@ -31,7 +31,7 @@ class StackedRNNCell(UnifiedRNN):
         last_layer_output = inputs
 
         if input_aux is not None:
-            last_layer_output = filter_cat([last_layer_output] + input_aux, dim=1)
+            last_layer_output = filter_cat([last_layer_output] + input_aux, dim=-1)
 
         if inputs.size()[-1] < self.input_dim and input_aux is None:
             raise ValueError('Dimension not match')
