@@ -126,12 +126,14 @@ class Seq2PDA(nn.Module):
             self._arrange_predicted_tokens(token_stack, exact_token_logit, lhs_mask, predicted_p_growth, predicted_mask)
             self.npda.stop_gradient_for_tree_state()
 
-        # compute metrics
-        print(separate_loss)
-        self._compute_err(token_stack, target_tokens)
+        # print(separate_loss)
+        print(list(sum(l) / (valid_derivation_num + 1e-15) for l in zip(*separate_loss)))
         normalized_loss = sum(derivation_loss) / (valid_derivation_num + 1e-15)
         self.loss(normalized_loss)
         output = {'loss': normalized_loss}
+
+        # compute metrics
+        self._compute_err(token_stack, target_tokens)
         self.npda.reset_automata()
         return output
 

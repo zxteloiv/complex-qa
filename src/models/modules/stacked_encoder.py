@@ -2,6 +2,11 @@ from typing import Optional
 import torch.nn
 
 class StackedEncoder(torch.nn.Module):
+    """
+    Stacked Encoder over a token sequence. The encoder could be either based on RNN or Transformer.
+    The Encoder is usually not used with any initial hidden states.
+    If it is a must, then the RNN_LM from models.base_s2s.rnn_lm may be used instead.
+    """
     def __init__(self, encs,
                  input_size: Optional = None,
                  output_size: Optional = None,
