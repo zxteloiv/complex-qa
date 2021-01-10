@@ -11,6 +11,8 @@ from ..modules.stacked_rnn_cell import StackedRNNCell
 from utils.seq_collector import SeqCollector
 from allennlp.nn.util import min_value_of_dtype, tiny_value_of_dtype
 from .tree_state_updater import TreeStateUpdater
+from .partial_tree_encoder import StackNodeComposer
+from .rule_scorer import RuleScorer
 from utils.nn import init_state_for_stacked_rnn, get_final_encoder_states
 
 from .tensor_typing_util import *
@@ -19,17 +21,17 @@ class NeuralPDA(nn.Module):
     def __init__(self,
                  # modules
                  symbol_embedding: nn.Embedding,
+                 lhs_symbol_mapper,
 
                  grammar_tutor,
                  token_tutor,
                  rhs_expander: StackedRNNCell,
                  stack: TensorBatchStack,
 
-                 tree_state_updater: TreeStateUpdater,
-                 stack_node_composer,
+                 post_tree_updater: TreeStateUpdater,
+                 pre_tree_updater: StackNodeComposer,
 
-                 query_attention_composer: VectorContextComposer,
-                 rule_representation_scorer,
+                 rule_scorer: RuleScorer,
 
                  exact_token_predictor: nn.Module,
 
@@ -45,14 +47,14 @@ class NeuralPDA(nn.Module):
         self._gt = grammar_tutor
         self._tt = token_tutor
         self._embedder = symbol_embedding
+        self._lhs_symbol_mapper = lhs_symbol_mapper
         self._exact_token_predictor = exact_token_predictor
 
-        self._query_attn_comp = query_attention_composer
-        self._tree_state_updater: TreeStateUpdater = tree_state_updater
+        self._post_tree_updater: TreeStateUpdater = post_tree_updater
         self._dropout = nn.Dropout(dropout)
 
-        self._stack_node_composer = stack_node_composer
-        self._rule_scorer = rule_representation_scorer
+        self._pre_tree_updater = pre_tree_updater
+        self._rule_scorer = rule_scorer
 
         # configurations
         self.grammar_entry = grammar_entry
@@ -129,7 +131,7 @@ class NeuralPDA(nn.Module):
         best_choice = self._make_a_topological_choice(opt_prob, step_symbols, grammar_guide)
         chosen_symbols, _, _ = self.retrieve_the_chosen_structure(best_choice, grammar_guide)
 
-        self._update_tree_state(self._retrieve_the_selected_option_repr(best_choice, opt_repr))
+        self._update_tree_state(self._retrieve_the_selected_option_repr(best_choice, opt_repr), lhs_mask)
         exact_token_logit = self._predict_exact_token_after_derivation(chosen_symbols)
 
         return lhs, lhs_mask, grammar_guide, opt_prob, exact_token_logit
@@ -143,10 +145,10 @@ class NeuralPDA(nn.Module):
             symbols, symbol_mask = self._stack.dump()   # mask: (batch, max_cur)
             symbols = symbols.squeeze(-1)               # symbols: (batch, max_cur)
             symbol_emb = self._embedder(symbols)        # symbol_emb: (batch, max_cur, emb_sz)
-            return self._stack_node_composer(symbol_emb, symbol_mask)
+            return self._pre_tree_updater(symbol_emb, symbol_mask)
 
         else:
-            return self._tree_state.detach() if self._tree_state is not None else None
+            return self._tree_state if self._tree_state is not None else None
 
     def _get_topological_choice_distribution(self, lhs, tree_state, grammar_guide):
         """
@@ -158,34 +160,45 @@ class NeuralPDA(nn.Module):
                 (batch, opt_num) choice probabilities,
                 (batch, opt_num, hid) compositional representation of each rule option
         """
-        mem = SeqCollector()
+
+        # opt_repr: (batch, opt_num, hid)
+        # opt_mask: (batch, opt_num)
+        opt_repr, opt_mask = self._get_bare_choice_representation(lhs, grammar_guide)
+
+        # attention computation and compose the context vector with the symbol hidden states
+        query_context = self._query_attn_fn(opt_repr)
+
+        # opt_logit, opt_prob: (batch, opt_num)
+        opt_logit = self._rule_scorer(opt_repr, query_context, tree_state)
+        opt_prob = masked_softmax(opt_logit, opt_mask.bool())
+
+        return opt_prob, opt_repr
+
+    def _get_bare_choice_representation(self, lhs, grammar_guide) -> Tuple[FT, LT]:
         valid_symbols = grammar_guide[:, :, 0]      # valid_symbols: (batch, opt_num, max_seq)
         parental_growth = grammar_guide[:, :, 1]    # p_growth: (batch, opt_num, max_seq)
         fraternal_growth = grammar_guide[:, :, 2]   # f_growth: (batch, opt_num, max_seq)
         batch, opt_num, max_symbol_len = valid_symbols.size()
+        # use lhs as the expander initial hx
+        # lhs_emb: (batch, opt_num, hid)
+        lhs_emb = self._dropout(self._embedder(lhs.unsqueeze(-1).expand(batch, opt_num)))
+        rhs_init_state = self._lhs_symbol_mapper(lhs_emb)
+        hx, _ = self._expander.init_hidden_states(
+            init_state_for_stacked_rnn([rhs_init_state], self._expander.get_layer_num(), "all")
+        )
 
-        hx = None
-        if tree_state is not None:
-            init_state = init_state_for_stacked_rnn([tree_state], self._expander.get_layer_num(), "all")
-            hx, _ = self._expander.init_hidden_states(init_state)
-
-        for step in range(-1, max_symbol_len):
+        mem = SeqCollector()
+        for step in range(0, max_symbol_len):
             # prepare ranking features
-            if step < 0:
-                step_symbol = lhs.unsqueeze(-1).expand(batch, opt_num)
-                step_f_growth = same_as_lhs = step_p_growth = torch.zeros_like(step_symbol).unsqueeze(-1)
-            else:
-                step_symbol = valid_symbols[:, :, step]
-                step_p_growth = parental_growth[:, :, step].unsqueeze(-1)
-                step_f_growth = fraternal_growth[:, :, step].unsqueeze(-1)
-                same_as_lhs = (step_symbol == lhs.unsqueeze(-1)).unsqueeze(-1)
+            step_symbol = valid_symbols[:, :, step]
+            step_p_growth = parental_growth[:, :, step].unsqueeze(-1)
+            step_f_growth = fraternal_growth[:, :, step].unsqueeze(-1)
+            same_as_lhs = (step_symbol == lhs.unsqueeze(-1)).unsqueeze(-1)
 
             emb = self._dropout(self._embedder(step_symbol))  # (batch, opt_num, emb_sz)
             # step_output: (batch, opt_num, hid)
             hx, step_out = self._expander(emb, hx, input_aux=[step_p_growth, step_f_growth, same_as_lhs])
-
-            if step >= 0:
-                mem(step_output=step_out)
+            mem(step_output=step_out)
 
         # rhs_output: (batch, opt_num, max_seq, hid)
         rhs_output = mem.get_stacked_tensor('step_output', dim=-2)
@@ -198,15 +211,8 @@ class NeuralPDA(nn.Module):
             symbol_mask.reshape(batch * opt_num, max_symbol_len)
         ).reshape(batch, opt_num, -1)
 
-        # attention computation and compose the context vector with the symbol hidden states
-        query_context = self._query_attn_fn(opt_repr)
-        opt_repr = self._query_attn_comp(query_context, opt_repr)   # opt_repr: (batch, opt_num, hid)
         opt_mask = symbol_mask.sum(-1) > 0
-
-        # option rule score
-        scores = self._rule_scorer(opt_repr)    # (batch, opt_num, 1)
-        opt_prob = masked_softmax(scores.squeeze(-1), opt_mask) # (batch, opt_num)
-        return opt_prob, opt_repr
+        return opt_repr, opt_mask
 
     def _make_a_topological_choice(self, opt_prob, step_symbols: NullOrLT, grammar_guide: NullOrLT) -> LT:
         """
@@ -245,17 +251,16 @@ class NeuralPDA(nn.Module):
         # argmax is forbidden on bool storage, but max is ok
         return _choice.max(dim=-1)[1]
 
-    def _update_tree_state(self, opt_repr) -> None:
+    def _update_tree_state(self, opt_repr, lhs_mask) -> None:
         """
         :param opt_repr: (batch, hid)
-        :param rhs_mask: (batch, seq)
+        :param lhs_mask: (batch,)
         :return:
         """
         if self.tree_state_policy == "post_expansion":
             # tree_state: (batch, hid)
             ts = self._tree_state
-            batch = opt_repr.size()[0]
-            self._tree_state = self._tree_state_updater(ts, opt_repr.unsqueeze(-1), opt_repr.new_ones(batch, 1))
+            self._tree_state = self._post_tree_updater(ts, opt_repr, lhs_mask)
 
     @property
     def tree_state(self):

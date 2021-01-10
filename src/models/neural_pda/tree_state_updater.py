@@ -7,6 +7,7 @@ from utils.nn import get_final_encoder_states
 class TreeStateUpdater(nn.Module):
     def forward(self, tree_state, seq_states, seq_mask):
         """
+
         :param tree_state: (batch, hid)
         :param seq_states: (batch, hid, seq)
         :param seq_mask: (batch, seq)
@@ -116,14 +117,23 @@ class SeqRNNTSU(TreeStateUpdater):
         # (batch, hid)
         return get_final_encoder_states(rnn_out, seq_mask)
 
+
 class SingleTimestepTSU(TreeStateUpdater):
     def __init__(self, rnn_cell: UnifiedRNN):
         super().__init__()
         self._rnn= rnn_cell
 
-    def forward_with_empty_tree(self, seq_states, seq_mask):
-        return self.forward_with_available_tree(None, seq_states, seq_mask)
+    def forward_with_empty_tree(self, seq_states, lhs_mask):
+        _, new_ts = self._rnn(seq_states[:, :], None)
+        return new_ts
 
-    def forward_with_available_tree(self, tree_state, seq_states, seq_mask):
-        _, out = self._rnn(seq_states[:, :, 0], self._rnn.init_hidden_states(tree_state)[0])
-        return out
+    def forward_with_available_tree(self, tree_state, seq_states, lhs_mask):
+        """
+        :param tree_state: (batch, hid)
+        :param seq_states: (batch, hid)
+        :param lhs_mask: (batch,)
+        :return: an updated tree_state: (batch, hid)
+        """
+        _, new_ts = self._rnn(seq_states[:, :], self._rnn.init_hidden_states(tree_state)[0])
+        mask = lhs_mask.unsqueeze(-1)
+        return new_ts * mask + tree_state * (1 - mask)

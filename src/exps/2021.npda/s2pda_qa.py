@@ -97,7 +97,7 @@ def get_stack_node_updater(p):
 
     return UnifiedRNNNodeComposer(cell)
 
-def get_tree_state_updater(p):
+def get_post_tree_state_updater(p):
     from models.neural_pda.tree_state_updater import BoundedAddTSU, OrthogonalAddTSU, MaxPoolingAddTSU, AvgAddTSU
     from models.neural_pda.tree_state_updater import SingleTimestepTSU
     from models.modules.sym_typed_rnn_cell import SymTypedRNNCell
@@ -127,6 +127,7 @@ def get_model(p, vocab: NSVocabulary):
     from models.neural_pda.seq2pda import Seq2PDA
     from models.neural_pda.npda import NeuralPDA
     from models.neural_pda.batched_stack import TensorBatchStack
+    from models.neural_pda.rule_scorer import MLPScorerWrapper
     from models.modules.stacked_encoder import StackedEncoder
     from models.modules.attention_wrapper import get_wrapped_attention
     from models.modules.quantized_token_predictor import QuantTokenPredictor
@@ -134,7 +135,7 @@ def get_model(p, vocab: NSVocabulary):
     from models.modules.sym_typed_rnn_cell import SymTypedRNNCell
     from models.modules.container import MultiInputsSequential
     from models.modules.mixture_softmax import MoSProjection
-    from models.modules.attention_composer import ClassicMLPComposer, CatComposer, AddComposer
+    from allennlp.nn.activations import Activation
 
     encoder = StackedEncoder.get_encoder(p)
     emb_src = nn.Embedding(vocab.get_vocab_size(p.src_ns), embedding_dim=p.emb_sz)
@@ -158,26 +159,34 @@ def get_model(p, vocab: NSVocabulary):
 
     npda = NeuralPDA(
         symbol_embedding=emb_s,
+        lhs_symbol_mapper=MultiInputsSequential(
+            nn.Linear(p.emb_sz, p.hidden_sz),
+            Activation.by_name('mish')(),
+            nn.Linear(p.hidden_sz, p.hidden_sz),
+            Activation.by_name('tanh')(),
+        ),
         grammar_tutor=get_grammar_tutor(vocab, ns_s),
         rhs_expander=StackedRNNCell(
             [
                 SymTypedRNNCell(input_dim=p.emb_sz + 3 if floor == 0 else p.hidden_sz,
                                 output_dim=p.hidden_sz,
-                                nonlinearity="mish")
+                                nonlinearity="tanh")
                 for floor in range(p.num_expander_layer)
             ],
             p.emb_sz, p.hidden_sz, p.num_expander_layer, intermediate_dropout=p.dropout
         ),
         stack=TensorBatchStack(p.batch_sz, p.max_derivation_step, item_size=1, dtype=torch.long),
-        query_attention_composer=MultiInputsSequential(
-            ClassicMLPComposer(encoder.get_output_dim(), p.hidden_sz, p.hidden_sz, use_tanh=False),
-            nn.Hardtanh()
-        ),
-        rule_representation_scorer=nn.Linear(p.hidden_sz, 1),
+        rule_scorer=MLPScorerWrapper(MultiInputsSequential(
+            nn.Linear(encoder.get_output_dim() + p.hidden_sz * 2, p.hidden_sz),
+            Activation.by_name('tanh')(),
+            nn.Linear(p.hidden_sz, 1),
+        )),
         exact_token_predictor=exact_token_predictor,
         token_tutor=get_exact_token_tutor(vocab, p.tgt_ns[0], p.tgt_ns[1]),
-        tree_state_updater=get_tree_state_updater(p),
-        stack_node_composer=get_stack_node_updater(p),
+
+        post_tree_updater=get_post_tree_state_updater(p),
+        pre_tree_updater=get_stack_node_updater(p),
+
         grammar_entry=vocab.get_token_index(p.grammar_entry, ns_s),
         max_derivation_step=p.max_derivation_step,
         dropout=p.dropout,
