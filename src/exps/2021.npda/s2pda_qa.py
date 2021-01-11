@@ -46,7 +46,7 @@ def cfq_pda():
     p.num_exact_token_mixture = 1
     p.exact_token_quant_criterion = "projection"
 
-    p.tree_state_policy = "post_expansion"   # pre_expansion, post_expansion
+    p.tree_state_policy = "pre_expansion"   # pre_expansion, post_expansion
     # pre_expansion only
     p.stack_node_updater = "lstm"   # lstm, gru, typed_rnn
 
@@ -81,22 +81,6 @@ def get_exact_token_tutor(vocab, ns_symbol, ns_exact_token):
     ett = ExactTokenTutor(vocab.get_vocab_size(ns_symbol), vocab.get_vocab_size(ns_exact_token), valid_token_lookup)
     return ett
 
-def get_stack_node_updater(p):
-    from models.neural_pda.partial_tree_encoder import UnifiedRNNNodeComposer
-    from models.modules.universal_hidden_state_wrapper import TorchRNNWrapper
-    from models.modules.sym_typed_rnn_cell import SymTypedRNNCell
-    from torch import nn
-    if p.stack_node_updater == "lstm":
-        cell = TorchRNNWrapper(nn.LSTMCell(p.emb_sz, p.hidden_sz))
-    elif p.stack_node_updater == "typed_rnn":
-        cell = SymTypedRNNCell(p.emb_sz, p.hidden_sz)
-    elif p.stack_node_updater == "gru":
-        cell = TorchRNNWrapper(nn.GRUCell(p.emb_sz, p.hidden_sz))
-    else:
-        raise NotImplementedError
-
-    return UnifiedRNNNodeComposer(cell)
-
 def get_post_tree_state_updater(p):
     from models.neural_pda.tree_state_updater import BoundedAddTSU, OrthogonalAddTSU, MaxPoolingAddTSU, AvgAddTSU
     from models.neural_pda.tree_state_updater import SingleTimestepTSU
@@ -127,6 +111,8 @@ def get_model(p, vocab: NSVocabulary):
     from models.neural_pda.seq2pda import Seq2PDA
     from models.neural_pda.npda import NeuralPDA
     from models.neural_pda.batched_stack import TensorBatchStack
+    from models.neural_pda.partial_tree_encoder import TopDownLSTMEncoder
+    from models.transformer.multi_head_attention import MultiHeadSelfAttention
     from models.neural_pda.rule_scorer import MLPScorerWrapper
     from models.modules.stacked_encoder import StackedEncoder
     from models.modules.attention_wrapper import get_wrapped_attention
@@ -175,7 +161,6 @@ def get_model(p, vocab: NSVocabulary):
             ],
             p.emb_sz, p.hidden_sz, p.num_expander_layer, intermediate_dropout=p.dropout
         ),
-        stack=TensorBatchStack(p.batch_sz, p.max_derivation_step, item_size=1, dtype=torch.long),
         rule_scorer=MLPScorerWrapper(MultiInputsSequential(
             nn.Linear(encoder.get_output_dim() + p.hidden_sz * 2, p.hidden_sz),
             Activation.by_name('tanh')(),
@@ -185,7 +170,8 @@ def get_model(p, vocab: NSVocabulary):
         token_tutor=get_exact_token_tutor(vocab, p.tgt_ns[0], p.tgt_ns[1]),
 
         post_tree_updater=get_post_tree_state_updater(p),
-        pre_tree_updater=get_stack_node_updater(p),
+        pre_tree_updater=TopDownLSTMEncoder(p.emb_sz, p.hidden_sz, p.hidden_sz // 2),
+        pre_tree_self_attn=MultiHeadSelfAttention(p.num_heads, p.hidden_sz, p.hidden_sz, p.hidden_sz, 0.,),
 
         grammar_entry=vocab.get_token_index(p.grammar_entry, ns_s),
         max_derivation_step=p.max_derivation_step,
@@ -201,18 +187,11 @@ def get_model(p, vocab: NSVocabulary):
                                          )
 
 
-    from models.base_s2s.rnn_lm import RNNModel
     model = Seq2PDA(
         encoder=encoder,
         src_embedding=emb_src,
         enc_attn_net=enc_attn_net,
         npda=npda,
-        src_lm=RNNModel(embedding=emb_src,
-                        rnn=StackedLSTMCell(input_dim=p.emb_sz,
-                                            hidden_dim=p.hidden_sz,
-                                            n_layers=p.num_enc_layers,
-                                            intermediate_dropout=p.dropout,),
-                        prediction=nn.Linear(p.hidden_sz, vocab.get_vocab_size(p.src_ns))),
         max_expansion_len=p.max_expansion_len,
         src_ns=p.src_ns,
         tgt_ns=p.tgt_ns,

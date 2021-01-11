@@ -11,9 +11,11 @@ from ..modules.stacked_rnn_cell import StackedRNNCell
 from utils.seq_collector import SeqCollector
 from allennlp.nn.util import min_value_of_dtype, tiny_value_of_dtype
 from .tree_state_updater import TreeStateUpdater
-from .partial_tree_encoder import StackNodeComposer
+from .partial_tree_encoder import TopDownTreeEncoder
+from .tree import Tree
 from .rule_scorer import RuleScorer
 from utils.nn import init_state_for_stacked_rnn, get_final_encoder_states
+from ..transformer.multi_head_attention import MultiHeadSelfAttention
 
 from .tensor_typing_util import *
 
@@ -26,10 +28,10 @@ class NeuralPDA(nn.Module):
                  grammar_tutor,
                  token_tutor,
                  rhs_expander: StackedRNNCell,
-                 stack: TensorBatchStack,
 
                  post_tree_updater: TreeStateUpdater,
-                 pre_tree_updater: StackNodeComposer,
+                 pre_tree_updater: TopDownTreeEncoder,
+                 pre_tree_self_attn: Nullable[MultiHeadSelfAttention],
 
                  rule_scorer: RuleScorer,
 
@@ -43,7 +45,6 @@ class NeuralPDA(nn.Module):
                  ):
         super().__init__()
         self._expander = rhs_expander
-        self._stack = stack
         self._gt = grammar_tutor
         self._tt = token_tutor
         self._embedder = symbol_embedding
@@ -54,28 +55,43 @@ class NeuralPDA(nn.Module):
         self._dropout = nn.Dropout(dropout)
 
         self._pre_tree_updater = pre_tree_updater
+        self._pre_tree_self_attn = pre_tree_self_attn
         self._rule_scorer = rule_scorer
 
+        # -------------------
         # configurations
         self.grammar_entry = grammar_entry
         self.max_derivation_step = max_derivation_step  # a very large upper limit for the runtime storage
 
         self.tree_state_policy = tree_state_policy
 
+        # -------------------
         # the helpful storage for runtime forwarding
         self._query_attn_fn = None
-        self._tree_state = None
+        self._post_tree_state = None
         self._derivation_step = 0
+        # the stack contains information about both the node position and the node token value
+        self._stack: Optional[TensorBatchStack] = None
+        self._partial_tree: Optional[Tree] = None
 
     def init_automata(self, batch_sz: int, device: torch.device, query_attn_fn: Callable):
+        # init tree
+        self._partial_tree = Tree(batch_sz, self.max_derivation_step * 5, 1, device=device)
+
+        root_id = torch.zeros((batch_sz, 1), device=device).long()
+        root_val = torch.full((batch_sz, 1), fill_value=self.grammar_entry, device=device).long()
+        self._partial_tree.init_root(root_val)
+
+        root_item = torch.cat([root_id, root_val], dim=-1)
+
         # init stack
-        self._stack.reset(batch_sz, device)
-        start = torch.full((batch_sz, 1), fill_value=self.grammar_entry, device=device).long()
-        self._stack.push(start, push_mask=torch.ones((batch_sz,), device=device, dtype=torch.long))
+        self._stack = TensorBatchStack(batch_sz, self.max_derivation_step, 2, dtype=torch.long, device=device)
+        self._stack.push(root_item, push_mask=None)
+
         # init derivation counter
         self._derivation_step = 0
         # init tree state
-        self._tree_state = None
+        self._post_tree_state = None
         # since the automata independently runs for every batch, the query attention is also initialized every batch.
         self._query_attn_fn = query_attn_fn
 
@@ -92,7 +108,7 @@ class NeuralPDA(nn.Module):
         # init derivation counter
         self._derivation_step = 0
         # init tree state
-        self._tree_state = None
+        self._post_tree_state = None
         self._query_attn_fn = None
 
     def forward(self, token_based=False, **kwargs):
@@ -115,10 +131,10 @@ class NeuralPDA(nn.Module):
             topo_preds: Tuple[(batch, max_seq) * 4] ;
             exact_token_p: [(batch, max_seq, V)]
         """
-        # lhs, lhs_mask: (batch,)
+        # lhs_idx, lhs, lhs_mask: (batch,)
         # tree_state: (batch, hidden)
-        lhs, lhs_mask = self._select_node()
-        tree_state = self._encode_partial_tree()
+        tree_state = self._encode_partial_tree()    # tree encoding must precede the lhs popping
+        lhs_idx, lhs, lhs_mask = self._select_node()
 
         # grammar_guide: (batch, opt_num, 4, max_seq)
         grammar_guide = self._gt(lhs)
@@ -132,23 +148,47 @@ class NeuralPDA(nn.Module):
         chosen_symbols, _, _ = self.retrieve_the_chosen_structure(best_choice, grammar_guide)
 
         self._update_tree_state(self._retrieve_the_selected_option_repr(best_choice, opt_repr), lhs_mask)
-        exact_token_logit = self._predict_exact_token_after_derivation(chosen_symbols)
+        exact_token_logit = self._predict_exact_token_after_derivation(chosen_symbols, tree_state)
 
-        return lhs, lhs_mask, grammar_guide, opt_prob, exact_token_logit
-
-    def _select_node(self) -> Tuple[LT, LT]:
-        node, success = self._stack.pop()
-        return node.squeeze(-1).long(), success
+        return lhs_idx, lhs_mask, grammar_guide, opt_prob, exact_token_logit
 
     def _encode_partial_tree(self):
         if self.tree_state_policy == "pre_expansion":
-            symbols, symbol_mask = self._stack.dump()   # mask: (batch, max_cur)
-            symbols = symbols.squeeze(-1)               # symbols: (batch, max_cur)
-            symbol_emb = self._embedder(symbols)        # symbol_emb: (batch, max_cur, emb_sz)
-            return self._pre_tree_updater(symbol_emb, symbol_mask)
+            # node_val: (batch, node_num, node_val_dim)
+            # node_parent, node_mask: (batch, node_num)
+            node_val, node_parent, node_mask = self._partial_tree.dump_partial_tree()
+            node_val = node_val.squeeze(-1)
+
+            # node_emb: (batch, node_num, emb_sz)
+            node_emb = self._embedder(node_val)
+
+            # tree_hidden: (batch, node_num, hidden_sz)
+            tree_hidden = self._pre_tree_updater(node_emb, node_parent, node_mask)
+
+            # leaf_mask should be consistent with node_mask
+            # leaf_mask: (batch, leaf_num)
+            # leaf_pos: (batch, leaf_num)
+            leaves, leaf_mask = self._stack.dump()
+            leaf_pos = leaves[:, :, 0]
+
+            # leaf_hid: (batch, leaf_num, hid)
+            batch_index = torch.arange(self._stack.max_batch_size, device=leaves.device).long()
+            leaf_hid = tree_hidden[batch_index.unsqueeze(-1), leaf_pos]
+
+            if self._pre_tree_self_attn is not None:
+                leaf_hid, _ = self._pre_tree_self_attn(leaf_hid, leaf_mask)
+
+            # the last leaf is the next LHS that will be popped out
+            return get_final_encoder_states(leaf_hid, leaf_mask)
 
         else:
-            return self._tree_state if self._tree_state is not None else None
+            return self._post_tree_state if self._post_tree_state is not None else None
+
+    def _select_node(self) -> Tuple[LT, LT, LT]:
+        node, success = self._stack.pop()
+        node_idx = node[:, 0]
+        node_val = node[:, 1]
+        return node_idx, node_val, success
 
     def _get_topological_choice_distribution(self, lhs, tree_state, grammar_guide):
         """
@@ -259,18 +299,14 @@ class NeuralPDA(nn.Module):
         """
         if self.tree_state_policy == "post_expansion":
             # tree_state: (batch, hid)
-            ts = self._tree_state
-            self._tree_state = self._post_tree_updater(ts, opt_repr, lhs_mask)
-
-    @property
-    def tree_state(self):
-        return self._tree_state
+            ts = self._post_tree_state
+            self._post_tree_state = self._post_tree_updater(ts, opt_repr, lhs_mask)
 
     def stop_gradient_for_tree_state(self):
-        if self._tree_state is not None:
-            self._tree_state = self._tree_state.detach()
+        if self._post_tree_state is not None:
+            self._post_tree_state = self._post_tree_state.detach()
 
-    def _predict_exact_token_after_derivation(self, symbols: LT) -> FT:
+    def _predict_exact_token_after_derivation(self, symbols: LT, tree_state) -> FT:
         # symbols: (batch, expansion_len)
         expansion_len = symbols.size()[-1]
 
@@ -280,17 +316,18 @@ class NeuralPDA(nn.Module):
         # symbol_emb: (batch, *, emb)
         symbol_emb = self._dropout(self._embedder(symbols))
         # tree_state: (batch, expansion_len, hid) <- (batch, 1, hid) <- (batch, hid)
-        tree_state = self._encode_partial_tree().unsqueeze(1).expand(-1, expansion_len, -1)
+        tree_state = tree_state.unsqueeze(1).expand(-1, expansion_len, -1)
         proj_inp = torch.cat([symbol_emb, tree_state], dim=-1)
         # exact_logit: (batch, *, V)
         exact_logit = self._exact_token_predictor(proj_inp)
         exact_logit = exact_logit + (compliant_weights + tiny_value_of_dtype(exact_logit.dtype)).log()
         return exact_logit
 
-    def push_predictions_onto_stack(self, symbol: LT, p_growth: LT, symbol_mask: LT, lhs_mask: NullOrLT):
+    def update_pda_with_predictions(self, parent_idx: LT, symbol: LT, p_growth: LT, symbol_mask: LT, lhs_mask: NullOrLT):
         """
         Iterate the symbols backwards and push them onto the stack based on topological information.
 
+        :param parent_idx: (batch,)
         :param symbol: (batch, max_seq)
         :param p_growth: (batch, max_seq), 1 if the symbol is a non-terminal and will grow a subtree, 0 otherwise.
         :param symbol_mask: (batch, max_seq)
@@ -302,7 +339,13 @@ class NeuralPDA(nn.Module):
             if lhs_mask is not None:
                 push_mask *= lhs_mask
             assert push_mask.ndim == 1
-            self._stack.push(symbol[:, step].unsqueeze(-1), push_mask.long())
+            step_symbol = symbol[:, step].unsqueeze(-1)
+            push_mask = push_mask.long()
+
+            # node_idx, succ: (batch,)
+            node_idx, succ = self._partial_tree.add_new_node_edge(step_symbol, parent_idx, push_mask)
+            stack_item = torch.cat([node_idx.unsqueeze(-1), step_symbol], dim=-1)
+            self._stack.push(stack_item, (push_mask * succ).long())
 
     @staticmethod
     def retrieve_the_chosen_structure(choice, grammar_guide) -> T3L:

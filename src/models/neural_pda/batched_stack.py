@@ -166,9 +166,9 @@ class TensorBatchStack(BatchStack, DumpBatchStack):
                 (1) if successful (either pushed or retained), (0) if max_stack_size is exceeded.
         """
         batch_sz = data.size()[0]
+        assert data.dtype == self._storage.dtype
         assert push_mask is None or push_mask.size()[0] == batch_sz
-        push_mask = torch.tensor([1.], device=data.device) if push_mask is None else push_mask
-        push_mask = push_mask.long()
+        push_mask = torch.tensor([1], device=data.device).long() if push_mask is None else push_mask
         # force the incoming batch size equal to the storage,
         # such that no slicing is required and the implementation is easier.
         assert batch_sz == self.max_batch_size
@@ -209,7 +209,7 @@ class TensorBatchStack(BatchStack, DumpBatchStack):
 
         device = self._storage.device
         if default_item is None:
-            default_item = torch.zeros((self.max_batch_size, self.item_size), device=device)
+            default_item = torch.zeros((self.max_batch_size, self.item_size), device=device, dtype=self.dtype)
 
         # succ, top_idx: (batch,)
         succ = ((self._top_cur >= 0) * (self._top_cur < self.max_stack_size)).long()
