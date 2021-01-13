@@ -72,19 +72,23 @@ class MidOrderTraversalField(Field):
         super().__init__()
         self.tree_key = tree_key
         self.namespaces = list(namespaces) or ('symbols', 'exact_token')
-        self.output_keys = output_keys or (
-            'rhs_symbols', 'parental_growth', 'rhs_exact_tokens', 'mask', 'target_tokens'
-        )
         self.padding = padding
         self.max_derivation_symbols = max_derivation_symbols
         self.grammar_token_generation = grammar_token_generation
+        self.output_keys = output_keys or (
+            'tree_nodes',           # (batch, n_d), the tree nodes, i.e., all the expanded lhs
+            'node_parents',         # (batch, n_d),
+            'expansion_frontiers',  # (batch, n_d, max_runtime_stack_size),
+            'derivations',          # (batch, n_d, max_seq), the gold derivations, actually num_derivations = num_lhs
+            'exact_tokens',         # (batch, n_d, max_seq),
+            'target_tokens',        # (batch, tgt_len),
+        )
 
     def batch_tensor_by_key(self, tensors_by_keys: Mapping[str, List[torch.Tensor]]) -> Mapping[str, torch.Tensor]:
         output = dict()
         for k in self.output_keys:
             tensor_list = tensors_by_keys[k]
-            batched = pad_sequence(tensor_list, batch_first=True, padding_value=self.padding)
-            output[k] = batched
+            output[k] = self._nested_list_numbers_to_tensors(tensor_list)
         return output
 
     def generate_namespace_tokens(self, example) -> Generator[Tuple[str, str], None, None]:
@@ -105,38 +109,100 @@ class MidOrderTraversalField(Field):
         Tree, Token = lark.Tree, lark.Token
         tree: Tree = example.get(self.tree_key)
         assert tree is not None
+        # to get the symbol_id and the exact_token id from a token string
+        s_id = lambda t: self.vocab.get_token_index(t, self.namespaces[0])
+        et_id = lambda t: self.vocab.get_token_index(t, self.namespaces[1])
 
-        tokid = self.vocab.get_token_index
-        ns_s, ns_et = self.namespaces
+        tree_nodes = []
+        node_parent = []
+        frontiers = []
+        derivations = []
+        exact_tokens = []
+        target_tokens = []
 
-        left_most_derivation = defaultdict(list)
-        for subtree in tree.iter_subtrees_topdown():
-            children: List[Union[Tree, Token]] = subtree.children
+        # pre-assign an ID, otherwise the system won't work
+        # IDs are allocated in the left-most derivation order
+        _id = 0
+        def _assign_id_to_tree(t: Tree):
+            nonlocal _id
+            t.id = _id
+            _id += 1
+            for c in t.children:
+                if isinstance(c, Tree):
+                    _assign_id_to_tree(c)
 
-            rhs_symbol, rhs_exact_token, parental_growth = [tokid(START_SYMBOL, ns_s)], [tokid(START_SYMBOL, ns_et)], [0]
-            for s in children:
-                rhs_symbol.append(tokid(s.data, ns_s) if isinstance(s, Tree) else tokid(s.type, ns_s))
-                rhs_exact_token.append(tokid(s.value.lower(), ns_et) if isinstance(s, Token) else self.padding)
-                parental_growth.append(1 if isinstance(s, Tree) else 0)
+        _assign_id_to_tree(tree)
 
-            mask = [1] * len(rhs_symbol)
+        # traverse again the tree
+        op_stack: List[Tuple[int, Tree]] = [(0, tree)]
+        while len(op_stack) > 0:
+            stack_node_ids = [t.id for _, t in op_stack]
 
-            if len(rhs_symbol) < self.max_derivation_symbols:
-                padding_seq = [self.padding] * (self.max_derivation_symbols - len(rhs_symbol))
-                rhs_symbol.extend(padding_seq)
-                rhs_exact_token.extend(padding_seq)
-                parental_growth.extend(padding_seq)
-                mask.extend(padding_seq)
+            parent_id, node = op_stack.pop()
+            tree_nodes.append(s_id(node.data))
+            node_parent.append(parent_id)
 
-            for k, l in zip(self.output_keys[:-1], (rhs_symbol, parental_growth, rhs_exact_token, mask)):
-                left_most_derivation[k].extend(l)
+            children: List[Union[Tree, Token]] = node.children
+            _expansion = [s_id(START_SYMBOL)] + [s_id(s.data) if isinstance(s, Tree) else s_id(s.type) for s in children]
+            _etokens = [et_id(START_SYMBOL)] + [et_id(s.value.lower()) if isinstance(s, Token) else self.padding for s in children]
+            derivations.append(_expansion)
+            exact_tokens.append(_etokens)
+            target_tokens.extend(list(filter(lambda t: t != self.padding, _etokens)))
+            frontiers.append(stack_node_ids)
 
-        target_tokens = list(filter(lambda x: x not in (self.padding,), left_most_derivation[self.output_keys[-3]]))
+            for c in reversed(children):
+                if isinstance(c, Tree):
+                    op_stack.append((node.id, c))
 
-        output = dict()
-        for k, l in left_most_derivation.items():
-            output[k] = torch.tensor(l)
+        output = dict(zip(self.output_keys, (
+            tree_nodes,
+            node_parent,
+            frontiers,
+            derivations,
+            exact_tokens,
+            target_tokens
+        )))
 
-        output[self.output_keys[-1]] = torch.tensor(target_tokens)
         return output
+
+    @staticmethod
+    def _nested_list_numbers_to_tensors(nested: list, padding=0, example=None):
+        """Turn a list of list of list of list ... of integers to a tensor with the given padding"""
+        ndim_max = defaultdict(lambda: 0)
+
+        def _count_nested_max(nested, depth):
+            if not isinstance(nested, list):
+                return
+
+            ndim_max[depth] = max(ndim_max[depth], len(nested))
+            for x in nested:
+                _count_nested_max(x, depth + 1)
+
+        _count_nested_max(nested, 0)
+        ndim_max = [ndim_max[d] for d in sorted(ndim_max.keys())]
+
+        def _get_padding_at_depth(depth):
+            size = ndim_max[depth:]
+            lump = padding
+            for i in reversed(size):
+                lump = [lump] * i
+            return lump
+
+        def _pad_nested(nested, depth):
+            if not isinstance(nested, list):
+                return nested
+
+            if len(nested) < ndim_max[depth]:
+                nested = nested + [_get_padding_at_depth(depth + 1)] * (ndim_max[depth] - len(nested))
+
+            return [_pad_nested(x, depth + 1) for x in nested]
+
+        full_fledged = _pad_nested(nested, 0)
+        dev = dtype = None
+        if example is not None:
+            dev = example.device
+            dtype = example.dtype
+
+        return torch.tensor(full_fledged, device=dev, dtype=dtype)
+
 

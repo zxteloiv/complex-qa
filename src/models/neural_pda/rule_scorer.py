@@ -25,12 +25,12 @@ class MLPScorerWrapper(RuleScorer):
         self._module = module
 
     def forward(self, rule_option: FT, query_context: FT, tree_state: NullOrFT) -> FT:
-        # transform tree state to the appropriate size
-        # and squeeze the linear mapping of the module, which usually has a top layer with output dim=1 for logits
-        if tree_state is not None:
-            ts = tree_state.unsqueeze(1).expand_as(rule_option)
-        else:
-            ts = torch.zeros_like(rule_option)
+        # the tree state and query context should have similar size prefix as the rule_option,
+        # except for the option dimension.
+        opt_num = rule_option.size()[-2]
 
-        inp = torch.cat([rule_option, query_context, ts], dim=-1)
+        expand_fn = lambda t: t.unsqueeze(-2).expand(*t.size()[:-1], opt_num, t.size()[-1])
+        tree_state, query_context = list(map(expand_fn, (tree_state, query_context)))
+
+        inp = torch.cat([rule_option, query_context, tree_state], dim=-1)
         return self._module(inp).squeeze(-1)

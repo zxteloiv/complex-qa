@@ -61,7 +61,9 @@ class GeneralMultiHeadAttention(torch.nn.Module):
     def forward(self,
                 input: torch.Tensor,
                 attend_over: torch.Tensor,
-                attend_mask: Optional[torch.LongTensor] = None) -> Tuple[torch.Tensor, torch.Tensor]:
+                attend_mask: Optional[torch.LongTensor] = None,
+                structural_mask: Optional[torch.LongTensor] = None,
+                ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Do a multi-head attention for _input_ tokens over the _attend_over_ tokens.
         _attend_mask_ is used to wipe out padded tokens in the corresponding sequences.
@@ -69,6 +71,8 @@ class GeneralMultiHeadAttention(torch.nn.Module):
         :param input: (batch, max_input_length, input_dim)
         :param attend_over: (batch, max_attend_length, attend_dim)
         :param attend_mask: (batch, max_attend_length), used to blind out padded tokens
+        :param structural_mask: (batch, max_input_length, max_attend_length),
+            to constrain attentions between valid tokens which reflects the structure of two sequence
         :return: Tuple of context vector and attention vector:
                    context: (batch, max_input_length, output_dim)
                  attention: (batch, max_input_length, num_heads, max_attend_length)
@@ -106,7 +110,7 @@ class GeneralMultiHeadAttention(torch.nn.Module):
         values, queries = map(lambda x: x.permute(0, 2, 1, 3), [values, queries])
 
         # attn: (batch, num_heads, max_input_len, max_attend_length)
-        attn = self.dot_attention(queries, keys, attend_mask)
+        attn = self.dot_attention(queries, keys, attend_mask, structural_mask)
 
         # context_by_heads: (batch, num_heads, max_input_len, value_dim)
         context_by_heads = torch.matmul(attn, values)
@@ -125,13 +129,17 @@ class GeneralMultiHeadAttention(torch.nn.Module):
     def dot_attention(self,
                       queries: torch.Tensor,
                       keys: torch.Tensor,
-                      attend_mask: Optional[torch.Tensor]) -> torch.Tensor:
+                      attend_mask: Optional[torch.Tensor],
+                      structural_mask: Optional[torch.Tensor],
+                      ) -> torch.Tensor:
         """
         Doing Dot Attention for multi-heads simultaneously
 
         :param queries: (batch, num_heads, max_input_len,  key_dim)
         :param keys: (batch, num_heads, key_dim, max_attend_len)
         :param attend_mask: (batch, max_attend_length), used to blind out padded tokens
+        :param structural_mask: (batch, max_input_len, max_attend_len),
+            to constrain attentions between valid tokens which reflects the structure of two sequence
         :return:
         """
         # similarity: (batch, num_heads, max_input_len, max_attend_len)
@@ -154,6 +162,10 @@ class GeneralMultiHeadAttention(torch.nn.Module):
             # (batch, 1, max_input_len, max_attend_len)
             attend_mask = attend_mask * mask if attend_mask is not None else mask
 
+        if structural_mask is not None:
+            # (batch, 1, max_input_len, max_attend_len)
+            structural_mask = structural_mask.unsqueeze(1)
+            attend_mask = attend_mask * structural_mask if attend_mask is not None else structural_mask
 
         # attn: (batch, num_heads, max_input_len, max_attend_length)
         attn = masked_softmax(similarity, mask=attend_mask, dim=-1)
@@ -189,8 +201,10 @@ class MultiHeadSelfAttention(torch.nn.Module):
             temperature=temperature
         )
 
-    def forward(self, input: torch.Tensor, mask: Optional[torch.Tensor] = None):
-        return self.self_attention(input=input, attend_over=input, attend_mask=mask)
+    def forward(self, input: torch.Tensor,
+                mask: Optional[torch.Tensor] = None,
+                structural_mask: Optional[torch.Tensor] = None):
+        return self.self_attention(input=input, attend_over=input, attend_mask=mask, structural_mask=structural_mask)
 
 
 class MaskedMultiHeadSelfAttention(torch.nn.Module):
@@ -220,8 +234,10 @@ class MaskedMultiHeadSelfAttention(torch.nn.Module):
             temperature=temperature
         )
 
-    def forward(self, input: torch.Tensor, mask: Optional[torch.Tensor] = None):
-        return self.self_attention(input=input, attend_over=input, attend_mask=mask)
+    def forward(self, input: torch.Tensor,
+                mask: Optional[torch.Tensor] = None,
+                structural_mask: Optional[torch.Tensor] = None):
+        return self.self_attention(input=input, attend_over=input, attend_mask=mask, structural_mask=structural_mask)
 
 
 class MultiHeadAttention(torch.nn.Module):

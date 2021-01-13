@@ -12,26 +12,33 @@ class GrammarTutorForGeneration(nn.Module):
 
         rule_sample = next(iter(padded_rhs_dict.values()))
         # (vocab, max_count, 4, max_seq)
-        self._g = nn.Parameter(torch.zeros(vocab_size, *rule_sample.size()), requires_grad=False)
+        self._g = nn.Parameter(torch.zeros(vocab_size, *rule_sample.size(), dtype=torch.long), requires_grad=False)
         for lhs_id, rhs_tensor in padded_rhs_dict.items():
             self._g[lhs_id] = rhs_tensor
 
     def forward(self, lhs: torch.Tensor) -> torch.LongTensor:
         """
-        :param lhs: (batch,) the LHS id batch
-        :return: (batch, max_count, 4, max_seq),
+        :param lhs: (batch, *) the LHS id batch
+        :return: (batch, *, max_count, 4, max_seq),
                 the 4 sequences are symbols, parental_growth, fraternal_growth, and mask, respectively.
         """
-        # motto: (batch, max_count, 4, max_seq)
+        size_pref = lhs.size()
+
+        # motto: (batch, *, max_count, 4, max_seq)
         motto = self._g[lhs].long()
 
-        # mask: (batch, max_count, max_seq)
-        mask = motto[:, :, -1, :]
+        # motto_rs: (-1, max_count, 4, max_seq)
+        motto_rs = motto.reshape(-1, *motto.size()[-3:])
+
+        # mask: (-1, max_count, max_seq)
+        mask = motto_rs[:, :, -1, :]
 
         # clip the rules if all the companion rules with the same indices w.r.t to any LHS in the batch
         # has been entirely masked (no RHS symbols)
-        # clipped_motto: (batch, valid_masks, 4, valid_seq)
-        v_clipped_motto = motto[:, :, :, mask.sum([0, 1]) > 0]
+        # clipped_motto: (-1, valid_masks, 4, valid_seq)
+        v_clipped_motto = motto_rs[:, :, :, mask.sum([0, 1]) > 0]
         clipped_motto = v_clipped_motto[:, mask.sum([0, 2]) > 0, :, :]
+
+        clipped_motto = clipped_motto.reshape(*size_pref, *clipped_motto.size()[-3:])
         return clipped_motto
 

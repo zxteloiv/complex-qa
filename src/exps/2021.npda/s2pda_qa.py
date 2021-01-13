@@ -20,7 +20,7 @@ def cfq_pda():
     p = HyperParamSet.common_settings(ROOT)
     p.TRAINING_LIMIT = 5
     p.OPTIM = "RAdam"
-    p.batch_sz = 64
+    p.batch_sz = 32
     p.weight_decay = .2
 
     p.src_ns = 'questionPatternModEntities'
@@ -31,7 +31,7 @@ def cfq_pda():
     p.encoder = "bilstm"
     p.emb_sz = 128
     p.hidden_sz = 128
-    p.num_heads = 8
+    p.num_heads = 4
     p.attn_use_linear = False
     p.attn_use_bias = False
     p.attn_use_tanh_activation = False
@@ -81,36 +81,10 @@ def get_exact_token_tutor(vocab, ns_symbol, ns_exact_token):
     ett = ExactTokenTutor(vocab.get_vocab_size(ns_symbol), vocab.get_vocab_size(ns_exact_token), valid_token_lookup)
     return ett
 
-def get_post_tree_state_updater(p):
-    from models.neural_pda.tree_state_updater import BoundedAddTSU, OrthogonalAddTSU, MaxPoolingAddTSU, AvgAddTSU
-    from models.neural_pda.tree_state_updater import SingleTimestepTSU
-    from models.modules.sym_typed_rnn_cell import SymTypedRNNCell
-    if p.tree_state_updater == "max_add":
-        tsu = MaxPoolingAddTSU()
-
-    elif p.tree_state_updater == "avg_add":
-        tsu = AvgAddTSU()
-
-    elif p.tree_state_updater == "orthogonal_add":
-        tsu = OrthogonalAddTSU(-p.tsu_bound, p.tsu_bound, p.tsu_focus_on_new_symbols)
-
-    elif p.tree_state_updater == "bounded_add":
-        tsu = BoundedAddTSU(-p.tsu_bound, p.tsu_bound)
-
-    elif p.tree_state_updater == "single_rnn":
-        tsu = SingleTimestepTSU(SymTypedRNNCell(p.hidden_sz, p.hidden_sz))
-
-    else:
-        raise NotImplementedError
-
-    return tsu
-
 def get_model(p, vocab: NSVocabulary):
-    import torch
     from torch import nn
     from models.neural_pda.seq2pda import Seq2PDA
     from models.neural_pda.npda import NeuralPDA
-    from models.neural_pda.batched_stack import TensorBatchStack
     from models.neural_pda.partial_tree_encoder import TopDownLSTMEncoder
     from models.transformer.multi_head_attention import MultiHeadSelfAttention
     from models.neural_pda.rule_scorer import MLPScorerWrapper
@@ -146,9 +120,10 @@ def get_model(p, vocab: NSVocabulary):
     npda = NeuralPDA(
         symbol_embedding=emb_s,
         lhs_symbol_mapper=MultiInputsSequential(
-            nn.Linear(p.emb_sz, p.hidden_sz),
+            nn.Linear(p.emb_sz, p.hidden_sz // 2),
+            nn.Dropout(p.dropout),
             Activation.by_name('mish')(),
-            nn.Linear(p.hidden_sz, p.hidden_sz),
+            nn.Linear(p.hidden_sz // 2, p.hidden_sz),
             Activation.by_name('tanh')(),
         ),
         grammar_tutor=get_grammar_tutor(vocab, ns_s),
@@ -163,13 +138,13 @@ def get_model(p, vocab: NSVocabulary):
         ),
         rule_scorer=MLPScorerWrapper(MultiInputsSequential(
             nn.Linear(encoder.get_output_dim() + p.hidden_sz * 2, p.hidden_sz),
+            nn.Dropout(p.dropout),
             Activation.by_name('tanh')(),
             nn.Linear(p.hidden_sz, 1),
         )),
         exact_token_predictor=exact_token_predictor,
         token_tutor=get_exact_token_tutor(vocab, p.tgt_ns[0], p.tgt_ns[1]),
 
-        post_tree_updater=get_post_tree_state_updater(p),
         pre_tree_updater=TopDownLSTMEncoder(p.emb_sz, p.hidden_sz, p.hidden_sz // 2),
         pre_tree_self_attn=MultiHeadSelfAttention(p.num_heads, p.hidden_sz, p.hidden_sz, p.hidden_sz, 0.,),
 
@@ -199,25 +174,6 @@ def get_model(p, vocab: NSVocabulary):
     )
 
     return model
-
-class Seq2PDATrainingUpdater(TrainingUpdater):
-    def update_epoch(self):
-        model, optim, iterator = self._models[0], self._optims[0], self._iterators[0]
-
-        if iterator.is_new_epoch:
-            self.stop_epoch()
-
-        device = self._device
-        model.train()
-        optim.zero_grad()
-        batch  = next(iterator)
-
-        if device >= 0:
-            batch = move_to_device(batch, device)
-
-        output = model(optim=optim, **batch)
-
-        return output
 
 def main():
     from utils.trialbot_setup import setup
@@ -267,8 +223,6 @@ def main():
         if args.debug:
             from utils.trial_bot_extensions import track_pytorch_module_forward_time
             bot.add_event_handler(Events.STARTED, track_pytorch_module_forward_time, 100)
-
-        bot.updater = Seq2PDATrainingUpdater.from_bot(bot)
 
     else:
         bot.add_event_handler(Events.ITERATION_COMPLETED, prediction_analysis, 100)
