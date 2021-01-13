@@ -134,7 +134,7 @@ if __name__ == '__main__':
     enc = TopDownLSTMEncoder(300, 128, 64)
     x = torch.randn(32, 1000, 300)
     conn = torch.ones(32, 1000).long().cumsum(dim=-1) - 2
-    y = enc.forward(x, conn)
+    y = enc.forward(x, conn, None)
     print(y.size())
     loss = y.sum()
     loss.backward()

@@ -18,17 +18,17 @@ def cfq_pda():
     from utils.root_finder import find_root
     ROOT = find_root()
     p = HyperParamSet.common_settings(ROOT)
-    p.TRAINING_LIMIT = 5
+    p.TRAINING_LIMIT = 100
     p.OPTIM = "RAdam"
     p.batch_sz = 32
-    p.weight_decay = .2
+    p.weight_decay = .02
 
     p.src_ns = 'questionPatternModEntities'
     p.tgt_ns = datasets.cfq_translator.UNIFIED_TREE_NS
 
-    p.enc_attn = "generalized_bilinear"
+    p.enc_attn = "generalized_dot_product"
     # transformer requires input embedding equal to hidden size
-    p.encoder = "bilstm"
+    p.encoder = "transformer"
     p.emb_sz = 128
     p.hidden_sz = 128
     p.num_heads = 4
@@ -38,22 +38,13 @@ def cfq_pda():
     p.num_enc_layers = 2
     p.dropout = .2
     p.num_expander_layer = 2
-    p.max_derivation_step = 500
+    p.max_derivation_step = 200
     p.max_expansion_len = 11
     p.grammar_entry = "queryunit"
 
     p.exact_token_predictor = "quant" # linear, mos, quant
     p.num_exact_token_mixture = 1
     p.exact_token_quant_criterion = "projection"
-
-    p.tree_state_policy = "pre_expansion"   # pre_expansion, post_expansion
-    # pre_expansion only
-    p.stack_node_updater = "lstm"   # lstm, gru, typed_rnn
-
-    p.tree_state_updater = "single_rnn"   # orthogonal_add, bounded_add, max_add, avg_add, single_rnn
-    p.tsu_bound = 4.
-    p.tsu_num_layers = 1    # valid for lstm
-    p.tsu_focus_on_new_symbols = False
 
     return p
 
@@ -122,9 +113,8 @@ def get_model(p, vocab: NSVocabulary):
         lhs_symbol_mapper=MultiInputsSequential(
             nn.Linear(p.emb_sz, p.hidden_sz // 2),
             nn.Dropout(p.dropout),
-            Activation.by_name('mish')(),
             nn.Linear(p.hidden_sz // 2, p.hidden_sz),
-            Activation.by_name('tanh')(),
+            nn.Tanh(),
         ),
         grammar_tutor=get_grammar_tutor(vocab, ns_s),
         rhs_expander=StackedRNNCell(
@@ -151,7 +141,6 @@ def get_model(p, vocab: NSVocabulary):
         grammar_entry=vocab.get_token_index(p.grammar_entry, ns_s),
         max_derivation_step=p.max_derivation_step,
         dropout=p.dropout,
-        tree_state_policy=p.tree_state_policy,
     )
 
     enc_attn_net = get_wrapped_attention(p.enc_attn, p.hidden_sz, encoder.get_output_dim(),
@@ -199,7 +188,7 @@ def main():
         from utils.trial_bot_extensions import evaluation_on_dev_every_epoch
         from utils.trial_bot_extensions import save_model_every_num_iters
         from utils.trial_bot_extensions import collect_garbage, print_hyperparameters
-        bot.add_event_handler(Events.EPOCH_COMPLETED, evaluation_on_dev_every_epoch, 90)
+        # bot.add_event_handler(Events.EPOCH_COMPLETED, evaluation_on_dev_every_epoch, 90)
         bot.add_event_handler(Events.STARTED, print_hyperparameters, 100)
         bot.add_event_handler(Events.ITERATION_COMPLETED, end_with_nan_loss, 100)
         bot.add_event_handler(Events.EPOCH_COMPLETED, every_epoch_model_saver, 100)

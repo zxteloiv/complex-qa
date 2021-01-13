@@ -10,7 +10,6 @@ from ..interfaces.unified_rnn import UnifiedRNN
 from ..modules.stacked_rnn_cell import StackedRNNCell
 from utils.seq_collector import SeqCollector
 from allennlp.nn.util import min_value_of_dtype, tiny_value_of_dtype
-from .tree_state_updater import TreeStateUpdater
 from .partial_tree_encoder import TopDownTreeEncoder
 from .tree import Tree
 from .rule_scorer import RuleScorer
@@ -41,7 +40,6 @@ class NeuralPDA(nn.Module):
                  grammar_entry: int,
                  max_derivation_step: int = 1000,
                  dropout: float = 0.2,
-                 tree_state_policy: Literal["pre_expansion", "post_expansion"] = "post_expansion",
                  ):
         super().__init__()
         self._expander = rhs_expander
@@ -61,8 +59,6 @@ class NeuralPDA(nn.Module):
         # configurations
         self.grammar_entry = grammar_entry
         self.max_derivation_step = max_derivation_step  # a very large upper limit for the runtime storage
-
-        self.tree_state_policy = tree_state_policy
 
         # -------------------
         # the helpful storage for runtime forwarding
