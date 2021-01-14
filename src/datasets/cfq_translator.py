@@ -3,7 +3,7 @@ from trialbot.data import Translator, START_SYMBOL, END_SYMBOL, PADDING_TOKEN
 from utils.sparql_tokenizer import split_sparql
 from .field import FieldAwareTranslator
 from .seq_field import SeqField
-from .cfq_fields import MidOrderTraversalField, GrammarPatternSeqField, GrammarModEntSeqField
+from .cfq_fields import MidOrderTraversalField, GrammarPatternSeqField, GrammarModEntSeqField, TutorBuilderField
 
 @Registry.translator('cfq_seq_mod_ent_qa')
 class CFQSeq(FieldAwareTranslator):
@@ -47,3 +47,9 @@ class CFQFlatDerivations(FieldAwareTranslator):
                                    )
         ])
 
+class CFQTutorBuilder(FieldAwareTranslator):
+    def __init__(self):
+        super().__init__(field_list=[
+            TutorBuilderField(tree_key='sparqlPatternModEntities_tree',
+                              ns=UNIFIED_TREE_NS)
+        ])

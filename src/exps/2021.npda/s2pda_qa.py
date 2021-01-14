@@ -6,8 +6,6 @@ from collections import defaultdict
 
 from trialbot.training import TrialBot, Registry
 from trialbot.data import NSVocabulary
-from trialbot.training.updater import TrainingUpdater, TestingUpdater
-from trialbot.utils.move_to_device import move_to_device
 
 import datasets.cfq
 import datasets.cfq_translator
@@ -22,6 +20,8 @@ def cfq_pda():
     p.OPTIM = "RAdam"
     p.batch_sz = 32
     p.weight_decay = .02
+
+    p.tutor_usage = "from_dataset" # from_grammar, from_dataset
 
     p.src_ns = 'questionPatternModEntities'
     p.tgt_ns = datasets.cfq_translator.UNIFIED_TREE_NS
@@ -44,22 +44,24 @@ def cfq_pda():
 
     p.exact_token_predictor = "quant" # linear, mos, quant
     p.num_exact_token_mixture = 1
-    p.exact_token_quant_criterion = "projection"
+    p.exact_token_quant_criterion = "dot_product"
 
     return p
 
-def get_grammar_tutor(vocab, ns_symbol):
-    from models.neural_pda.grammar_tutor import GrammarTutorForGeneration
+def get_grammar_tutor(p, vocab):
+    ns_symbol, ns_exact_token = p.tgt_ns
+    import torch
+    from models.neural_pda.grammar_tutor import GrammarTutor
     from datasets.lark_translator import UnifiedLarkTranslator
     grammar_dataset, _, _ = datasets.cfq.sparql_pattern_grammar()
     grammar_translator = UnifiedLarkTranslator(datasets.cfq_translator.UNIFIED_TREE_NS)
     grammar_translator.index_with_vocab(vocab)
     rule_list = [grammar_translator.to_tensor(r) for r in grammar_dataset]
-    rule_repr = grammar_translator.batch_tensor(rule_list)
-    gt = GrammarTutorForGeneration(vocab.get_vocab_size(ns_symbol), {int(k): v for k, v in rule_repr.items()})
-    return gt
+    rule_batch = grammar_translator.batch_tensor(rule_list)
+    ordered_lhs, ordered_rhs = list(zip(*rule_batch.items()))
+    ordered_rhs = torch.stack(ordered_rhs)
+    gt = GrammarTutor(vocab.get_vocab_size(ns_symbol), ordered_lhs, ordered_rhs)
 
-def get_exact_token_tutor(vocab, ns_symbol, ns_exact_token):
     from datasets.lark_translator import LarkExactTokenReader
     from models.neural_pda.token_tutor import ExactTokenTutor
     reader = LarkExactTokenReader(vocab=vocab, ns=(ns_symbol, ns_exact_token))
@@ -70,7 +72,41 @@ def get_exact_token_tutor(vocab, ns_symbol, ns_exact_token):
             pair_set.add(p)
     valid_token_lookup = reader.merge_the_pairs(pair_set)
     ett = ExactTokenTutor(vocab.get_vocab_size(ns_symbol), vocab.get_vocab_size(ns_exact_token), valid_token_lookup)
-    return ett
+
+    return ett, gt
+
+def get_cfq_tailored_tutor(p, vocab):
+    from datasets.cfq_translator import CFQTutorBuilder
+    from tqdm import tqdm
+    import pickle
+    from models.neural_pda.token_tutor import ExactTokenTutor
+    from models.neural_pda.grammar_tutor import GrammarTutor
+    from utils.preprocessing import nested_list_numbers_to_tensors
+
+    tutor_dump_name = os.path.join(datasets.cfq.CFQ_PATH, 'tutors.pkl')
+    if os.path.exists(tutor_dump_name):
+        logging.getLogger(__name__).info(f"Use the existing tutor dump... {tutor_dump_name}")
+        tutor_repr = pickle.load(open(tutor_dump_name, 'rb'))
+    else:
+        logging.getLogger(__name__).info(f"Build the tutor dump for the first time...")
+
+        builder = CFQTutorBuilder()
+        builder.index_with_vocab(vocab)
+        train_set, _, _ = datasets.cfq.cfq_mcd1()
+        tutor_repr = builder.batch_tensor([builder.to_tensor(example) for example in tqdm(train_set)])
+        logging.getLogger(__name__).info(f"Dump the tutor information... {tutor_dump_name}")
+        pickle.dump(tutor_repr, open(tutor_dump_name, 'wb'))
+
+    token_map: defaultdict
+    grammar_map: defaultdict
+    token_map, grammar_map = map(tutor_repr.get, ('token_map', 'grammar_map'))
+    ns_s, ns_et = p.tgt_ns
+    ett = ExactTokenTutor(vocab.get_vocab_size(ns_s), vocab.get_vocab_size(ns_et), token_map, False)
+
+    ordered_lhs, ordered_rhs_options = list(zip(*grammar_map.items()))
+    ordered_rhs_options = nested_list_numbers_to_tensors(ordered_rhs_options)
+    gt = GrammarTutor(vocab.get_vocab_size(ns_s), ordered_lhs, ordered_rhs_options)
+    return ett, gt
 
 def get_model(p, vocab: NSVocabulary):
     from torch import nn
@@ -108,6 +144,11 @@ def get_model(p, vocab: NSVocabulary):
             p.num_exact_token_mixture, p.hidden_sz + p.emb_sz, vocab.get_vocab_size(ns_et),
         )
 
+    if p.tutor_usage == "from_grammar":
+        ett, gt = get_grammar_tutor(p, vocab)
+    else:
+        ett, gt = get_cfq_tailored_tutor(p, vocab)
+
     npda = NeuralPDA(
         symbol_embedding=emb_s,
         lhs_symbol_mapper=MultiInputsSequential(
@@ -116,7 +157,7 @@ def get_model(p, vocab: NSVocabulary):
             nn.Linear(p.hidden_sz // 2, p.hidden_sz),
             nn.Tanh(),
         ),
-        grammar_tutor=get_grammar_tutor(vocab, ns_s),
+        grammar_tutor=gt,
         rhs_expander=StackedRNNCell(
             [
                 SymTypedRNNCell(input_dim=p.emb_sz + 3 if floor == 0 else p.hidden_sz,
@@ -133,7 +174,7 @@ def get_model(p, vocab: NSVocabulary):
             nn.Linear(p.hidden_sz, 1),
         )),
         exact_token_predictor=exact_token_predictor,
-        token_tutor=get_exact_token_tutor(vocab, p.tgt_ns[0], p.tgt_ns[1]),
+        token_tutor=ett,
 
         pre_tree_updater=TopDownLSTMEncoder(p.emb_sz, p.hidden_sz, p.hidden_sz // 2),
         pre_tree_self_attn=MultiHeadSelfAttention(p.num_heads, p.hidden_sz, p.hidden_sz, p.hidden_sz, 0.,),

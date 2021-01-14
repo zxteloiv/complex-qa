@@ -2,19 +2,22 @@ from typing import Tuple, Dict, List
 import torch
 from torch import nn
 
-class GrammarTutorForGeneration(nn.Module):
-    def __init__(self, vocab_size, padded_rhs_dict: Dict[int, torch.Tensor]):
+class GrammarTutor(nn.Module):
+    def __init__(self, vocab_size, lhs_indexing, padded_rhs_options: torch.Tensor):
         """
         :param vocab_size: int
-        :param padded_rhs_dict: {lhs_id: (max_count, 4, max_seq)}
+        :param lhs_indexing: [int] * lhs_num
+        :param padded_rhs_options: (lhs_num, max_count, 4, max_seq)
         """
         super().__init__()
 
-        rule_sample = next(iter(padded_rhs_dict.values()))
         # (vocab, max_count, 4, max_seq)
-        self._g = nn.Parameter(torch.zeros(vocab_size, *rule_sample.size(), dtype=torch.long), requires_grad=False)
-        for lhs_id, rhs_tensor in padded_rhs_dict.items():
-            self._g[lhs_id] = rhs_tensor
+        g = torch.zeros(vocab_size, *padded_rhs_options.size()[1:], dtype=torch.long)
+        for lhs_id, rhs_tensor in zip(lhs_indexing, padded_rhs_options):
+            g[lhs_id] = rhs_tensor
+
+        # use the parameter wrapper such that the module will be move to cuda together with the model
+        self._g = nn.Parameter(g, requires_grad=False)
 
     def forward(self, lhs: torch.Tensor) -> torch.LongTensor:
         """
@@ -25,7 +28,7 @@ class GrammarTutorForGeneration(nn.Module):
         size_pref = lhs.size()
 
         # motto: (batch, *, max_count, 4, max_seq)
-        motto = self._g[lhs].long()
+        motto = self._g[lhs]
 
         # motto_rs: (-1, max_count, 4, max_seq)
         motto_rs = motto.reshape(-1, *motto.size()[-3:])

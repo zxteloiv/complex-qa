@@ -1,4 +1,4 @@
-from typing import List, Mapping, Generator, Tuple, Optional, Any, Literal, Iterable, Union
+from typing import List, Mapping, Generator, Tuple, Optional, Any, Literal, Iterable, Union, DefaultDict
 from collections import defaultdict
 import torch
 from torch.nn.utils.rnn import pad_sequence
@@ -6,6 +6,8 @@ from .field import FieldAwareTranslator, Field
 from .seq_field import SeqField
 import lark
 from trialbot.data import START_SYMBOL
+from utils.preprocessing import nested_list_numbers_to_tensors
+_Tree, _Token = lark.Tree, lark.Token
 
 class GrammarPatternSeqField(SeqField):
     @classmethod
@@ -60,7 +62,6 @@ class GrammarModEntSeqField(GrammarPatternSeqField):
         else:
             return tok
 
-
 class MidOrderTraversalField(Field):
     def __init__(self, tree_key: str,
                  namespaces: Iterable[str],
@@ -88,7 +89,7 @@ class MidOrderTraversalField(Field):
         output = dict()
         for k in self.output_keys:
             tensor_list = tensors_by_keys[k]
-            output[k] = self._nested_list_numbers_to_tensors(tensor_list)
+            output[k] = nested_list_numbers_to_tensors(tensor_list)
         return output
 
     def generate_namespace_tokens(self, example) -> Generator[Tuple[str, str], None, None]:
@@ -165,44 +166,55 @@ class MidOrderTraversalField(Field):
 
         return output
 
-    @staticmethod
-    def _nested_list_numbers_to_tensors(nested: list, padding=0, example=None):
-        """Turn a list of list of list of list ... of integers to a tensor with the given padding"""
-        ndim_max = defaultdict(lambda: 0)
+class TutorBuilderField(Field):
+    def __init__(self, tree_key: str, ns: Tuple[str, str]):
+        super().__init__()
+        self.tree_key = tree_key
+        self.ns = ns
 
-        def _count_nested_max(nested, depth):
-            if not isinstance(nested, list):
-                return
+    def batch_tensor_by_key(self, tensors_by_keys: Mapping[str, List[DefaultDict]]) -> Mapping[str, DefaultDict]:
+        token_map = defaultdict(set)
+        for m in tensors_by_keys['token_map']:
+            for symbol, tokens in m.items():
+                token_map[symbol].update(tokens)
 
-            ndim_max[depth] = max(ndim_max[depth], len(nested))
-            for x in nested:
-                _count_nested_max(x, depth + 1)
+        grammar_map = defaultdict(set)
+        for m in tensors_by_keys['grammar_map']:
+            for lhs, rhs_list in m.items():
+                grammar_map[lhs].update(rhs_list)
 
-        _count_nested_max(nested, 0)
-        ndim_max = [ndim_max[d] for d in sorted(ndim_max.keys())]
+        return {"token_map": token_map, "grammar_map": grammar_map}
 
-        def _get_padding_at_depth(depth):
-            size = ndim_max[depth:]
-            lump = padding
-            for i in reversed(size):
-                lump = [lump] * i
-            return lump
+    def to_tensor(self, example) -> Mapping[str, DefaultDict[int, list]]:
+        tree: _Tree = example.get(self.tree_key)
+        token_map = defaultdict(set)
+        for k, v in self._generate_exact_token_mapping(tree):
+            token_map[k].add(v)
 
-        def _pad_nested(nested, depth):
-            if not isinstance(nested, list):
-                return nested
+        grammar_map = defaultdict(set)
+        for lhs, grammar in self._traverse_tree_for_derivations(tree):
+            grammar_map[lhs].add(grammar)
 
-            if len(nested) < ndim_max[depth]:
-                nested = nested + [_get_padding_at_depth(depth + 1)] * (ndim_max[depth] - len(nested))
+        return {"token_map": token_map, "grammar_map": grammar_map}
 
-            return [_pad_nested(x, depth + 1) for x in nested]
+    def _generate_exact_token_mapping(self, tree: _Tree):
+        s_id = lambda t: self.vocab.get_token_index(t, self.ns[0])
+        et_id = lambda t: self.vocab.get_token_index(t, self.ns[1])
+        for subtree in tree.iter_subtrees_topdown():
+            for s in subtree.children:
+                if isinstance(s, _Token):
+                    yield s_id(s.type), et_id(s.value.lower())
 
-        full_fledged = _pad_nested(nested, 0)
-        dev = dtype = None
-        if example is not None:
-            dev = example.device
-            dtype = example.dtype
-
-        return torch.tensor(full_fledged, device=dev, dtype=dtype)
-
-
+    def _traverse_tree_for_derivations(self, tree: _Tree):
+        is_tree = lambda s: isinstance(s, _Tree)
+        s_id = lambda t: self.vocab.get_token_index(t, self.ns[0])
+        for subtree in tree.iter_subtrees_topdown():
+            children: List[Union[_Tree, _Token]] = subtree.children
+            lhs = s_id(subtree.data)
+            rhs = [s_id(START_SYMBOL)] + [s_id(s.data) if is_tree(s) else s_id(s.type) for s in children]
+            p_growth = [0] + [1 if is_tree(s) else 0 for s in children]
+            f_growth = [1] * (len(rhs) - 1) + [0]
+            mask = [1] * len(rhs)
+            grammar = [rhs, p_growth, f_growth, mask]
+            grammar = tuple(map(tuple, grammar))
+            yield lhs, grammar

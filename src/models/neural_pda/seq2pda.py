@@ -131,7 +131,8 @@ class Seq2PDA(nn.Module):
                            target_tokens,  # (batch, max_tgt_len)
                            ):
         enc_attn_fn = self._encode_source(source_tokens)
-        self.npda.init_automata(source_tokens.size()[0], source_tokens.device, enc_attn_fn)
+        self.npda.init_automata(source_tokens.size()[0], source_tokens.device, enc_attn_fn,
+                                max_derivation_step=tree_nodes.size()[-1])
 
         batch_sz = source_tokens.size()[0]
         token_stack = TensorBatchStack(batch_sz, 1000, item_size=1, dtype=torch.long, device=source_tokens.device)

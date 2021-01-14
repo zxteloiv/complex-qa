@@ -63,13 +63,13 @@ class NeuralPDA(nn.Module):
         # -------------------
         # the helpful storage for runtime forwarding
         self._query_attn_fn = None
-        self._post_tree_state = None
         self._derivation_step = 0
         # the stack contains information about both the node position and the node token value
         self._stack: Optional[TensorBatchStack] = None
         self._partial_tree: Optional[Tree] = None
 
-    def init_automata(self, batch_sz: int, device: torch.device, query_attn_fn: Callable):
+    def init_automata(self, batch_sz: int, device: torch.device, query_attn_fn: Callable,
+                      max_derivation_step: int = 0):
         # init tree
         self._partial_tree = Tree(batch_sz, self.max_derivation_step * 5, 1, device=device)
 
@@ -86,9 +86,11 @@ class NeuralPDA(nn.Module):
         # init derivation counter
         self._derivation_step = 0
         # init tree state
-        self._post_tree_state = None
         # since the automata independently runs for every batch, the query attention is also initialized every batch.
         self._query_attn_fn = query_attn_fn
+
+        if max_derivation_step > 0:
+            self.max_derivation_step = max_derivation_step + 1
 
     def continue_derivation(self):
         if self._derivation_step >= self.max_derivation_step:
@@ -103,7 +105,6 @@ class NeuralPDA(nn.Module):
         # init derivation counter
         self._derivation_step = 0
         # init tree state
-        self._post_tree_state = None
         self._query_attn_fn = None
 
     def forward(self, token_based=False, **kwargs):
@@ -186,36 +187,32 @@ class NeuralPDA(nn.Module):
         return lhs_idx, lhs_mask, grammar_guide, opt_prob, exact_token_logit
 
     def _encode_partial_tree(self):
-        if self.tree_state_policy == "pre_expansion":
-            # node_val: (batch, node_num, node_val_dim)
-            # node_parent, node_mask: (batch, node_num)
-            node_val, node_parent, node_mask = self._partial_tree.dump_partial_tree()
-            node_val = node_val.squeeze(-1)
+        # node_val: (batch, node_num, node_val_dim)
+        # node_parent, node_mask: (batch, node_num)
+        node_val, node_parent, node_mask = self._partial_tree.dump_partial_tree()
+        node_val = node_val.squeeze(-1)
 
-            # node_emb: (batch, node_num, emb_sz)
-            node_emb = self._embedder(node_val)
+        # node_emb: (batch, node_num, emb_sz)
+        node_emb = self._embedder(node_val)
 
-            # tree_hidden: (batch, node_num, hidden_sz)
-            tree_hidden = self._pre_tree_updater(node_emb, node_parent, node_mask)
+        # tree_hidden: (batch, node_num, hidden_sz)
+        tree_hidden = self._pre_tree_updater(node_emb, node_parent, node_mask)
 
-            # leaf_mask should be consistent with node_mask
-            # leaf_mask: (batch, leaf_num)
-            # leaf_pos: (batch, leaf_num)
-            leaves, leaf_mask = self._stack.dump()
-            leaf_pos = leaves[:, :, 0]
+        # leaf_mask should be consistent with node_mask
+        # leaf_mask: (batch, leaf_num)
+        # leaf_pos: (batch, leaf_num)
+        leaves, leaf_mask = self._stack.dump()
+        leaf_pos = leaves[:, :, 0]
 
-            # leaf_hid: (batch, leaf_num, hid)
-            batch_index = torch.arange(self._stack.max_batch_size, device=leaves.device).long()
-            leaf_hid = tree_hidden[batch_index.unsqueeze(-1), leaf_pos]
+        # leaf_hid: (batch, leaf_num, hid)
+        batch_index = torch.arange(self._stack.max_batch_size, device=leaves.device).long()
+        leaf_hid = tree_hidden[batch_index.unsqueeze(-1), leaf_pos]
 
-            if self._pre_tree_self_attn is not None:
-                leaf_hid, _ = self._pre_tree_self_attn(leaf_hid, leaf_mask)
+        if self._pre_tree_self_attn is not None:
+            leaf_hid, _ = self._pre_tree_self_attn(leaf_hid, leaf_mask)
 
-            # the last leaf is the next LHS that will be popped out
-            return get_final_encoder_states(leaf_hid, leaf_mask)
-
-        else:
-            return self._post_tree_state if self._post_tree_state is not None else None
+        # the last leaf is the next LHS that will be popped out
+        return get_final_encoder_states(leaf_hid, leaf_mask)
 
     def _select_node(self) -> Tuple[LT, LT, LT]:
         node, success = self._stack.pop()
@@ -332,14 +329,15 @@ class NeuralPDA(nn.Module):
         :return:
         """
         # compliant_weights: (batch, *, max_seq, V)
-        compliant_weights = self._tt(symbols)
+        compliant_weights = self._tt(symbols).bool()
 
         # symbol_emb: (batch, *, max_seq, emb)
         symbol_emb = self._dropout(self._embedder(symbols))
         proj_inp = torch.cat([symbol_emb, expanded_ts], dim=-1)
         # exact_logit: (batch, *, V)
         exact_logit = self._exact_token_predictor(proj_inp)
-        exact_logit = exact_logit + (compliant_weights + tiny_value_of_dtype(exact_logit.dtype)).log()
+        # exact_logit = exact_logit + (compliant_weights + tiny_value_of_dtype(exact_logit.dtype)).log()
+        exact_logit = exact_logit.masked_fill(~compliant_weights, min_value_of_dtype(exact_logit.dtype))
         return exact_logit
 
     def update_pda_with_predictions(self, parent_idx: LT, symbol: LT, p_growth: LT, symbol_mask: LT, lhs_mask: NullOrLT):
