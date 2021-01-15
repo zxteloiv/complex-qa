@@ -200,6 +200,7 @@ class TutorBuilderField(Field):
     def _generate_exact_token_mapping(self, tree: _Tree):
         s_id = lambda t: self.vocab.get_token_index(t, self.ns[0])
         et_id = lambda t: self.vocab.get_token_index(t, self.ns[1])
+        yield s_id(START_SYMBOL), et_id(START_SYMBOL)
         for subtree in tree.iter_subtrees_topdown():
             for s in subtree.children:
                 if isinstance(s, _Token):

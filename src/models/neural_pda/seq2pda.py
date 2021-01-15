@@ -37,7 +37,6 @@ class Seq2PDA(nn.Module):
                  npda: NeuralPDA,
 
                  # configuration
-                 max_expansion_len: int,
                  src_ns: str,
                  tgt_ns: List[str],
                  vocab,
@@ -52,7 +51,6 @@ class Seq2PDA(nn.Module):
         self.topo_loss = Average()
         self.err = Average()
         self.tok_pad = 0
-        self.max_expansion_len = max_expansion_len
         self.src_ns = src_ns
         self.tgt_ns = tgt_ns
         self.logger = logging.getLogger(self.__class__.__name__)
@@ -101,11 +99,12 @@ class Seq2PDA(nn.Module):
         # tree_mask, nll: (batch, n_d)
         tree_mask = (tree_nodes != self.tok_pad).long()
         nll = -(opt_prob + 1e-15).log().gather(dim=-1, index=choice.unsqueeze(-1)).squeeze(-1)
-        topo_loss = ((nll * tree_mask).sum(-1) / (tree_mask.sum(-1) + 1e-15)).mean()
+        # use a token-level loss such that the tokens in a long sequence won't get discounted
+        topo_loss = (nll * tree_mask).sum() / (tree_mask.sum() + 1e-15)
 
         # ------------- 2. training the exact token prediction ------------
         _, et_mask = prepare_input_mask(exact_tokens)
-        token_loss = seq_cross_ent(exact_logit, exact_tokens, et_mask)
+        token_loss = seq_cross_ent(exact_logit, exact_tokens, et_mask, average="token")
 
         # ================
 

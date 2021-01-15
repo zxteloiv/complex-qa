@@ -28,7 +28,7 @@ def cfq_pda():
 
     p.enc_attn = "generalized_dot_product"
     # transformer requires input embedding equal to hidden size
-    p.encoder = "transformer"
+    p.encoder = "lstm"
     p.emb_sz = 128
     p.hidden_sz = 128
     p.num_heads = 4
@@ -197,7 +197,6 @@ def get_model(p, vocab: NSVocabulary):
         src_embedding=emb_src,
         enc_attn_net=enc_attn_net,
         npda=npda,
-        max_expansion_len=p.max_expansion_len,
         src_ns=p.src_ns,
         tgt_ns=p.tgt_ns,
         vocab=vocab,
