@@ -99,12 +99,22 @@ class Seq2PDA(nn.Module):
         # tree_mask, nll: (batch, n_d)
         tree_mask = (tree_nodes != self.tok_pad).long()
         nll = -(opt_prob + 1e-15).log().gather(dim=-1, index=choice.unsqueeze(-1)).squeeze(-1)
-        # use a token-level loss such that the tokens in a long sequence won't get discounted
-        topo_loss = (nll * tree_mask).sum() / (tree_mask.sum() + 1e-15)
+        # use a sensitive loss such that the grad won't get discounted by the factor of 0-loss items
+        # topo_loss = (nll * tree_mask).sum() / (tree_mask.sum() + 1e-15)
+        topo_loss = (nll * tree_mask).sum() / source_tokens.size()[0]
 
         # ------------- 2. training the exact token prediction ------------
         _, et_mask = prepare_input_mask(exact_tokens)
-        token_loss = seq_cross_ent(exact_logit, exact_tokens, et_mask, average="token")
+        tok_nll = -(exact_logit + 1e-15).log().gather(dim=-1, index=exact_tokens.unsqueeze(-1)).squeeze(-1)
+        # token_loss = seq_cross_ent(exact_logit, exact_tokens, et_mask, average="token")
+        token_loss = (tok_nll * et_mask).sum() / source_tokens.size()[0]
+
+        # ------------- 3. error metric computation -------------
+        # *_err: (batch,)
+        topo_err = ((opt_prob.argmax(dim=-1) != choice) * tree_mask).sum(dim=-1)
+        token_err = ((exact_logit.argmax(dim=-1) != exact_tokens) * et_mask).sum([1, 2])
+        for e1, e2 in zip(topo_err, token_err):
+            self.err(1. if e1 + e2 > 0 else 0.)
 
         # ================
 
