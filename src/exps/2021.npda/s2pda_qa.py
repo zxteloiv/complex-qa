@@ -232,7 +232,6 @@ def main():
         bot.add_event_handler(Events.STARTED, print_hyperparameters, 100)
         bot.add_event_handler(Events.ITERATION_COMPLETED, end_with_nan_loss, 100)
         bot.add_event_handler(Events.EPOCH_COMPLETED, every_epoch_model_saver, 100)
-        bot.add_event_handler(Events.ITERATION_COMPLETED, save_model_every_num_iters, 100, interval=100)
         bot.add_event_handler(Events.ITERATION_COMPLETED, collect_garbage, 80)
         bot.add_event_handler(Events.EPOCH_COMPLETED, collect_garbage, 80)
 

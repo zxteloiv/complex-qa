@@ -1,6 +1,7 @@
 from typing import Optional, Tuple, Generic, List
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from models.modules.stacked_encoder import StackedEncoder
 from allennlp.training.metrics.perplexity import Perplexity, Average
 from utils.nn import prepare_input_mask, seq_cross_ent, init_state_for_stacked_rnn
@@ -101,13 +102,13 @@ class Seq2PDA(nn.Module):
         nll = -(opt_prob + 1e-15).log().gather(dim=-1, index=choice.unsqueeze(-1)).squeeze(-1)
         # use a sensitive loss such that the grad won't get discounted by the factor of 0-loss items
         # topo_loss = (nll * tree_mask).sum() / (tree_mask.sum() + 1e-15)
-        topo_loss = (nll * tree_mask).sum() / source_tokens.size()[0]
+        topo_loss = (nll * tree_mask).sum() / (10 * source_tokens.size()[0])
 
         # ------------- 2. training the exact token prediction ------------
         _, et_mask = prepare_input_mask(exact_tokens)
-        tok_nll = -(exact_logit + 1e-15).log().gather(dim=-1, index=exact_tokens.unsqueeze(-1)).squeeze(-1)
+        tok_nll = -F.log_softmax(exact_logit, dim=-1).gather(dim=-1, index=exact_tokens.unsqueeze(-1)).squeeze(-1)
         # token_loss = seq_cross_ent(exact_logit, exact_tokens, et_mask, average="token")
-        token_loss = (tok_nll * et_mask).sum() / source_tokens.size()[0]
+        token_loss = (tok_nll * et_mask).sum() / (10 * source_tokens.size()[0])
 
         # ------------- 3. error metric computation -------------
         # *_err: (batch,)
