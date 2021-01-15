@@ -322,3 +322,7 @@ def init_state_for_stacked_rnn(src_agg: List[torch.Tensor],
         init_state = src_agg
 
     return init_state
+
+def expand_tensor_size_at_dim(t: torch.Tensor, size: int, dim: int =-2) -> torch.Tensor:
+    old_size = t.size()
+    return t.unsqueeze(dim=dim).expand(*old_size[:dim + 1], size, *old_size[dim + 1:])

@@ -107,12 +107,12 @@ class MidOrderTraversalField(Field):
                     yield ns_et, c.value.lower()
 
     def to_tensor(self, example) -> Mapping[str, torch.Tensor]:
-        Tree, Token = lark.Tree, lark.Token
-        tree: Tree = example.get(self.tree_key)
+        tree: _Tree = example.get(self.tree_key)
         assert tree is not None
         # to get the symbol_id and the exact_token id from a token string
         s_id = lambda t: self.vocab.get_token_index(t, self.namespaces[0])
         et_id = lambda t: self.vocab.get_token_index(t, self.namespaces[1])
+        is_tree = lambda s: isinstance(s, _Tree)
 
         tree_nodes = []
         node_parent = []
@@ -124,36 +124,40 @@ class MidOrderTraversalField(Field):
         # pre-assign an ID, otherwise the system won't work
         # IDs are allocated in the left-most derivation order
         _id = 0
-        def _assign_id_to_tree(t: Tree):
+        def _assign_id_to_tree(t: _Tree):
             nonlocal _id
             t.id = _id
             _id += 1
             for c in t.children:
-                if isinstance(c, Tree):
+                if is_tree(c):
                     _assign_id_to_tree(c)
 
         _assign_id_to_tree(tree)
 
-        # traverse again the tree
-        op_stack: List[Tuple[int, Tree]] = [(0, tree)]
-        while len(op_stack) > 0:
-            stack_node_ids = [t.id for _, t in op_stack]
+        tree_node_id_set = set()
 
+        # traverse again the tree in the order of left-most derivation
+        op_stack: List[Tuple[int, _Tree]] = [(0, tree)]
+        while len(op_stack) > 0:
             parent_id, node = op_stack.pop()
             tree_nodes.append(s_id(node.data))
             node_parent.append(parent_id)
 
-            children: List[Union[Tree, Token]] = node.children
-            _expansion = [s_id(START_SYMBOL)] + [s_id(s.data) if isinstance(s, Tree) else s_id(s.type) for s in children]
-            _etokens = [et_id(START_SYMBOL)] + [et_id(s.value.lower()) if isinstance(s, Token) else self.padding for s in children]
+            children: List[Union[_Tree, _Token]] = node.children
+            _expansion = [s_id(START_SYMBOL)] + [s_id(s.data) if is_tree(s) else s_id(s.type) for s in children]
+            _etokens = [et_id(START_SYMBOL)] + [et_id(s.value.lower()) if not is_tree(s) else self.padding for s in children]
             derivations.append(_expansion)
             exact_tokens.append(_etokens)
             target_tokens.extend(list(filter(lambda t: t != self.padding, _etokens)))
-            frontiers.append(stack_node_ids)
+
+            tree_node_id_set.add(node.id)
+            frontiers.append([x for x in tree_node_id_set if x not in node_parent])
 
             for c in reversed(children):
-                if isinstance(c, Tree):
+                if is_tree(c):
                     op_stack.append((node.id, c))
+
+        frontiers[0].append(0)
 
         output = dict(zip(self.output_keys, (
             tree_nodes,

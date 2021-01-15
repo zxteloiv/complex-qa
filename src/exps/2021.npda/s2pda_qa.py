@@ -132,16 +132,16 @@ def get_model(p, vocab: NSVocabulary):
 
     if p.exact_token_predictor == "linear":
         exact_token_predictor = nn.Sequential(
-            nn.Linear(p.hidden_sz + p.emb_sz, vocab.get_vocab_size(ns_et)),
+            nn.Linear(encoder.get_output_dim() + p.hidden_sz + p.emb_sz, vocab.get_vocab_size(ns_et)),
         )
     elif p.exact_token_predictor == "quant":
         exact_token_predictor = QuantTokenPredictor(
-            vocab.get_vocab_size(ns_et), p.hidden_sz + p.emb_sz,
+            vocab.get_vocab_size(ns_et), encoder.get_output_dim() + p.hidden_sz + p.emb_sz,
             quant_criterion=p.exact_token_quant_criterion,
         )
     else:
         exact_token_predictor = MoSProjection(
-            p.num_exact_token_mixture, p.hidden_sz + p.emb_sz, vocab.get_vocab_size(ns_et),
+            p.num_exact_token_mixture, encoder.get_output_dim() + p.hidden_sz + p.emb_sz, vocab.get_vocab_size(ns_et),
         )
 
     if p.tutor_usage == "from_grammar":

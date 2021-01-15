@@ -15,7 +15,7 @@ from .tree import Tree
 from .rule_scorer import RuleScorer
 from utils.nn import init_state_for_stacked_rnn, get_final_encoder_states
 from ..transformer.multi_head_attention import MultiHeadSelfAttention
-from utils.nn import prepare_input_mask
+from utils.nn import prepare_input_mask, expand_tensor_size_at_dim
 
 from .tensor_typing_util import *
 
@@ -141,13 +141,15 @@ class NeuralPDA(nn.Module):
         # tree_grammar: (batch, n_d, opt_num, 4, max_seq)
         tree_grammar = self._gt(tree_nodes)
 
+        # attention computation and compose the context vector with the symbol hidden states
+        # query_context: (batch, *, attention_out)
+        query_context = self._query_attn_fn(tree_hid)
+
         # opt_prob: (batch, n_d, opt_num)
         # opt_repr: (batch, n_d, opt_num, hid)
-        opt_prob, opt_repr = self._get_topological_choice_distribution(tree_nodes, tree_hid)
+        opt_prob, opt_repr = self._get_topological_choice_distribution(tree_nodes, tree_hid, query_context)
 
-        # tree_state: (batch, n_d, max_seq, hid) <- (batch, n_d, 1, hid) <- (batch, n_d, hid)
-        tree_state = tree_hid.unsqueeze(-2).expand(*tree_hid.size()[:-1], derivations.size()[-1], tree_hid.size()[-1])
-        exact_logit = self._predict_exact_token_after_derivation(derivations, tree_state)
+        exact_logit = self._predict_exact_token_after_derivation(derivations, tree_hid, query_context)
 
         return opt_prob, exact_logit, tree_grammar
 
@@ -172,21 +174,22 @@ class NeuralPDA(nn.Module):
         # grammar_guide: (batch, opt_num, 4, max_seq)
         grammar_guide = self._gt(lhs)
 
+        # attention computation and compose the context vector with the symbol hidden states
+        # query_context: (batch, *, attention_out)
+        query_context = self._query_attn_fn(tree_state)
+
         # opt_prob: (batch, opt_num)
         # opt_repr: (batch, opt_num, hid)
-        opt_prob, opt_repr = self._get_topological_choice_distribution(lhs, tree_state)
+        opt_prob, opt_repr = self._get_topological_choice_distribution(lhs, tree_state, query_context)
 
         # best_choice: (batch,)
         best_choice = opt_prob.argmax(dim=-1)
         chosen_symbols, _, _ = self.retrieve_the_chosen_structure(best_choice, grammar_guide)
-
-        # tree_state: (batch, expansion_len, hid) <- (batch, 1, hid) <- (batch, hid)
-        tree_state = tree_state.unsqueeze(-2).expand(-1, chosen_symbols.size()[-1], -1)
-        exact_token_logit = self._predict_exact_token_after_derivation(chosen_symbols, tree_state)
+        exact_token_logit = self._predict_exact_token_after_derivation(chosen_symbols, tree_state, query_context)
 
         return lhs_idx, lhs_mask, grammar_guide, opt_prob, exact_token_logit
 
-    def _encode_partial_tree(self):
+    def _encode_partial_tree(self) -> FT:
         # node_val: (batch, node_num, node_val_dim)
         # node_parent, node_mask: (batch, node_num)
         node_val, node_parent, node_mask = self._partial_tree.dump_partial_tree()
@@ -198,21 +201,24 @@ class NeuralPDA(nn.Module):
         # tree_hidden: (batch, node_num, hidden_sz)
         tree_hidden = self._pre_tree_updater(node_emb, node_parent, node_mask)
 
-        # leaf_mask should be consistent with node_mask
-        # leaf_mask: (batch, leaf_num)
-        # leaf_pos: (batch, leaf_num)
-        leaves, leaf_mask = self._stack.dump()
-        leaf_pos = leaves[:, :, 0]
-
-        # leaf_hid: (batch, leaf_num, hid)
-        batch_index = torch.arange(self._stack.max_batch_size, device=leaves.device).long()
-        leaf_hid = tree_hidden[batch_index.unsqueeze(-1), leaf_pos]
+        # encode all leaves rather than those on stack only
+        # attn_mask: (batch, node_num)
+        batch_index = torch.arange(self._stack.max_batch_size, device=node_val.device).long()
+        attn_mask = node_mask
+        attn_mask[batch_index.unsqueeze(-1), node_parent] = 0
 
         if self._pre_tree_self_attn is not None:
-            leaf_hid, _ = self._pre_tree_self_attn(leaf_hid, leaf_mask)
+            tree_hidden, _ = self._pre_tree_self_attn(tree_hidden, attn_mask)
 
-        # the last leaf is the next LHS that will be popped out
-        return get_final_encoder_states(leaf_hid, leaf_mask)
+        # leaf_mask should be consistent with node_mask
+        # top_item: (batch, 2)
+        # top_pos: (batch,)
+        top_item, top_mask = self._stack.top()
+        top_pos = top_item[:, 0]
+
+        # tree_state: (batch, hid)
+        tree_state = tree_hidden[batch_index, top_pos]
+        return tree_state
 
     def _select_node(self) -> Tuple[LT, LT, LT]:
         node, success = self._stack.pop()
@@ -220,12 +226,12 @@ class NeuralPDA(nn.Module):
         node_val = node[:, 1]
         return node_idx, node_val, success
 
-    def _get_topological_choice_distribution(self, lhs, tree_state):
+    def _get_topological_choice_distribution(self, lhs, tree_state, query_context):
         """
         get the topological choice distribution for the current derivation, conditioning on the given LHS and Tree States
         :param lhs: (batch, *)
         :param tree_state: (batch, *, hid_dim)
-        :param grammar_guide: (batch, *, opt_num, 4, max_seq)
+        :param query_context: (batch, *, attention_dim)
         :return: tuple of 2:
                 (batch, *, opt_num) choice probabilities,
                 (batch, *, opt_num, hid) compositional representation of each rule option
@@ -240,12 +246,11 @@ class NeuralPDA(nn.Module):
         opt_repr = full_grammar_repr[lhs]
         opt_mask = full_grammar_mask[lhs]
 
-        # attention computation and compose the context vector with the symbol hidden states
-        # query_context: (batch, *, attention_out)
-        query_context = self._query_attn_fn(tree_state)
-
         # opt_logit, opt_prob: (batch, *, opt_num)
-        opt_logit = self._rule_scorer(opt_repr, query_context, tree_state)
+        opt_num = opt_mask.size()[-1]
+        exp_qc = expand_tensor_size_at_dim(query_context, opt_num, dim=-2)
+        exp_ts = expand_tensor_size_at_dim(tree_state, opt_num, dim=-2)
+        opt_logit = self._rule_scorer(opt_repr, exp_qc, exp_ts)
         opt_prob = masked_softmax(opt_logit, opt_mask.bool())
 
         return opt_prob, opt_repr
@@ -296,36 +301,11 @@ class NeuralPDA(nn.Module):
         opt_mask = symbol_mask.sum(-1) > 0
         return opt_repr, opt_mask
 
-    @staticmethod
-    def find_choice_by_symbols(gold_symbols: LT, valid_symbols: LT, symbol_mask: LT) -> LT:
-        """
-        :param gold_symbols: (batch, *, max_derivation_len)
-        :param valid_symbols: (batch, *, opt_num, max_possible_len)
-        :param symbol_mask: (batch, *, opt_num, max_possible_len)
-        :return:
-        """
-        size_bound = max(gold_symbols.size()[-1], valid_symbols.size()[-1])
-        def _pad(t):
-            if t.size()[-1] == size_bound:
-                return t
-            return F.pad(t, [0, size_bound - t.size()[-1]], value=0)
-
-        gold_symbols, valid_symbols, symbol_mask = [_pad(t) for t in (gold_symbols, valid_symbols, symbol_mask)]
-
-        # seq_comp: (batch, *, opt_num, max_len)
-        seq_comp = (valid_symbols == gold_symbols.unsqueeze(-2)) * symbol_mask
-        _choice = (seq_comp.sum(dim=-1) == symbol_mask.sum(dim=-1))  # _choice: (batch, *, opt_num)
-        # there must be some choice found for all batch, otherwise the data is inconsistent
-        _tmp_sum = _choice.sum(dim=-1)
-        assert (_tmp_sum > 0).all()
-
-        # argmax is forbidden on bool storage, but max is ok
-        return _choice.max(dim=-1)[1]
-
-    def _predict_exact_token_after_derivation(self, symbols: LT, expanded_ts) -> FT:
+    def _predict_exact_token_after_derivation(self, symbols: LT, tree_state: FT, query_context: FT) -> FT:
         """
         :param symbols: (batch, *, max_seq)
-        :param expanded_ts: (batch, *, max_seq, hid)
+        :param tree_state: (batch, *, hid)
+        :param query_context: (batch, *, attention_dim)
         :return:
         """
         # compliant_weights: (batch, *, max_seq, V)
@@ -333,7 +313,11 @@ class NeuralPDA(nn.Module):
 
         # symbol_emb: (batch, *, max_seq, emb)
         symbol_emb = self._dropout(self._embedder(symbols))
-        proj_inp = torch.cat([symbol_emb, expanded_ts], dim=-1)
+
+        seq_size = symbol_emb.size()[-2]
+        exp_ts = expand_tensor_size_at_dim(tree_state, seq_size, dim=-2)
+        exp_qc = expand_tensor_size_at_dim(query_context, seq_size, dim=-2)
+        proj_inp = torch.cat([symbol_emb, exp_ts, exp_qc], dim=-1)
         # exact_logit: (batch, *, V)
         exact_logit = self._exact_token_predictor(proj_inp)
         # exact_logit = exact_logit + (compliant_weights + tiny_value_of_dtype(exact_logit.dtype)).log()
@@ -401,4 +385,30 @@ class NeuralPDA(nn.Module):
             symbol_mask,        # symbol_mask: (batch, *, opt_num, max_seq)
         ) = splitted
         return valid_symbols, parental_growth, fraternal_growth, symbol_mask
+
+    @staticmethod
+    def find_choice_by_symbols(gold_symbols: LT, valid_symbols: LT, symbol_mask: LT) -> LT:
+        """
+        :param gold_symbols: (batch, *, max_derivation_len)
+        :param valid_symbols: (batch, *, opt_num, max_possible_len)
+        :param symbol_mask: (batch, *, opt_num, max_possible_len)
+        :return:
+        """
+        size_bound = max(gold_symbols.size()[-1], valid_symbols.size()[-1])
+        def _pad(t):
+            if t.size()[-1] == size_bound:
+                return t
+            return F.pad(t, [0, size_bound - t.size()[-1]], value=0)
+
+        gold_symbols, valid_symbols, symbol_mask = [_pad(t) for t in (gold_symbols, valid_symbols, symbol_mask)]
+
+        # seq_comp: (batch, *, opt_num, max_len)
+        seq_comp = (valid_symbols == gold_symbols.unsqueeze(-2)) * symbol_mask
+        _choice = (seq_comp.sum(dim=-1) == symbol_mask.sum(dim=-1))  # _choice: (batch, *, opt_num)
+        # there must be some choice found for all batch, otherwise the data is inconsistent
+        _tmp_sum = _choice.sum(dim=-1)
+        assert (_tmp_sum > 0).all()
+
+        # argmax is forbidden on bool storage, but max is ok
+        return _choice.max(dim=-1)[1]
 

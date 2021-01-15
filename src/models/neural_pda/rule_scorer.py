@@ -24,13 +24,6 @@ class MLPScorerWrapper(RuleScorer):
         super().__init__()
         self._module = module
 
-    def forward(self, rule_option: FT, query_context: FT, tree_state: NullOrFT) -> FT:
-        # the tree state and query context should have similar size prefix as the rule_option,
-        # except for the option dimension.
-        opt_num = rule_option.size()[-2]
-
-        expand_fn = lambda t: t.unsqueeze(-2).expand(*t.size()[:-1], opt_num, t.size()[-1])
-        tree_state, query_context = list(map(expand_fn, (tree_state, query_context)))
-
+    def forward(self, rule_option: FT, query_context: FT, tree_state: FT) -> FT:
         inp = torch.cat([rule_option, query_context, tree_state], dim=-1)
         return self._module(inp).squeeze(-1)
