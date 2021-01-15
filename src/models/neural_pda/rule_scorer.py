@@ -27,3 +27,12 @@ class MLPScorerWrapper(RuleScorer):
     def forward(self, rule_option: FT, query_context: FT, tree_state: FT) -> FT:
         inp = torch.cat([rule_option, query_context, tree_state], dim=-1)
         return self._module(inp).squeeze(-1)
+
+class HeuristicMLPScorerWrapper(RuleScorer):
+    def __init__(self, module: MultiInputsSequential):
+        super().__init__()
+        self._module = module
+
+    def forward(self, rule_option: FT, query_context: FT, tree_state: FT) -> FT:
+        inp = torch.cat([rule_option, query_context, tree_state, query_context - tree_state, query_context * tree_state], dim=-1)
+        return self._module(inp).squeeze(-1)

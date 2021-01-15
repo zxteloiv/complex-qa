@@ -9,25 +9,9 @@ from .npda import NeuralPDA
 from utils.seq_collector import SeqCollector
 from utils.text_tool import make_human_readable_text
 from .batched_stack import TensorBatchStack
-from ..base_s2s.rnn_lm import RNNModel
 import logging
-import gc
 
-# from .tensor_typing_util import ( T3T, T3L, T3F, T4T, T4L, T4F, T5T, T5L, T5F, )
 from .tensor_typing_util import *
-
-
-def _efficiently_optimize(loss_list, optim):
-    filtered_loss = list(filter(lambda l: l > 1e-13, loss_list))
-    loss = 0
-    if len(filtered_loss) > 0:
-        for l in filtered_loss:
-            loss = loss + l
-        optim.zero_grad()
-        loss.backward(retain_graph=True)
-        optim.step()
-    return loss.detach() if isinstance(loss, torch.Tensor) else loss
-
 
 class Seq2PDA(nn.Module):
     def __init__(self,

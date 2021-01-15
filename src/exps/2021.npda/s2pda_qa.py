@@ -46,6 +46,8 @@ def cfq_pda():
     p.num_exact_token_mixture = 1
     p.exact_token_quant_criterion = "dot_product"
 
+    p.rule_scorer = "heuristic" # heuristic, mlp
+
     return p
 
 def get_grammar_tutor(p, vocab):
@@ -114,7 +116,7 @@ def get_model(p, vocab: NSVocabulary):
     from models.neural_pda.npda import NeuralPDA
     from models.neural_pda.partial_tree_encoder import TopDownLSTMEncoder
     from models.transformer.multi_head_attention import MultiHeadSelfAttention
-    from models.neural_pda.rule_scorer import MLPScorerWrapper
+    from models.neural_pda.rule_scorer import MLPScorerWrapper, HeuristicMLPScorerWrapper
     from models.modules.stacked_encoder import StackedEncoder
     from models.modules.attention_wrapper import get_wrapped_attention
     from models.modules.quantized_token_predictor import QuantTokenPredictor
@@ -149,6 +151,22 @@ def get_model(p, vocab: NSVocabulary):
     else:
         ett, gt = get_cfq_tailored_tutor(p, vocab)
 
+    if p.rule_scorer == "heuristic":
+        assert encoder.get_output_dim() == p.hidden_sz, "attention outputs must have the same size with the hidden_size"
+        rule_scorer = HeuristicMLPScorerWrapper(MultiInputsSequential(
+            nn.Linear(encoder.get_output_dim() + p.hidden_sz * 2 + p.hidden_sz * 2, p.hidden_sz),
+            nn.Dropout(p.dropout),
+            Activation.by_name('tanh')(),
+            nn.Linear(p.hidden_sz, 1),
+        ))
+    else:
+        rule_scorer = MLPScorerWrapper(MultiInputsSequential(
+            nn.Linear(encoder.get_output_dim() + p.hidden_sz * 2, p.hidden_sz),
+            nn.Dropout(p.dropout),
+            Activation.by_name('tanh')(),
+            nn.Linear(p.hidden_sz, 1),
+        ))
+
     npda = NeuralPDA(
         symbol_embedding=emb_s,
         lhs_symbol_mapper=MultiInputsSequential(
@@ -167,12 +185,7 @@ def get_model(p, vocab: NSVocabulary):
             ],
             p.emb_sz, p.hidden_sz, p.num_expander_layer, intermediate_dropout=p.dropout
         ),
-        rule_scorer=MLPScorerWrapper(MultiInputsSequential(
-            nn.Linear(encoder.get_output_dim() + p.hidden_sz * 2, p.hidden_sz),
-            nn.Dropout(p.dropout),
-            Activation.by_name('tanh')(),
-            nn.Linear(p.hidden_sz, 1),
-        )),
+        rule_scorer=rule_scorer,
         exact_token_predictor=exact_token_predictor,
         token_tutor=ett,
 
