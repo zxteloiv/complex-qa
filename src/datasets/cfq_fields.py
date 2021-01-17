@@ -152,6 +152,8 @@ class MidOrderTraversalField(Field):
 
             tree_node_id_set.add(node.id)
             frontiers.append([x for x in tree_node_id_set if x not in node_parent])
+            # the expanded nodes will all get attended over
+            tree_node_id_set.update([n.id for n in children if is_tree(n)])
 
             for c in reversed(children):
                 if is_tree(c):

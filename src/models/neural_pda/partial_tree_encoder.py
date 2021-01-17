@@ -74,7 +74,7 @@ class TopDownLSTMEncoder(TopDownTreeEncoder):
             else:
                 parent = None
 
-            h, c = self._run_cell(inp_f, inp_o, inp_z, parent)
+            h, c = self._run_cell(inp_f[:, node_id], inp_o[:, node_id], inp_z[:, node_id], parent)
 
             if self.tensor_based:
                 tree_h[batch_index, node_id] = h
@@ -87,9 +87,8 @@ class TopDownLSTMEncoder(TopDownTreeEncoder):
             tree_h = torch.stack(tree_hs, dim=1)
         return tree_h
 
-    def _run_cell(self, inp_f, inp_o, inp_z, parent=None):
+    def _run_cell(self, f_, o_, z_, parent=None):
         # (batch, hid)
-        f_, o_, z_ = list(map(lambda t: t[:, 0, :], (inp_f, inp_o, inp_z)))
         if parent is not None:
             parent_h, parent_c = parent
         else:

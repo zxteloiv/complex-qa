@@ -201,20 +201,25 @@ class NeuralPDA(nn.Module):
         # tree_hidden: (batch, node_num, hidden_sz)
         tree_hidden = self._pre_tree_updater(node_emb, node_parent, node_mask)
 
-        # encode all leaves rather than those on stack only
-        # attn_mask: (batch, node_num)
         batch_index = torch.arange(self._stack.max_batch_size, device=node_val.device).long()
-        attn_mask = node_mask
-        attn_mask[batch_index.unsqueeze(-1), node_parent] = 0
-
-        if self._pre_tree_self_attn is not None:
-            tree_hidden, _ = self._pre_tree_self_attn(tree_hidden, attn_mask)
-
         # leaf_mask should be consistent with node_mask
         # top_item: (batch, 2)
         # top_pos: (batch,)
         top_item, top_mask = self._stack.top()
-        top_pos = top_item[:, 0]
+        top_pos = top_item[:, 0] * top_mask
+
+        if self._pre_tree_self_attn is not None:
+            # encode all leaves, all the current node except for those who had been others' parent nodes.
+            # attn_mask: (batch, node_num)
+            attn_mask = node_mask
+            # if node_mask.size()[-1] > 1:
+            # # stack nodes & mask: (batch, max_stack_num, 2) & (batch, max_stack_num)
+            # stack_nodes, stack_mask = self._stack.dump()
+            # stack_pos = stack_nodes[:, :, 0] * stack_mask
+            # attn_mask[batch_index.unsqueeze(-1), stack_pos] = 0
+            attn_mask[batch_index.unsqueeze(-1), node_parent] = 0
+            attn_mask[batch_index, top_pos] = 1 # the node itself must be involved into self-attention
+            tree_hidden, _ = self._pre_tree_self_attn(tree_hidden, attn_mask)
 
         # tree_state: (batch, hid)
         tree_state = tree_hidden[batch_index, top_pos]
