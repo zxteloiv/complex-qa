@@ -136,6 +136,8 @@ class NeuralPDA(nn.Module):
             attn_mask[torch.arange(batch, device=tree_mask.device).reshape(-1, 1, 1),
                       torch.arange(n_d, device=tree_mask.device).reshape(1, -1, 1),
                       expansion_frontiers] = 1
+            # the root has the id equal to the padding and must be excluded from attention targets except for itself.
+            attn_mask[:, 1:, 0] = 0
             tree_hid, _ = self._pre_tree_self_attn(tree_hid, tree_mask, structural_mask=attn_mask)
 
         # tree_grammar: (batch, n_d, opt_num, 4, max_seq)
@@ -405,11 +407,14 @@ class NeuralPDA(nn.Module):
                 return t
             return F.pad(t, [0, size_bound - t.size()[-1]], value=0)
 
-        gold_symbols, valid_symbols, symbol_mask = [_pad(t) for t in (gold_symbols, valid_symbols, symbol_mask)]
+        gold_mask = (gold_symbols != 0).long()
+        gold_symbols, gold_mask, valid_symbols, symbol_mask = [
+            _pad(t) for t in (gold_symbols, gold_mask, valid_symbols, symbol_mask)
+        ]
 
         # seq_comp: (batch, *, opt_num, max_len)
         seq_comp = (valid_symbols == gold_symbols.unsqueeze(-2)) * symbol_mask
-        _choice = (seq_comp.sum(dim=-1) == symbol_mask.sum(dim=-1))  # _choice: (batch, *, opt_num)
+        _choice = (seq_comp.sum(dim=-1) == gold_mask.unsqueeze(-2).sum(dim=-1))  # _choice: (batch, *, opt_num)
         # there must be some choice found for all batch, otherwise the data is inconsistent
         _tmp_sum = _choice.sum(dim=-1)
         assert (_tmp_sum > 0).all()
