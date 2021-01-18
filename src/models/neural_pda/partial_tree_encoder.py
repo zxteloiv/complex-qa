@@ -3,7 +3,7 @@ from torch import nn
 from torch.nn import functional as F
 
 class TopDownTreeEncoder(nn.Module):
-    def forward(self, tree_embedding, node_connection, node_mask):
+    def forward(self, tree_embedding, node_connection, node_mask, tree_hx=None):
         """
         :param tree_embedding: (batch, node_num, input_sz)
         :param node_connection: (batch, node_num)
@@ -13,7 +13,7 @@ class TopDownTreeEncoder(nn.Module):
         raise NotImplementedError
 
 class TopDownLSTMEncoder(TopDownTreeEncoder):
-    def __init__(self, input_sz: int, hidden_sz: int, transition_matrix_rank: int = 0, tensor_based: bool = True):
+    def __init__(self, input_sz: int, hidden_sz: int, transition_matrix_rank: int = 0):
         super().__init__()
         self.inp_mapping_o = nn.Linear(input_sz, hidden_sz)
         self.inp_mapping_f = nn.Linear(input_sz, hidden_sz)
@@ -34,9 +34,7 @@ class TopDownLSTMEncoder(TopDownTreeEncoder):
         self.hid_sz = hidden_sz
         self.trans_sz = transition_matrix_rank
 
-        self.tensor_based = tensor_based
-
-    def forward(self, tree_embedding, node_connection, node_mask):
+    def forward(self, tree_embedding, node_connection, node_mask, tree_hx=None):
         """
         :param tree_embedding: (batch, node_num, input_sz)
         :param node_connection: (batch, node_num)
@@ -52,40 +50,32 @@ class TopDownLSTMEncoder(TopDownTreeEncoder):
         inp_z = self.inp_mapping_z(tree_embedding)
 
         # tree_h, tree_c: [(batch, hid)]
-        if self.tensor_based:
-            tree_h = torch.randn_like(inp_f)
-            tree_c = torch.randn_like(inp_f)
-        else:
+        if tree_hx is None:
             tree_hs = []
             tree_cs = []
+            start_node = 0
+        else:
+            tree_hs, tree_cs = tree_hx
+            start_node = len(tree_hs)
 
-        for node_id in range(node_num):
+        for node_id in range(start_node, node_num):
             # p_node_id: (batch,)
             parent_node_id = node_connection[:, node_id]
 
             if node_id > 0:
-                if self.tensor_based:
-                    parent_h = tree_h[batch_index, parent_node_id]
-                    parent_c = tree_c[batch_index, parent_node_id]
-                else:
-                    parent_h = torch.stack(tree_hs, dim=1)[batch_index, parent_node_id]
-                    parent_c = torch.stack(tree_cs, dim=1)[batch_index, parent_node_id]
+                parent_h = torch.stack(tree_hs, dim=1)[batch_index, parent_node_id]
+                parent_c = torch.stack(tree_cs, dim=1)[batch_index, parent_node_id]
                 parent = (parent_h, parent_c)
             else:
                 parent = None
 
             h, c = self._run_cell(inp_f[:, node_id], inp_o[:, node_id], inp_z[:, node_id], parent)
 
-            if self.tensor_based:
-                tree_h[batch_index, node_id] = h
-                tree_c[batch_index, node_id] = c
-            else:
-                tree_hs.append(h)
-                tree_cs.append(c)
+            tree_hs.append(h)
+            tree_cs.append(c)
 
-        if not self.tensor_based:
-            tree_h = torch.stack(tree_hs, dim=1)
-        return tree_h
+        tree_h = torch.stack(tree_hs, dim=1)
+        return tree_h, (tree_hs, tree_cs)
 
     def _run_cell(self, f_, o_, z_, parent=None):
         # (batch, hid)

@@ -67,11 +67,13 @@ class NeuralPDA(nn.Module):
         # the stack contains information about both the node position and the node token value
         self._stack: Optional[TensorBatchStack] = None
         self._partial_tree: Optional[Tree] = None
+        self._tree_hx = None
 
     def init_automata(self, batch_sz: int, device: torch.device, query_attn_fn: Callable,
                       max_derivation_step: int = 0):
         # init tree
         self._partial_tree = Tree(batch_sz, self.max_derivation_step * 5, 1, device=device)
+        self._tree_hx = None
 
         root_id = torch.zeros((batch_sz, 1), device=device).long()
         root_val = torch.full((batch_sz, 1), fill_value=self.grammar_entry, device=device).long()
@@ -128,7 +130,7 @@ class NeuralPDA(nn.Module):
         # nodes_emb: (batch, n_d, emb)
         # tree_hid: (batch, n_d, hid)
         nodes_emb = self._embedder(tree_nodes)
-        tree_hid = self._pre_tree_updater(nodes_emb, node_parents, tree_mask)
+        tree_hid, _ = self._pre_tree_updater(nodes_emb, node_parents, tree_mask)
 
         if self._pre_tree_self_attn is not None:
             batch, n_d = tree_nodes.size()
@@ -201,7 +203,8 @@ class NeuralPDA(nn.Module):
         node_emb = self._embedder(node_val)
 
         # tree_hidden: (batch, node_num, hidden_sz)
-        tree_hidden = self._pre_tree_updater(node_emb, node_parent, node_mask)
+        tree_hidden, tree_hx = self._pre_tree_updater(node_emb, node_parent, node_mask, self._tree_hx)
+        self._tree_hx = tree_hx
 
         batch_index = torch.arange(self._stack.max_batch_size, device=node_val.device).long()
         # leaf_mask should be consistent with node_mask
