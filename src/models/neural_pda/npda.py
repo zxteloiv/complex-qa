@@ -142,20 +142,20 @@ class NeuralPDA(nn.Module):
                   expansion_frontiers] = 1
         # the root has the id equal to the padding and must be excluded from attention targets except for itself.
         attn_mask[:, 1:, 0] = 0
-        tree_hid, _ = self._pre_tree_self_attn(tree_hid, tree_mask, structural_mask=attn_mask)
+        tree_hid_att, _ = self._pre_tree_self_attn(tree_hid, tree_mask, structural_mask=attn_mask)
 
         # tree_grammar: (batch, n_d, opt_num, 4, max_seq)
         tree_grammar = self._gt(tree_nodes)
 
         # attention computation and compose the context vector with the symbol hidden states
         # query_context: (batch, *, attention_out)
-        query_context = self._query_attn_fn(tree_hid)
+        query_context = self._query_attn_fn(tree_hid_att)
 
         # opt_prob: (batch, n_d, opt_num)
         # opt_repr: (batch, n_d, opt_num, hid)
-        opt_prob, opt_repr = self._get_topological_choice_distribution(tree_nodes, tree_hid, query_context)
+        opt_prob, opt_repr = self._get_topological_choice_distribution(tree_nodes, tree_hid_att, query_context)
 
-        exact_logit = self._predict_exact_token_after_derivation(derivations, tree_hid, query_context)
+        exact_logit = self._predict_exact_token_after_derivation(derivations, tree_hid_att, query_context)
 
         return opt_prob, exact_logit, tree_grammar
 
@@ -417,11 +417,14 @@ class NeuralPDA(nn.Module):
         ]
 
         # seq_comp: (batch, *, opt_num, max_len)
-        seq_comp = (valid_symbols == gold_symbols.unsqueeze(-2)) * symbol_mask
-        _choice = (seq_comp.sum(dim=-1) == gold_mask.unsqueeze(-2).sum(dim=-1))  # _choice: (batch, *, opt_num)
-        # there must be some choice found for all batch, otherwise the data is inconsistent
-        _tmp_sum = _choice.sum(dim=-1)
-        assert (_tmp_sum > 0).all()
+        # the comparison actually requires symbol_a * mask_a == symbol_b * mask_b,
+        # but the symbols are all properly masked here now.
+        seq_comp = (valid_symbols * symbol_mask == (gold_symbols * gold_mask).unsqueeze(-2))
+        # only the non-empty sequences require comparison, other choices default to 0
+        # _choice: (batch, *, opt_num)
+        _choice = seq_comp.all(dim=-1) * (symbol_mask.sum(-1) > 0)
+        # there must be one and only one choice found for all batch, otherwise the data is inconsistent
+        assert (_choice.sum(dim=-1) == (gold_mask.sum(-1) > 0)).all()
 
         # argmax is forbidden on bool storage, but max is ok
         return _choice.max(dim=-1)[1]

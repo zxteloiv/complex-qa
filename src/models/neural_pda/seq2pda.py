@@ -124,21 +124,23 @@ class Seq2PDA(nn.Module):
                            exact_tokens,  # (batch, n_d, max_seq)
                            target_tokens,  # (batch, max_tgt_len)
                            ):
+        batch_sz, device = source_tokens.size()[0], source_tokens.device
         enc_attn_fn = self._encode_source(source_tokens)
-        self.npda.init_automata(source_tokens.size()[0], source_tokens.device, enc_attn_fn,
-                                max_derivation_step=tree_nodes.size()[-1])
+        self.npda.init_automata(batch_sz, device, enc_attn_fn, max_derivation_step=tree_nodes.size()[-1])
 
-        batch_sz = source_tokens.size()[0]
-        token_stack = TensorBatchStack(batch_sz, 1000, item_size=1, dtype=torch.long, device=source_tokens.device)
-        symbol_stack = TensorBatchStack(batch_sz, 5000, item_size=1, dtype=torch.long, device=source_tokens.device)
+        token_stack = TensorBatchStack(batch_sz, 500, item_size=1, dtype=torch.long, device=device)
+        symbol_stack = TensorBatchStack(batch_sz, 1000, item_size=1, dtype=torch.long, device=device)
+        symbol_list = []
         while self.npda.continue_derivation():
             lhs_idx, lhs_mask, grammar_guide, opt_prob, exact_token_logit = self.npda()
 
             predicted_symbol, predicted_p_growth, predicted_mask = self._infer_topology_greedily(opt_prob, grammar_guide)
+            symbol_list.append(predicted_symbol)
             self._arrange_predicted_tokens(token_stack, exact_token_logit, lhs_mask, predicted_p_growth, predicted_mask)
             self._arrange_predicted_symbols(symbol_stack, lhs_mask, predicted_symbol, predicted_mask)
             self.npda.update_pda_with_predictions(lhs_idx, predicted_symbol, predicted_p_growth, predicted_mask, lhs_mask)
 
+        predictions = torch.stack([F.pad(t, [0, derivations.size()[-1] - t.size()[-1]]) for t in symbol_list], dim=1)
         # compute metrics
         self._compute_err(token_stack, target_tokens)
 

@@ -44,7 +44,7 @@ def cfq_debug():
     store = PickleDataset(join(CFQ_PATH, 'parsed_cfq.pkl'), ('localhost', 6379, 0), 'cfq_parse_')
     all_idx = json.load(open(split_filename))
     split_idx = list(map(all_idx.get, ['trainIdxs', 'devIdxs', 'testIdxs']))
-    split_idx[-1] = [46501, 77066]
+    split_idx[-1] = [7901, 178847, 46501, 77066]
     return tuple(IndexDataset(store, ds) for ds in split_idx)
 
 @Registry.dataset()
