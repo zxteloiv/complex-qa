@@ -108,6 +108,9 @@ class NeuralPDA(nn.Module):
         self._derivation_step = 0
         # init tree state
         self._query_attn_fn = None
+        self._tree_hx = None
+        self._partial_tree = None
+        self._stack = None
 
     def forward(self, token_based=False, **kwargs):
         if self.training:
@@ -132,15 +135,14 @@ class NeuralPDA(nn.Module):
         nodes_emb = self._embedder(tree_nodes)
         tree_hid, _ = self._pre_tree_updater(nodes_emb, node_parents, tree_mask)
 
-        if self._pre_tree_self_attn is not None:
-            batch, n_d = tree_nodes.size()
-            attn_mask = tree_mask.new_zeros((batch, n_d, n_d))
-            attn_mask[torch.arange(batch, device=tree_mask.device).reshape(-1, 1, 1),
-                      torch.arange(n_d, device=tree_mask.device).reshape(1, -1, 1),
-                      expansion_frontiers] = 1
-            # the root has the id equal to the padding and must be excluded from attention targets except for itself.
-            attn_mask[:, 1:, 0] = 0
-            tree_hid, _ = self._pre_tree_self_attn(tree_hid, tree_mask, structural_mask=attn_mask)
+        batch, n_d = tree_nodes.size()
+        attn_mask = tree_mask.new_zeros((batch, n_d, n_d))
+        attn_mask[torch.arange(batch, device=tree_mask.device).reshape(-1, 1, 1),
+                  torch.arange(n_d, device=tree_mask.device).reshape(1, -1, 1),
+                  expansion_frontiers] = 1
+        # the root has the id equal to the padding and must be excluded from attention targets except for itself.
+        attn_mask[:, 1:, 0] = 0
+        tree_hid, _ = self._pre_tree_self_attn(tree_hid, tree_mask, structural_mask=attn_mask)
 
         # tree_grammar: (batch, n_d, opt_num, 4, max_seq)
         tree_grammar = self._gt(tree_nodes)
@@ -213,18 +215,17 @@ class NeuralPDA(nn.Module):
         top_item, top_mask = self._stack.top()
         top_pos = top_item[:, 0] * top_mask
 
-        if self._pre_tree_self_attn is not None:
-            # encode all leaves, all the current node except for those who had been others' parent nodes.
-            # attn_mask: (batch, node_num)
-            attn_mask = node_mask
-            # if node_mask.size()[-1] > 1:
-            # # stack nodes & mask: (batch, max_stack_num, 2) & (batch, max_stack_num)
-            # stack_nodes, stack_mask = self._stack.dump()
-            # stack_pos = stack_nodes[:, :, 0] * stack_mask
-            # attn_mask[batch_index.unsqueeze(-1), stack_pos] = 0
-            attn_mask[batch_index.unsqueeze(-1), node_parent] = 0
-            attn_mask[batch_index, top_pos] = 1 # the node itself must be involved into self-attention
-            tree_hidden, _ = self._pre_tree_self_attn(tree_hidden, attn_mask)
+        # encode all leaves, all the current node except for those who had been others' parent nodes.
+        # attn_mask: (batch, node_num)
+        attn_mask = node_mask
+        # if node_mask.size()[-1] > 1:
+        # # stack nodes & mask: (batch, max_stack_num, 2) & (batch, max_stack_num)
+        # stack_nodes, stack_mask = self._stack.dump()
+        # stack_pos = stack_nodes[:, :, 0] * stack_mask
+        # attn_mask[batch_index.unsqueeze(-1), stack_pos] = 0
+        attn_mask[batch_index.unsqueeze(-1), node_parent] = 0
+        attn_mask[batch_index, top_pos] = 1 # the node itself must be involved into self-attention
+        tree_hidden, _ = self._pre_tree_self_attn(tree_hidden, attn_mask)
 
         # tree_state: (batch, hid)
         tree_state = tree_hidden[batch_index, top_pos]

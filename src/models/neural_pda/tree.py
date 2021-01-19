@@ -109,3 +109,40 @@ class Tree:
         parent_idx = parent_idx.squeeze(-1)
         assert (parent_mask == node_mask).all()
         return node_val, parent_idx, parent_mask
+
+if __name__ == '__main__':
+    t = Tree(2, 7)
+    def _print_tree(tree):
+        n, p, m = tree.dump_partial_tree()
+        print(n.squeeze(-1).tolist())
+        print(p.tolist())
+        print(m.tolist())
+        print('-----' * 10)
+
+    t.init_root(torch.tensor([[192], [192]]).long())
+    _print_tree(t)
+    node_idx, succ = t.add_new_node_edge(
+        node_val=torch.full((2, 1), 61, dtype=torch.long).long(),
+        parent_idx=torch.tensor([0, 0]).long(),
+        push_mask=torch.tensor([1, 1]).long()
+    )
+
+    _print_tree(t)
+    node_idx, succ = t.add_new_node_edge(
+        node_val=torch.full((2, 1), 62, dtype=torch.long).long(),
+        parent_idx=node_idx,
+        push_mask=torch.tensor([0, 1]).long()
+    )
+    _print_tree(t)
+    node_idx, succ = t.add_new_node_edge(
+        node_val=torch.full((2, 1), 144, dtype=torch.long).long(),
+        parent_idx=node_idx,
+        push_mask=torch.tensor([1, 1]).long()
+    )
+    _print_tree(t)
+    node_idx, succ = t.add_new_node_edge(
+        node_val=torch.full((2, 1), 144, dtype=torch.long).long(),
+        parent_idx=node_idx,
+        push_mask=torch.tensor([1, 1]).long()
+    )
+    _print_tree(t)

@@ -38,6 +38,16 @@ def cfq_iid():
     return cfq_preparsed_treebase(splitfile)
 
 @Registry.dataset()
+def cfq_debug():
+    import lark
+    split_filename = join(CFQ_PATH, 'splits', 'mcd1.json')
+    store = PickleDataset(join(CFQ_PATH, 'parsed_cfq.pkl'), ('localhost', 6379, 0), 'cfq_parse_')
+    all_idx = json.load(open(split_filename))
+    split_idx = list(map(all_idx.get, ['trainIdxs', 'devIdxs', 'testIdxs']))
+    split_idx[-1] = [46501, 77066]
+    return tuple(IndexDataset(store, ds) for ds in split_idx)
+
+@Registry.dataset()
 def cfq_mcd1():
     splitfile = join(CFQ_PATH, 'splits', 'mcd1.json')
     return cfq_preparsed_treebase(splitfile)

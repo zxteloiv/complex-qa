@@ -55,8 +55,10 @@ class TopDownLSTMEncoder(TopDownTreeEncoder):
             tree_cs = []
             start_node = 0
         else:
-            tree_hs, tree_cs = tree_hx
-            start_node = len(tree_hs)
+            tree_hs, tree_cs, last_node_mask = tree_hx
+            # in hs and cs there are padding values indicated by the node mask at previous time
+            # these values are invalid and must be recomputed now.
+            start_node = last_node_mask.sum(-1).min().item()
 
         for node_id in range(start_node, node_num):
             # p_node_id: (batch,)
@@ -71,11 +73,15 @@ class TopDownLSTMEncoder(TopDownTreeEncoder):
 
             h, c = self._run_cell(inp_f[:, node_id], inp_o[:, node_id], inp_z[:, node_id], parent)
 
-            tree_hs.append(h)
-            tree_cs.append(c)
+            if node_id < len(tree_hs):
+                tree_hs[node_id] = h
+                tree_cs[node_id] = c
+            else:
+                tree_hs.append(h)
+                tree_cs.append(c)
 
         tree_h = torch.stack(tree_hs, dim=1)
-        return tree_h, (tree_hs, tree_cs)
+        return tree_h, (tree_hs, tree_cs, node_mask)
 
     def _run_cell(self, f_, o_, z_, parent=None):
         # (batch, hid)
