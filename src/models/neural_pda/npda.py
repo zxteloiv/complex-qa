@@ -112,15 +112,8 @@ class NeuralPDA(nn.Module):
         self._partial_tree = None
         self._stack = None
 
-    def forward(self, token_based=False, **kwargs):
-        if self.training:
-            return self._forward_parallel_training(**kwargs)
-
-        if not token_based:
-            return self._forward_derivation_step()
-
-        else:
-            raise NotImplementedError
+    def forward(self, **kwargs):
+        return self._forward_parallel_training(**kwargs)
 
     def _forward_parallel_training(self,
                                    tree_nodes,  # (batch, n_d), the tree nodes = #lhs = num_derivations

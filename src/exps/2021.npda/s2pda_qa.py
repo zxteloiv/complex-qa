@@ -266,7 +266,13 @@ def main():
             bot.add_event_handler(Events.STARTED, track_pytorch_module_forward_time, 100)
 
     else:
-        bot.add_event_handler(Events.ITERATION_COMPLETED, prediction_analysis, 100)
+        @bot.attach_extension(Events.ITERATION_COMPLETED)
+        def iteration_metric(bot: TrialBot):
+            import json
+            print(json.dumps(bot.model.get_metric()))
+
+        if args.debug:
+            bot.add_event_handler(Events.ITERATION_COMPLETED, prediction_analysis, 100)
     bot.run()
 
 def prediction_analysis(bot: TrialBot):

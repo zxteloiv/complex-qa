@@ -52,7 +52,10 @@ class Seq2PDA(nn.Module):
             return self._forward_parallel_training(*args, **kwargs)
 
         else:
-            return self._forward_inference(*args, **kwargs)
+            output = self._forward_parallel_training(*args, **kwargs)
+            if 'loss' in output:
+                del output['loss']
+            return output
 
     def _forward_parallel_training(self,
                                    source_tokens: LT,  # (batch, src_len)
@@ -115,15 +118,15 @@ class Seq2PDA(nn.Module):
         enc_attn_fn = lambda out: self.enc_attn_net(out, source_hidden, source_mask)
         return enc_attn_fn
 
-    def _forward_inference(self,
-                           source_tokens: LT,  # (batch, src_len)
-                           tree_nodes,  # (batch, n_d), the tree nodes = #lhs = num_derivations
-                           node_parents,  # (batch, n_d),
-                           expansion_frontiers,  # (batch, n_d, max_runtime_stack_size),
-                           derivations,  # (batch, n_d, max_seq), the gold derivations for choice checking
-                           exact_tokens,  # (batch, n_d, max_seq)
-                           target_tokens,  # (batch, max_tgt_len)
-                           ):
+    def forward_inference(self,
+                          source_tokens: LT,  # (batch, src_len)
+                          tree_nodes,  # (batch, n_d), the tree nodes = #lhs = num_derivations
+                          node_parents,  # (batch, n_d),
+                          expansion_frontiers,  # (batch, n_d, max_runtime_stack_size),
+                          derivations,  # (batch, n_d, max_seq), the gold derivations for choice checking
+                          exact_tokens,  # (batch, n_d, max_seq)
+                          target_tokens,  # (batch, max_tgt_len)
+                          ):
         batch_sz, device = source_tokens.size()[0], source_tokens.device
         enc_attn_fn = self._encode_source(source_tokens)
         self.npda.init_automata(batch_sz, device, enc_attn_fn, max_derivation_step=tree_nodes.size()[-1])
