@@ -138,6 +138,7 @@ class NeuralPDA(nn.Module):
         # the root has the id equal to the padding and must be excluded from attention targets except for itself.
         attn_mask[:, 1:, 0] = 0
         tree_hid_att, _ = self._pre_tree_self_attn(tree_hid, tree_mask, structural_mask=attn_mask)
+        tree_hid_att = tree_hid_att.tanh()
 
         # tree_grammar: (batch, n_d, opt_num, 4, max_seq)
         tree_grammar = self._gt(tree_nodes)
@@ -225,7 +226,7 @@ class NeuralPDA(nn.Module):
 
         # tree_state: (batch, hid)
         tree_state = tree_hidden[batch_index, top_pos]
-        return tree_state
+        return tree_state.tanh()
 
     def _select_node(self) -> Tuple[LT, LT, LT]:
         node, success = self._stack.pop()
