@@ -68,6 +68,7 @@ class NeuralPDA(nn.Module):
         self._stack: Optional[TensorBatchStack] = None
         self._partial_tree: Optional[Tree] = None
         self._tree_hx = None
+        self.diagnosis = dict()
 
     def init_automata(self, batch_sz: int, device: torch.device, query_attn_fn: Callable,
                       max_derivation_step: int = 0):
@@ -121,6 +122,7 @@ class NeuralPDA(nn.Module):
                                    expansion_frontiers,  # (batch, n_d, max_runtime_stack_size),
                                    derivations,  # (batch, n_d, max_seq), the gold derivations for choice checking
                                    ):
+        self.diagnosis = dict()
         _, tree_mask = prepare_input_mask(tree_nodes)
 
         # nodes_emb: (batch, n_d, emb)
@@ -150,6 +152,7 @@ class NeuralPDA(nn.Module):
 
         exact_logit = self._predict_exact_token_after_derivation(derivations, tree_hid_att, query_context)
 
+        self.diagnosis.update(tree_hid=tree_hid, tree_hid_att=tree_hid_att)
         return opt_prob, exact_logit, tree_grammar
 
     def _forward_derivation_step(self):

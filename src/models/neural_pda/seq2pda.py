@@ -41,11 +41,22 @@ class Seq2PDA(nn.Module):
         self.logger = logging.getLogger(self.__class__.__name__)
         self.vocab = vocab
 
-    def get_metric(self, reset=False):
+        # ------ diagnosis metrics ---------
+        # split the
+        self.tree_hid_norm = (Average(), Average(), Average())
+        self.tree_att_norm = (Average(), Average(), Average())
+
+    def get_metric(self, reset=False, diagnosis=False):
         token_loss = self.token_loss.get_metric(reset)
         topo_loss = self.topo_loss.get_metric(reset)
         err = self.err.get_metric(reset)
-        return {"Token Loss": token_loss, "Topo Loss": topo_loss, "ERR": err}
+        output = {"Token Loss": token_loss, "Topo Loss": topo_loss, "ERR": err}
+
+        if diagnosis:
+            tree_hid_norm = [m.get_metric(reset) for m in self.tree_hid_norm]
+            tree_att_norm = [m.get_metric(reset) for m in self.tree_att_norm]
+            output.update(TreeHidNorm=tree_hid_norm, TreeAttNorm=tree_att_norm)
+        return output
 
     def forward(self, *args, **kwargs):
         if self.training:
@@ -105,6 +116,7 @@ class Seq2PDA(nn.Module):
             self.err(1. if e1 + e2 > 0 else 0.)
 
         # ================
+        self._diagnose_tree_state(tree_mask)
 
         output = {"loss": topo_loss + token_loss}
         self.token_loss(token_loss)
@@ -117,6 +129,22 @@ class Seq2PDA(nn.Module):
         source_hidden, _ = self.encoder(source, source_mask)
         enc_attn_fn = lambda out: self.enc_attn_net(out, source_hidden, source_mask)
         return enc_attn_fn
+
+    def _diagnose_tree_state(self, tree_mask):
+        tree_hid, tree_att = map(self.npda.diagnosis.get, ('tree_hid', 'tree_hid_att'))
+        tree_hid_norm = tree_hid.norm(dim=-1)
+        tree_att_norm = tree_att.norm(dim=-1)
+        tree_hs = tree_hid_norm.split(50, dim=1)[:3]
+        tree_as = tree_att_norm.split(50, dim=1)[:3]
+        tree_ms = tree_mask.split(50, dim=1)[:3]
+        for i, (h, a, m) in enumerate(zip(tree_hs, tree_as, tree_ms)):
+            h = (h * m).sum(dim=-1) / (m.sum(dim=-1) + 1e-13)
+            a = (a * m).sum(dim=-1) / (m.sum(dim=-1) + 1e-13)
+            m = m.sum(dim=-1)
+            for instance_h, instance_a, instance_m in zip(h, a, m):
+                if instance_m > 0:
+                    self.tree_hid_norm[i](instance_h)
+                    self.tree_att_norm[i](instance_a)
 
     def forward_inference(self,
                           source_tokens: LT,  # (batch, src_len)
