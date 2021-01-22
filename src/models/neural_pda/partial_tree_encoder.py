@@ -1,6 +1,7 @@
 import torch
 from torch import nn
 from torch.nn import functional as F
+from ..modules.variational_dropout import VariationalDropout
 
 class TopDownTreeEncoder(nn.Module):
     def forward(self, tree_embedding, node_connection, node_mask, tree_hx=None):
@@ -13,11 +14,14 @@ class TopDownTreeEncoder(nn.Module):
         raise NotImplementedError
 
 class TopDownLSTMEncoder(TopDownTreeEncoder):
-    def __init__(self, input_sz: int, hidden_sz: int, transition_matrix_rank: int = 0):
+    def __init__(self, input_sz: int, hidden_sz: int, transition_matrix_rank: int = 0, dropout=0.):
         super().__init__()
         self.inp_mapping_o = nn.Linear(input_sz, hidden_sz)
         self.inp_mapping_f = nn.Linear(input_sz, hidden_sz)
         self.inp_mapping_z = nn.Linear(input_sz, hidden_sz)
+        self.input_dropout = VariationalDropout(dropout)
+        self.hidden_dropout = VariationalDropout(dropout)
+        import allennlp
 
         if transition_matrix_rank == 0:
             transition_matrix_rank = hidden_sz
@@ -44,6 +48,8 @@ class TopDownLSTMEncoder(TopDownTreeEncoder):
         batch, node_num, _ = tree_embedding.size()
         batch_index = torch.arange(batch, dtype=torch.long, device=tree_embedding.device)
 
+        tree_embedding = self.input_dropout(tree_embedding)
+
         # inp_*: (batch, node_num, hidden_sz)
         inp_f = self.inp_mapping_f(tree_embedding)
         inp_o = self.inp_mapping_o(tree_embedding)
@@ -66,6 +72,7 @@ class TopDownLSTMEncoder(TopDownTreeEncoder):
 
             if node_id > 0:
                 parent_h = torch.stack(tree_hs, dim=1)[batch_index, parent_node_id]
+                parent_h = self.hidden_dropout(parent_h)
                 parent_c = torch.stack(tree_cs, dim=1)[batch_index, parent_node_id]
                 parent = (parent_h, parent_c)
             else:
@@ -129,7 +136,7 @@ if __name__ == '__main__':
     enc = TopDownLSTMEncoder(300, 128, 64)
     x = torch.randn(32, 1000, 300)
     conn = torch.ones(32, 1000).long().cumsum(dim=-1) - 2
-    y = enc.forward(x, conn, None)
+    y, _ = enc.forward(x, conn, None)
     print(y.size())
     loss = y.sum()
     loss.backward()

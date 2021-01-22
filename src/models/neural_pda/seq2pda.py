@@ -10,6 +10,7 @@ from utils.seq_collector import SeqCollector
 from utils.text_tool import make_human_readable_text
 from .batched_stack import TensorBatchStack
 import logging
+from ..modules.variational_dropout import VariationalDropout
 
 from .tensor_typing_util import *
 
@@ -59,6 +60,7 @@ class Seq2PDA(nn.Module):
         return output
 
     def forward(self, *args, **kwargs):
+        self._reset_variational_dropout()
         if self.training:
             return self._forward_parallel_training(*args, **kwargs)
 
@@ -122,6 +124,11 @@ class Seq2PDA(nn.Module):
         self.token_loss(token_loss)
         self.topo_loss(topo_loss)
         return output
+
+    def _reset_variational_dropout(self):
+        for m in self.modules():
+            if isinstance(m, VariationalDropout):
+                m.reset()
 
     def _encode_source(self, source_tokens):
         source_tokens, source_mask = prepare_input_mask(source_tokens, padding_val=self.tok_pad)

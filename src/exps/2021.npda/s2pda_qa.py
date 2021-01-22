@@ -19,7 +19,7 @@ def cfq_pda():
     p.TRAINING_LIMIT = 100
     p.OPTIM = "RAdam"
     p.batch_sz = 32
-    p.weight_decay = .02
+    p.weight_decay = .2
 
     p.tutor_usage = "from_dataset" # from_grammar, from_dataset
 
@@ -36,7 +36,7 @@ def cfq_pda():
     p.attn_use_bias = False
     p.attn_use_tanh_activation = False
     p.num_enc_layers = 2
-    p.dropout = .2
+    p.dropout = .4
     p.num_expander_layer = 2
     p.max_derivation_step = 200
     p.max_expansion_len = 11
@@ -46,9 +46,16 @@ def cfq_pda():
     p.num_exact_token_mixture = 1
     p.exact_token_quant_criterion = "dot_product"
 
-    p.rule_scorer = "heuristic" # heuristic, mlp
-
+    p.rule_scorer = "heuristic" # heuristic, mlp, triple_inner_product, triple_cosine
     return p
+
+from trialbot.utils.grid_search_helper import import_grid_search_parameters
+import_grid_search_parameters(
+    grid_conf={
+        "rule_scorer": ["triple_inner_product", "triple_cosine"]
+    },
+    base_param_fn=cfq_pda
+)
 
 def get_grammar_tutor(p, vocab):
     ns_symbol, ns_exact_token = p.tgt_ns
@@ -116,7 +123,7 @@ def get_model(p, vocab: NSVocabulary):
     from models.neural_pda.npda import NeuralPDA
     from models.neural_pda.partial_tree_encoder import TopDownLSTMEncoder
     from models.transformer.multi_head_attention import MultiHeadSelfAttention
-    from models.neural_pda.rule_scorer import MLPScorerWrapper, HeuristicMLPScorerWrapper
+    from models.neural_pda.rule_scorer import MLPScorerWrapper, HeuristicMLPScorerWrapper, GeneralizedInnerProductScorer
     from models.modules.stacked_encoder import StackedEncoder
     from models.modules.attention_wrapper import get_wrapped_attention
     from models.modules.quantized_token_predictor import QuantTokenPredictor
@@ -159,6 +166,10 @@ def get_model(p, vocab: NSVocabulary):
             Activation.by_name('tanh')(),
             nn.Linear(p.hidden_sz, 1),
         ))
+    elif p.rule_scorer == "triple_inner_product":
+        rule_scorer = GeneralizedInnerProductScorer()
+    elif p.rule_scorer == "triple_cosine":
+        rule_scorer = GeneralizedInnerProductScorer(normalized=True)
     else:
         rule_scorer = MLPScorerWrapper(MultiInputsSequential(
             nn.Linear(encoder.get_output_dim() + p.hidden_sz * 2, p.hidden_sz),
@@ -189,7 +200,7 @@ def get_model(p, vocab: NSVocabulary):
         exact_token_predictor=exact_token_predictor,
         token_tutor=ett,
 
-        pre_tree_updater=TopDownLSTMEncoder(p.emb_sz, p.hidden_sz, p.hidden_sz // 2),
+        pre_tree_updater=TopDownLSTMEncoder(p.emb_sz, p.hidden_sz, p.hidden_sz // 2, dropout=p.dropout),
         pre_tree_self_attn=MultiHeadSelfAttention(p.num_heads, p.hidden_sz, p.hidden_sz, p.hidden_sz, 0.,),
 
         grammar_entry=vocab.get_token_index(p.grammar_entry, ns_s),
@@ -233,6 +244,8 @@ def main():
     def print_models(bot: TrialBot):
         print(str(bot.models))
 
+    from utils.trial_bot_extensions import collect_garbage, print_hyperparameters
+    bot.add_event_handler(Events.STARTED, print_hyperparameters, 100)
     from trialbot.training import Events
     if not args.test:
         # --------------------- Training -------------------------------
@@ -240,9 +253,7 @@ def main():
         from utils.trial_bot_extensions import end_with_nan_loss
         from utils.trial_bot_extensions import evaluation_on_dev_every_epoch
         from utils.trial_bot_extensions import save_model_every_num_iters
-        from utils.trial_bot_extensions import collect_garbage, print_hyperparameters
         bot.add_event_handler(Events.EPOCH_COMPLETED, evaluation_on_dev_every_epoch, 90, skip_first_epochs=1)
-        bot.add_event_handler(Events.STARTED, print_hyperparameters, 100)
         bot.add_event_handler(Events.ITERATION_COMPLETED, end_with_nan_loss, 100)
         bot.add_event_handler(Events.EPOCH_COMPLETED, every_epoch_model_saver, 100)
         bot.add_event_handler(Events.ITERATION_COMPLETED, collect_garbage, 80)
