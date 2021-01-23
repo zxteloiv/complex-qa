@@ -16,7 +16,7 @@ def cfq_pda():
     from utils.root_finder import find_root
     ROOT = find_root()
     p = HyperParamSet.common_settings(ROOT)
-    p.TRAINING_LIMIT = 100
+    p.TRAINING_LIMIT = 10
     p.OPTIM = "RAdam"
     p.batch_sz = 32
     p.weight_decay = .2
@@ -42,6 +42,7 @@ def cfq_pda():
     p.max_expansion_len = 11
     p.grammar_entry = "queryunit"
 
+    p.tree_encoder = 'bare_dot_prod_attn' # lstm, bare_dot_prod_attn
     p.tree_attn_activation = 'tanh'  # tanh, none
 
     p.exact_token_predictor = "quant" # linear, mos, quant
@@ -115,7 +116,7 @@ def get_model(p, vocab: NSVocabulary):
     from torch import nn
     from models.neural_pda.seq2pda import Seq2PDA
     from models.neural_pda.npda import NeuralPDA
-    from models.neural_pda.partial_tree_encoder import TopDownLSTMEncoder
+    from models.neural_pda.partial_tree_encoder import TopDownLSTMEncoder, BareDotProdAttnEncoder
     from models.transformer.multi_head_attention import MultiHeadSelfAttention
     from models.neural_pda.rule_scorer import MLPScorerWrapper, HeuristicMLPScorerWrapper, GeneralizedInnerProductScorer
     from models.modules.stacked_encoder import StackedEncoder
@@ -172,6 +173,13 @@ def get_model(p, vocab: NSVocabulary):
             nn.Linear(p.hidden_sz, 1),
         ))
 
+    if p.tree_encoder == 'lstm':
+        tree_encoder = TopDownLSTMEncoder(p.emb_sz, p.hidden_sz, p.hidden_sz // 2, dropout=p.dropout)
+    elif p.tree_encoder == 'bare_dot_prod_attn':
+        tree_encoder = BareDotProdAttnEncoder()
+    else:
+        raise NotImplementedError
+
     npda = NeuralPDA(
         symbol_embedding=emb_s,
         lhs_symbol_mapper=MultiInputsSequential(
@@ -179,7 +187,7 @@ def get_model(p, vocab: NSVocabulary):
             nn.Dropout(p.dropout),
             nn.Linear(p.hidden_sz // 2, p.hidden_sz),
             nn.Tanh(),
-        ),
+        ) if p.emb_sz != p.hidden_sz else nn.Tanh(),
         grammar_tutor=gt,
         rhs_expander=StackedRNNCell(
             [
@@ -194,7 +202,7 @@ def get_model(p, vocab: NSVocabulary):
         exact_token_predictor=exact_token_predictor,
         token_tutor=ett,
 
-        pre_tree_updater=TopDownLSTMEncoder(p.emb_sz, p.hidden_sz, p.hidden_sz // 2, dropout=p.dropout),
+        pre_tree_encoder=tree_encoder,
         pre_tree_self_attn=MultiHeadSelfAttention(p.num_heads, p.hidden_sz, p.hidden_sz, p.hidden_sz, 0.,),
 
         grammar_entry=vocab.get_token_index(p.grammar_entry, ns_s),

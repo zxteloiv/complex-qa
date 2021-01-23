@@ -29,7 +29,7 @@ class NeuralPDA(nn.Module):
                  token_tutor,
                  rhs_expander: StackedRNNCell,
 
-                 pre_tree_updater: TopDownTreeEncoder,
+                 pre_tree_encoder: TopDownTreeEncoder,
                  pre_tree_self_attn: Nullable[MultiHeadSelfAttention],
 
                  rule_scorer: RuleScorer,
@@ -53,7 +53,7 @@ class NeuralPDA(nn.Module):
 
         self._dropout = nn.Dropout(dropout)
 
-        self._pre_tree_updater = pre_tree_updater
+        self._pre_tree_encoder = pre_tree_encoder
         self._pre_tree_self_attn = pre_tree_self_attn
         self._tree_attn_activation = tree_attn_activation
         self._rule_scorer = rule_scorer
@@ -131,7 +131,8 @@ class NeuralPDA(nn.Module):
         # nodes_emb: (batch, n_d, emb)
         # tree_hid: (batch, n_d, hid)
         nodes_emb = self._embedder(tree_nodes)
-        tree_hid, _ = self._pre_tree_updater(nodes_emb, node_parents, tree_mask)
+        nodes_emb = self._lhs_symbol_mapper(nodes_emb)
+        tree_hid, _ = self._pre_tree_encoder(nodes_emb, node_parents, tree_mask)
 
         batch, n_d = tree_nodes.size()
         attn_mask = tree_mask.new_zeros((batch, n_d, n_d))
@@ -204,9 +205,10 @@ class NeuralPDA(nn.Module):
 
         # node_emb: (batch, node_num, emb_sz)
         node_emb = self._embedder(node_val)
+        node_emb = self._lhs_symbol_mapper(node_emb)
 
         # tree_hidden: (batch, node_num, hidden_sz)
-        tree_hidden, tree_hx = self._pre_tree_updater(node_emb, node_parent, node_mask, self._tree_hx)
+        tree_hidden, tree_hx = self._pre_tree_encoder(node_emb, node_parent, node_mask, self._tree_hx)
         self._tree_hx = tree_hx
 
         batch_index = torch.arange(self._stack.max_batch_size, device=node_val.device).long()
