@@ -40,6 +40,8 @@ class NeuralPDA(nn.Module):
                  grammar_entry: int,
                  max_derivation_step: int = 1000,
                  dropout: float = 0.2,
+
+                 tree_attn_activation: nn.Module = None,
                  ):
         super().__init__()
         self._expander = rhs_expander
@@ -53,6 +55,7 @@ class NeuralPDA(nn.Module):
 
         self._pre_tree_updater = pre_tree_updater
         self._pre_tree_self_attn = pre_tree_self_attn
+        self._tree_attn_activation = tree_attn_activation
         self._rule_scorer = rule_scorer
 
         # -------------------
@@ -138,7 +141,8 @@ class NeuralPDA(nn.Module):
         # the root has the id equal to the padding and must be excluded from attention targets except for itself.
         attn_mask[:, 1:, 0] = 0
         tree_hid_att, _ = self._pre_tree_self_attn(tree_hid, tree_mask, structural_mask=attn_mask)
-        tree_hid_att = tree_hid_att.tanh()
+        if self._tree_attn_activation is not None:
+            tree_hid_att = self._tree_attn_activation(tree_hid_att)
 
         # tree_grammar: (batch, n_d, opt_num, 4, max_seq)
         tree_grammar = self._gt(tree_nodes)
@@ -226,7 +230,9 @@ class NeuralPDA(nn.Module):
 
         # tree_state: (batch, hid)
         tree_state = tree_hidden[batch_index, top_pos]
-        return tree_state.tanh()
+        if self._tree_attn_activation is not None:
+            tree_state = self._tree_attn_activation(tree_state)
+        return tree_state
 
     def _select_node(self) -> Tuple[LT, LT, LT]:
         node, success = self._stack.pop()

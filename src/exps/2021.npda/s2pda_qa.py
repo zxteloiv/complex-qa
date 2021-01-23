@@ -42,20 +42,14 @@ def cfq_pda():
     p.max_expansion_len = 11
     p.grammar_entry = "queryunit"
 
+    p.tree_attn_activation = 'tanh'  # tanh, none
+
     p.exact_token_predictor = "quant" # linear, mos, quant
     p.num_exact_token_mixture = 1
     p.exact_token_quant_criterion = "dot_product"
 
-    p.rule_scorer = "heuristic" # heuristic, mlp, triple_inner_product, triple_cosine
+    p.rule_scorer = "triple_inner_product" # heuristic, mlp, triple_inner_product, triple_cosine
     return p
-
-from trialbot.utils.grid_search_helper import import_grid_search_parameters
-import_grid_search_parameters(
-    grid_conf={
-        "rule_scorer": ["triple_inner_product", "triple_cosine"]
-    },
-    base_param_fn=cfq_pda
-)
 
 def get_grammar_tutor(p, vocab):
     ns_symbol, ns_exact_token = p.tgt_ns
@@ -206,6 +200,8 @@ def get_model(p, vocab: NSVocabulary):
         grammar_entry=vocab.get_token_index(p.grammar_entry, ns_s),
         max_derivation_step=p.max_derivation_step,
         dropout=p.dropout,
+
+        tree_attn_activation=None if p.tree_attn_activation == 'none' else Activation.by_name(p.tree_attn_activation)()
     )
 
     enc_attn_net = get_wrapped_attention(p.enc_attn, p.hidden_sz, encoder.get_output_dim(),
