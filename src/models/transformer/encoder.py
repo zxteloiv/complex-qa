@@ -136,6 +136,7 @@ class UniversalTransformerEncoder(torch.nn.Module):
         output_tensor = inputs
 
         for i in range(self.num_layers):
+            output_tensor = add_positional_features(output_tensor)
             output_tensor = add_depth_features_to_single_position(output_tensor, i)
 
             attention_out, _ = self.attention(output_tensor, mask)

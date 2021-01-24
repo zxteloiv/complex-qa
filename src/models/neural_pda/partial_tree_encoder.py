@@ -131,10 +131,11 @@ class TopDownLSTMEncoder(TopDownTreeEncoder):
         return torch.matmul(self.hid_trans_z.t(), self.hid_trans_z)
 
 class BareDotProdAttnEncoder(TopDownTreeEncoder):
-    def __init__(self, dropout: float = 0.2):
+    def __init__(self, dropout: float = 0.2, activation: nn.Module = None):
         super().__init__()
         self.input_dropout = VariationalDropout(dropout)
         self.hidden_dropout = VariationalDropout(dropout)
+        self.activation = activation
 
     def forward(self, tree_embedding, node_connection, node_mask, tree_hx=None):
         """
@@ -172,7 +173,9 @@ class BareDotProdAttnEncoder(TopDownTreeEncoder):
                 w_x = beta / (alpha + beta + 1e-15)
 
                 # h: (batch, hid)
-                h = w_h * parent_h + w_x * node_emb
+                h = (w_h * parent_h + w_x * node_emb)
+                if self.activation is not None:
+                    h = self.activation(h)
 
             if node_id < len(tree_hs):
                 tree_hs[node_id] = h

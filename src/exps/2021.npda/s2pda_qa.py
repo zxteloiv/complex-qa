@@ -176,7 +176,10 @@ def get_model(p, vocab: NSVocabulary):
     if p.tree_encoder == 'lstm':
         tree_encoder = TopDownLSTMEncoder(p.emb_sz, p.hidden_sz, p.hidden_sz // 2, dropout=p.dropout)
     elif p.tree_encoder == 'bare_dot_prod_attn':
-        tree_encoder = BareDotProdAttnEncoder()
+        tree_encoder = BareDotProdAttnEncoder(
+            dropout=p.dropout,
+            activation=None if p.tree_attn_activation == 'none' else Activation.by_name(p.tree_attn_activation)(),
+        )
     else:
         raise NotImplementedError
 
@@ -208,8 +211,6 @@ def get_model(p, vocab: NSVocabulary):
         grammar_entry=vocab.get_token_index(p.grammar_entry, ns_s),
         max_derivation_step=p.max_derivation_step,
         dropout=p.dropout,
-
-        tree_attn_activation=None if p.tree_attn_activation == 'none' else Activation.by_name(p.tree_attn_activation)()
     )
 
     enc_attn_net = get_wrapped_attention(p.enc_attn, p.hidden_sz, encoder.get_output_dim(),
