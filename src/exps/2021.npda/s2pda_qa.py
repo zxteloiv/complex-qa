@@ -52,6 +52,12 @@ def cfq_pda():
     p.rule_scorer = "triple_inner_product" # heuristic, mlp, triple_inner_product, triple_cosine
     return p
 
+@Registry.hparamset()
+def cfq_pda_0():
+    p = cfq_pda()
+    p.tree_attn_activation = 'none'
+    return p
+
 def get_grammar_tutor(p, vocab):
     ns_symbol, ns_exact_token = p.tgt_ns
     import torch
@@ -177,7 +183,6 @@ def get_model(p, vocab: NSVocabulary):
         tree_encoder = TopDownLSTMEncoder(p.emb_sz, p.hidden_sz, p.hidden_sz // 2, dropout=p.dropout)
     elif p.tree_encoder == 'bare_dot_prod_attn':
         tree_encoder = BareDotProdAttnEncoder(
-            dropout=p.dropout,
             activation=None if p.tree_attn_activation == 'none' else Activation.by_name(p.tree_attn_activation)(),
         )
     else:
