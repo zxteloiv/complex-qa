@@ -1,3 +1,4 @@
+from torch import nn
 from torch.nn import Sequential
 
 class MultiInputsSequential(Sequential):
@@ -16,4 +17,14 @@ class UnpackedInputsSequential(Sequential):
                 args = (args,)
 
         return args
+
+
+class SelectArgsById(nn.Module):
+    def __init__(self, i):
+        super().__init__()
+        self.i = i
+
+    def forward(self, *args):
+        return args[self.i]
+
 

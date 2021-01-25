@@ -1,10 +1,13 @@
+from typing import Tuple, Any
 import torch
 from torch import nn
 from torch.nn import functional as F
 from ..modules.variational_dropout import VariationalDropout
+from ..modules.decomposed_bilinear import DecomposedBilinear
+import math
 
 class TopDownTreeEncoder(nn.Module):
-    def forward(self, tree_embedding, node_connection, node_mask, tree_hx=None):
+    def forward(self, tree_embedding, node_connection, node_mask, tree_hx=None) -> Tuple[torch.Tensor, Any]:
         """
         :param tree_embedding: (batch, node_num, input_sz)
         :param node_connection: (batch, node_num)
@@ -142,7 +145,7 @@ class BareDotProdAttnEncoder(TopDownTreeEncoder):
         :param node_mask: (batch, node_num)
         :return: (batch, node_num, hidden_sz)
         """
-        batch, node_num, _ = tree_embedding.size()
+        batch, node_num, hid_sz = tree_embedding.size()
         batch_index = torch.arange(batch, dtype=torch.long, device=tree_embedding.device)
 
         # tree_hs: [(batch, hid)]
@@ -164,8 +167,8 @@ class BareDotProdAttnEncoder(TopDownTreeEncoder):
                 parent_node_id = node_connection[:, node_id]    # parent_node_id: (batch,)
                 parent_h = torch.stack(tree_hs, dim=1)[batch_index, parent_node_id]
                 # alpha, beta, w_h, w_x: (batch,)
-                alpha = (parent_h * node_emb).sum(dim=-1, keepdim=True).exp()
-                beta = (node_emb * node_emb).sum(dim=-1, keepdim=True).exp()
+                alpha = ((parent_h * node_emb).sum(dim=-1, keepdim=True) / math.sqrt(hid_sz)).exp()
+                beta = ((node_emb * node_emb).sum(dim=-1, keepdim=True) / math.sqrt(hid_sz)).exp()
                 w_h = alpha / (alpha + beta + 1e-15)
                 w_x = beta / (alpha + beta + 1e-15)
 
@@ -181,6 +184,95 @@ class BareDotProdAttnEncoder(TopDownTreeEncoder):
 
         tree_h = torch.stack(tree_hs, dim=1)
         return tree_h, (tree_hs, node_mask)
+
+class TopDownBilinearLSTMEncoder(TopDownTreeEncoder):
+    def __init__(self,
+                 input_sz: int,
+                 hidden_sz: int,
+                 bilinear_rank: int,
+                 bilinear_pool: int,
+                 dropout=0.):
+        super().__init__()
+        self.o_gate = DecomposedBilinear(input_sz, hidden_sz, hidden_sz, bilinear_rank, bilinear_pool)
+        self.f_gate = DecomposedBilinear(input_sz, hidden_sz, hidden_sz, bilinear_rank, bilinear_pool)
+        self.z = DecomposedBilinear(input_sz, hidden_sz, hidden_sz, bilinear_rank, bilinear_pool)
+        self.input_dropout = VariationalDropout(dropout)
+        self.hidden_dropout = VariationalDropout(dropout)
+
+    def forward(self, tree_embedding, node_connection, node_mask, tree_hx=None):
+        """
+        :param tree_embedding: (batch, node_num, input_sz)
+        :param node_connection: (batch, node_num)
+        :param node_mask: (batch, node_num)
+        :return: (batch, node_num, hidden_sz)
+        """
+        batch, node_num, hid_sz = tree_embedding.size()
+        batch_index = torch.arange(batch, dtype=torch.long, device=tree_embedding.device)
+
+        # tree_hs: [(batch, hid)]
+        if tree_hx is None:
+            tree_hs, tree_cs, start_node = [], [], 0
+        else:
+            tree_hs, tree_cs, last_node_mask = tree_hx
+            # in hs and cs there are padding values indicated by the node mask at previous time
+            # these values are invalid and must be recomputed now.
+            start_node = last_node_mask.sum(-1).min().item()
+
+        for node_id in range(start_node, node_num):
+            node_emb = tree_embedding[batch_index, node_id]
+            if node_id == 0:
+                c = node_emb
+                h = c.tanh()
+
+            else:
+                parent_node_id = node_connection[:, node_id]    # parent_node_id: (batch,)
+                parent_h = torch.stack(tree_hs, dim=1)[batch_index, parent_node_id]
+                parent_c = torch.stack(tree_cs, dim=1)[batch_index, parent_node_id]
+
+                f = self.f_gate(node_emb, parent_h).sigmoid()
+                o = self.o_gate(node_emb, parent_h).sigmoid()
+                z = self.z(node_emb, parent_h).tanh()
+
+                c = parent_c * f - (1 - f) * z
+
+                h = o * c.tanh()
+
+            if node_id < len(tree_hs):
+                tree_cs[node_id] = c
+                tree_hs[node_id] = h
+            else:
+                tree_hs.append(h)
+                tree_cs.append(c)
+
+        tree_h = torch.stack(tree_hs, dim=1)
+        return tree_h, (tree_hs, tree_cs, node_mask)
+
+
+class ReZeroParentalBilinearEncoder(TopDownTreeEncoder):
+    def __init__(self,
+                 mod: DecomposedBilinear,
+                 num_layers: int,
+                 ):
+        super().__init__()
+        self.mod = mod
+        self.num_layers = num_layers
+        self.alpha = nn.Parameter(torch.zeros(num_layers))
+
+    def forward(self, tree_embedding, node_connection, node_mask, tree_hx=None):
+        """
+        :param tree_embedding: (batch, node_num, hidden_sz), requires input_size == output_size
+        :param node_connection: (batch, node_num)
+        :param node_mask: (batch, node_num)
+        :return: (batch, node_num, hidden_sz)
+        """
+        batch, node_num, hid_sz = tree_embedding.size()
+        batch_index = torch.arange(batch, dtype=torch.long, device=tree_embedding.device)
+        layer_hid = tree_embedding
+        for depth in range(self.num_layers):
+            parent_hid = layer_hid[batch_index.unsqueeze(-1), node_connection]
+            layer_hid = layer_hid + self.mod(layer_hid, parent_hid) * self.alpha[depth]
+
+        return layer_hid, None
 
 
 if __name__ == '__main__':

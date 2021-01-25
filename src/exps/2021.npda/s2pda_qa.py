@@ -26,24 +26,29 @@ def cfq_pda():
     p.src_ns = 'questionPatternModEntities'
     p.tgt_ns = datasets.cfq_translator.UNIFIED_TREE_NS
 
-    p.enc_attn = "generalized_dot_product"
     # transformer requires input embedding equal to hidden size
     p.encoder = "lstm"
+    p.num_enc_layers = 2
     p.emb_sz = 128
     p.hidden_sz = 128
     p.num_heads = 4
+
+    p.enc_attn = "generalized_dot_product"
     p.attn_use_linear = False
     p.attn_use_bias = False
     p.attn_use_tanh_activation = False
-    p.num_enc_layers = 2
+
     p.dropout = .4
-    p.num_expander_layer = 2
+    p.num_expander_layer = 1
     p.max_derivation_step = 200
     p.max_expansion_len = 11
     p.grammar_entry = "queryunit"
 
-    p.tree_encoder = 'bare_dot_prod_attn' # lstm, bare_dot_prod_attn
-    p.tree_attn_activation = 'tanh'  # tanh, none
+    p.tree_encoder = 'bare_dot_prod_attn' # lstm, bare_dot_prod_attn, bilinear_tree_lstm, re_zero_bilinear
+    p.tree_attn_activation = 'linear'  # tanh, linear
+    p.use_attn_residual_norm = True
+    p.bilinear_rank = 1
+    p.bilinear_pool = p.hidden_sz // p.num_heads
 
     p.exact_token_predictor = "quant" # linear, mos, quant
     p.num_exact_token_mixture = 1
@@ -55,8 +60,24 @@ def cfq_pda():
 @Registry.hparamset()
 def cfq_pda_0():
     p = cfq_pda()
-    p.tree_attn_activation = 'none'
+    p.tree_encoder = 'lstm' # lstm, bare_dot_prod_attn, bilinear_tree_lstm, re_zero_bilinear
+    p.use_attn_residual_norm = True
     return p
+
+@Registry.hparamset()
+def cfq_pda_1():
+    p = cfq_pda()
+    p.tree_encoder = 'bilinear_tree_lstm' # lstm, bare_dot_prod_attn, bilinear_tree_lstm, re_zero_bilinear
+    p.use_attn_residual_norm = True
+    return p
+
+@Registry.hparamset()
+def cfq_pda_2():
+    p = cfq_pda()
+    p.tree_encoder = 're_zero_bilinear' # lstm, bare_dot_prod_attn, bilinear_tree_lstm, re_zero_bilinear
+    p.use_attn_residual_norm = True
+    return p
+
 
 def get_grammar_tutor(p, vocab):
     ns_symbol, ns_exact_token = p.tgt_ns
@@ -123,14 +144,16 @@ def get_model(p, vocab: NSVocabulary):
     from models.neural_pda.seq2pda import Seq2PDA
     from models.neural_pda.npda import NeuralPDA
     from models.neural_pda.partial_tree_encoder import TopDownLSTMEncoder, BareDotProdAttnEncoder
+    from models.neural_pda.partial_tree_encoder import TopDownBilinearLSTMEncoder, ReZeroParentalBilinearEncoder
     from models.transformer.multi_head_attention import MultiHeadSelfAttention
     from models.neural_pda.rule_scorer import MLPScorerWrapper, HeuristicMLPScorerWrapper, GeneralizedInnerProductScorer
     from models.modules.stacked_encoder import StackedEncoder
     from models.modules.attention_wrapper import get_wrapped_attention
     from models.modules.quantized_token_predictor import QuantTokenPredictor
+    from models.modules.decomposed_bilinear import DecomposedBilinear
     from models.modules.stacked_rnn_cell import StackedRNNCell, StackedLSTMCell, RNNType
     from models.modules.sym_typed_rnn_cell import SymTypedRNNCell
-    from models.modules.container import MultiInputsSequential
+    from models.modules.container import MultiInputsSequential, UnpackedInputsSequential, SelectArgsById
     from models.modules.mixture_softmax import MoSProjection
     from allennlp.nn.activations import Activation
 
@@ -179,11 +202,20 @@ def get_model(p, vocab: NSVocabulary):
             nn.Linear(p.hidden_sz, 1),
         ))
 
+    # embedding will be transformed into hid size with lhs_symbol_mapper,
+    # thus tree encoder input will be hid_sz by default
     if p.tree_encoder == 'lstm':
-        tree_encoder = TopDownLSTMEncoder(p.emb_sz, p.hidden_sz, p.hidden_sz // 2, dropout=p.dropout)
+        tree_encoder = TopDownLSTMEncoder(p.hidden_sz, p.hidden_sz, p.hidden_sz // 2, dropout=p.dropout)
     elif p.tree_encoder == 'bare_dot_prod_attn':
         tree_encoder = BareDotProdAttnEncoder(
-            activation=None if p.tree_attn_activation == 'none' else Activation.by_name(p.tree_attn_activation)(),
+            activation=Activation.by_name(p.tree_attn_activation)(),
+        )
+    elif p.tree_encoder == 'bilinear_tree_lstm':
+        tree_encoder = TopDownBilinearLSTMEncoder(p.hidden_sz, p.hidden_sz, p.bilinear_rank, p.bilinear_pool, p.dropout)
+    elif p.tree_encoder == 're_zero_bilinear':
+        tree_encoder = ReZeroParentalBilinearEncoder(
+            mod=DecomposedBilinear(p.hidden_sz, p.hidden_sz, p.hidden_sz, p.bilinear_rank, p.bilinear_pool),
+            num_layers=6,
         )
     else:
         raise NotImplementedError
@@ -191,11 +223,11 @@ def get_model(p, vocab: NSVocabulary):
     npda = NeuralPDA(
         symbol_embedding=emb_s,
         lhs_symbol_mapper=MultiInputsSequential(
-            nn.Linear(p.emb_sz, p.hidden_sz // 2),
+            nn.Linear(p.emb_sz, p.hidden_sz // p.num_heads),
             nn.Dropout(p.dropout),
-            nn.Linear(p.hidden_sz // 2, p.hidden_sz),
+            nn.Linear(p.hidden_sz // p.num_heads, p.hidden_sz),
             nn.Tanh(),
-        ) if p.emb_sz != p.hidden_sz else nn.Tanh(),
+        ) if p.emb_sz != p.hidden_sz else Activation.by_name('linear')(),   # `linear` returns the identity function
         grammar_tutor=gt,
         rhs_expander=StackedRNNCell(
             [
@@ -211,7 +243,11 @@ def get_model(p, vocab: NSVocabulary):
         token_tutor=ett,
 
         pre_tree_encoder=tree_encoder,
-        pre_tree_self_attn=MultiHeadSelfAttention(p.num_heads, p.hidden_sz, p.hidden_sz, p.hidden_sz, 0.,),
+        pre_tree_self_attn=UnpackedInputsSequential(
+            MultiHeadSelfAttention(p.num_heads, p.hidden_sz, p.hidden_sz, p.hidden_sz, 0.,),
+            SelectArgsById(0),
+        ),
+        residual_norm_after_self_attn=nn.LayerNorm(p.hidden_sz) if p.use_attn_residual_norm else None,
 
         grammar_entry=vocab.get_token_index(p.grammar_entry, ns_s),
         max_derivation_step=p.max_derivation_step,

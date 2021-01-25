@@ -14,7 +14,6 @@ from .partial_tree_encoder import TopDownTreeEncoder
 from .tree import Tree
 from .rule_scorer import RuleScorer
 from utils.nn import init_state_for_stacked_rnn, get_final_encoder_states
-from ..transformer.multi_head_attention import MultiHeadSelfAttention
 from utils.nn import prepare_input_mask, expand_tensor_size_at_dim
 
 from .tensor_typing_util import *
@@ -30,7 +29,8 @@ class NeuralPDA(nn.Module):
                  rhs_expander: StackedRNNCell,
 
                  pre_tree_encoder: TopDownTreeEncoder,
-                 pre_tree_self_attn: Nullable[MultiHeadSelfAttention],
+                 pre_tree_self_attn: nn.Module,
+                 residual_norm_after_self_attn: nn.Module,
 
                  rule_scorer: RuleScorer,
 
@@ -59,6 +59,7 @@ class NeuralPDA(nn.Module):
         # configurations
         self.grammar_entry = grammar_entry
         self.max_derivation_step = max_derivation_step  # a very large upper limit for the runtime storage
+        self.residual_norm = residual_norm_after_self_attn
 
         # -------------------
         # the helpful storage for runtime forwarding
@@ -138,7 +139,10 @@ class NeuralPDA(nn.Module):
                   expansion_frontiers] = 1
         # the root has the id equal to the padding and must be excluded from attention targets except for itself.
         attn_mask[:, 1:, 0] = 0
-        tree_hid_att, _ = self._pre_tree_self_attn(tree_hid, tree_mask, structural_mask=attn_mask)
+        tree_hid_att, = self._pre_tree_self_attn(tree_hid, tree_mask, attn_mask)
+        if self.residual_norm is not None:
+            tree_hid_att = tree_hid_att + tree_hid
+            tree_hid_att = self.residual_norm(tree_hid_att)
 
         # tree_grammar: (batch, n_d, opt_num, 4, max_seq)
         tree_grammar = self._gt(tree_nodes)
@@ -223,7 +227,7 @@ class NeuralPDA(nn.Module):
         # attn_mask[batch_index.unsqueeze(-1), stack_pos] = 0
         attn_mask[batch_index.unsqueeze(-1), node_parent] = 0
         attn_mask[batch_index, top_pos] = 1 # the node itself must be involved into self-attention
-        tree_hidden, _ = self._pre_tree_self_attn(tree_hidden, attn_mask)
+        tree_hidden, = self._pre_tree_self_attn(tree_hidden, attn_mask)
 
         # tree_state: (batch, hid)
         tree_state = tree_hidden[batch_index, top_pos]
