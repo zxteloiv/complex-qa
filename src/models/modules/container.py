@@ -16,7 +16,7 @@ class UnpackedInputsSequential(Sequential):
             if not isinstance(args, tuple):
                 args = (args,)
 
-        return args
+        return args if len(args) > 1 else args[0]
 
 
 class SelectArgsById(nn.Module):

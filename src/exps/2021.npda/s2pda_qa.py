@@ -49,6 +49,7 @@ def cfq_pda():
     p.use_attn_residual_norm = True
     p.bilinear_rank = 1
     p.bilinear_pool = p.hidden_sz // p.num_heads
+    p.num_re_zero_layer = 6
 
     p.exact_token_predictor = "quant" # linear, mos, quant
     p.num_exact_token_mixture = 1
@@ -76,6 +77,14 @@ def cfq_pda_2():
     p = cfq_pda()
     p.tree_encoder = 're_zero_bilinear' # lstm, bare_dot_prod_attn, bilinear_tree_lstm, re_zero_bilinear
     p.use_attn_residual_norm = True
+    return p
+
+@Registry.hparamset()
+def cfq_pda_3():
+    p = cfq_pda()
+    p.tree_encoder = 're_zero_bilinear' # lstm, bare_dot_prod_attn, bilinear_tree_lstm, re_zero_bilinear
+    p.use_attn_residual_norm = False
+    p.num_re_zero_layer = 18
     return p
 
 
@@ -215,7 +224,7 @@ def get_model(p, vocab: NSVocabulary):
     elif p.tree_encoder == 're_zero_bilinear':
         tree_encoder = ReZeroParentalBilinearEncoder(
             mod=DecomposedBilinear(p.hidden_sz, p.hidden_sz, p.hidden_sz, p.bilinear_rank, p.bilinear_pool),
-            num_layers=6,
+            num_layers=p.num_re_zero_layer,
         )
     else:
         raise NotImplementedError
