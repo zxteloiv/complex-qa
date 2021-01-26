@@ -93,5 +93,23 @@ def cfq_mod_ent_tranx():
     p.tied_decoder_embedding = True
     return p
 
+@Registry.hparamset()
+def cfq_mod_ent_tiny_tranx():
+    p = cfq_mod_ent_tranx()
+    p.TRAINING_LIMIT = 5
+    p.emb_sz = 32
+    p.hidden_sz = 32
+    p.encoder = 'lstm'
+    p.dec_hist_attn = 'none'
+    p.enc_attn = 'dot_product'
+    return p
+
+@Registry.hparamset()
+def cfq_mod_ent_small_tranx():
+    p = cfq_mod_ent_tiny_tranx()
+    p.emb_sz = 128
+    p.hidden_sz = 128
+    return p
+
 if __name__ == '__main__':
     main()
