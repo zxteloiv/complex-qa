@@ -134,8 +134,9 @@ class TopDownLSTMEncoder(TopDownTreeEncoder):
         return torch.matmul(self.hid_trans_z.t(), self.hid_trans_z)
 
 class BareDotProdAttnEncoder(TopDownTreeEncoder):
-    def __init__(self, activation: nn.Module = None):
+    def __init__(self, activation: nn.Module = None, pre_activation = None):
         super().__init__()
+        self.pre_activation = pre_activation
         self.activation = activation
 
     def forward(self, tree_embedding, node_connection, node_mask, tree_hx=None):
@@ -147,6 +148,8 @@ class BareDotProdAttnEncoder(TopDownTreeEncoder):
         """
         batch, node_num, hid_sz = tree_embedding.size()
         batch_index = torch.arange(batch, dtype=torch.long, device=tree_embedding.device)
+        if self.pre_activation is not None:
+            tree_embedding = self.pre_activation(tree_embedding)
 
         # tree_hs: [(batch, hid)]
         if tree_hx is None:

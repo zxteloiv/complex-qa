@@ -45,11 +45,13 @@ def cfq_pda():
     p.grammar_entry = "queryunit"
 
     p.tree_encoder = 'bare_dot_prod_attn' # lstm, bare_dot_prod_attn, bilinear_tree_lstm, re_zero_bilinear
-    p.tree_attn_activation = 'linear'  # tanh, linear
     p.use_attn_residual_norm = True
+    p.bare_attn_activation = 'linear'  # tanh, linear
+    p.bare_attn_pre_activation = 'tanh'  # tanh, linear
     p.bilinear_rank = 1
     p.bilinear_pool = p.hidden_sz // p.num_heads
     p.num_re_zero_layer = 6
+    p.detach_tree_encoder = False
 
     p.exact_token_predictor = "quant" # linear, mos, quant
     p.num_exact_token_mixture = 1
@@ -87,6 +89,15 @@ def cfq_pda_3():
     p.num_re_zero_layer = 18
     return p
 
+@Registry.hparamset()
+def cfq_pda_4():
+    p = cfq_pda()
+    p.tree_encoder = 'bare_dot_prod_attn' # lstm, bare_dot_prod_attn, bilinear_tree_lstm, re_zero_bilinear
+    p.use_attn_residual_norm = False
+    p.bare_attn_activation = 'linear'  # tanh, linear
+    p.bare_attn_pre_activation = 'tanh'  # tanh, linear
+    p.detach_tree_encoder = True
+    return p
 
 def get_grammar_tutor(p, vocab):
     ns_symbol, ns_exact_token = p.tgt_ns
@@ -217,7 +228,8 @@ def get_model(p, vocab: NSVocabulary):
         tree_encoder = TopDownLSTMEncoder(p.hidden_sz, p.hidden_sz, p.hidden_sz // 2, dropout=p.dropout)
     elif p.tree_encoder == 'bare_dot_prod_attn':
         tree_encoder = BareDotProdAttnEncoder(
-            activation=Activation.by_name(p.tree_attn_activation)(),
+            activation=Activation.by_name(p.bare_attn_activation)(),
+            pre_activation=Activation.by_name(p.bare_attn_pre_activation)(),
         )
     elif p.tree_encoder == 'bilinear_tree_lstm':
         tree_encoder = TopDownBilinearLSTMEncoder(p.hidden_sz, p.hidden_sz, p.bilinear_rank, p.bilinear_pool, p.dropout)
@@ -261,6 +273,7 @@ def get_model(p, vocab: NSVocabulary):
         grammar_entry=vocab.get_token_index(p.grammar_entry, ns_s),
         max_derivation_step=p.max_derivation_step,
         dropout=p.dropout,
+        detach_tree_encoder=p.detach_tree_encoder,
     )
 
     enc_attn_net = get_wrapped_attention(p.enc_attn, p.hidden_sz, encoder.get_output_dim(),

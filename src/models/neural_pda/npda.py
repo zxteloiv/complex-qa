@@ -39,6 +39,7 @@ class NeuralPDA(nn.Module):
                  # configuration
                  grammar_entry: int,
                  max_derivation_step: int = 1000,
+                 detach_tree_encoder: bool = False,
                  dropout: float = 0.2,
                  ):
         super().__init__()
@@ -54,12 +55,13 @@ class NeuralPDA(nn.Module):
         self._pre_tree_encoder = pre_tree_encoder
         self._pre_tree_self_attn = pre_tree_self_attn
         self._rule_scorer = rule_scorer
+        self._residual_norm = residual_norm_after_self_attn
 
         # -------------------
         # configurations
         self.grammar_entry = grammar_entry
         self.max_derivation_step = max_derivation_step  # a very large upper limit for the runtime storage
-        self.residual_norm = residual_norm_after_self_attn
+        self.detach_tree_encoder = detach_tree_encoder
 
         # -------------------
         # the helpful storage for runtime forwarding
@@ -131,6 +133,8 @@ class NeuralPDA(nn.Module):
         nodes_emb = self._embedder(tree_nodes)
         nodes_emb = self._lhs_symbol_mapper(nodes_emb)
         tree_hid, _ = self._pre_tree_encoder(nodes_emb, node_parents, tree_mask)
+        if self.detach_tree_encoder:
+            tree_hid = tree_hid.detach()
 
         batch, n_d = tree_nodes.size()
         attn_mask = tree_mask.new_zeros((batch, n_d, n_d))
@@ -140,9 +144,9 @@ class NeuralPDA(nn.Module):
         # the root has the id equal to the padding and must be excluded from attention targets except for itself.
         attn_mask[:, 1:, 0] = 0
         tree_hid_att = self._pre_tree_self_attn(tree_hid, tree_mask, attn_mask)
-        if self.residual_norm is not None:
+        if self._residual_norm is not None:
             tree_hid_att = tree_hid_att + tree_hid
-            tree_hid_att = self.residual_norm(tree_hid_att)
+            tree_hid_att = self._residual_norm(tree_hid_att)
 
         # tree_grammar: (batch, n_d, opt_num, 4, max_seq)
         tree_grammar = self._gt(tree_nodes)
