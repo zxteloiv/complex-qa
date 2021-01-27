@@ -6,6 +6,7 @@ from collections import defaultdict
 
 from trialbot.training import TrialBot, Registry
 from trialbot.data import NSVocabulary
+from trialbot.training.updater import TrainingUpdater
 
 import datasets.cfq
 import datasets.cfq_translator
@@ -44,14 +45,17 @@ def cfq_pda():
     p.max_expansion_len = 11
     p.grammar_entry = "queryunit"
 
-    p.tree_encoder = 'bare_dot_prod_attn' # lstm, bare_dot_prod_attn, bilinear_tree_lstm, re_zero_bilinear
+    p.tree_encoder = 'lstm' # lstm, bare_dot_prod_attn, bilinear_tree_lstm, re_zero_bilinear
     p.use_attn_residual_norm = True
     p.bare_attn_activation = 'linear'  # tanh, linear
     p.bare_attn_pre_activation = 'tanh'  # tanh, linear
     p.bilinear_rank = 1
     p.bilinear_pool = p.hidden_sz // p.num_heads
-    p.num_re_zero_layer = 6
-    p.detach_tree_encoder = False
+    p.bilinear_linear = False   # by default do not use linear mappings within bilinear modules
+    p.bilinear_bias = False     # by default do not use bias within bilinear modules
+    p.num_re_zero_layer = 18
+    p.detach_tree_encoder = False   # whether to stop-gradient for the tree encoder parameters
+    p.tree_training_lr_factor = 1.  # applied on the learning rate for tree encoder parameters
 
     p.exact_token_predictor = "quant" # linear, mos, quant
     p.num_exact_token_mixture = 1
@@ -63,40 +67,28 @@ def cfq_pda():
 @Registry.hparamset()
 def cfq_pda_0():
     p = cfq_pda()
-    p.tree_encoder = 'lstm' # lstm, bare_dot_prod_attn, bilinear_tree_lstm, re_zero_bilinear
-    p.use_attn_residual_norm = True
+    p.emb_sz = p.hidden_sz = 256
     return p
 
 @Registry.hparamset()
 def cfq_pda_1():
     p = cfq_pda()
-    p.tree_encoder = 'bilinear_tree_lstm' # lstm, bare_dot_prod_attn, bilinear_tree_lstm, re_zero_bilinear
-    p.use_attn_residual_norm = True
+    p.tree_training_lr_factor = 1e-2
     return p
 
 @Registry.hparamset()
 def cfq_pda_2():
     p = cfq_pda()
-    p.tree_encoder = 're_zero_bilinear' # lstm, bare_dot_prod_attn, bilinear_tree_lstm, re_zero_bilinear
-    p.use_attn_residual_norm = True
+    p.emb_sz = p.hidden_sz = 256
+    p.tree_training_lr_factor = 1e-2
     return p
 
 @Registry.hparamset()
 def cfq_pda_3():
     p = cfq_pda()
-    p.tree_encoder = 're_zero_bilinear' # lstm, bare_dot_prod_attn, bilinear_tree_lstm, re_zero_bilinear
-    p.use_attn_residual_norm = False
-    p.num_re_zero_layer = 18
-    return p
-
-@Registry.hparamset()
-def cfq_pda_4():
-    p = cfq_pda()
-    p.tree_encoder = 'bare_dot_prod_attn' # lstm, bare_dot_prod_attn, bilinear_tree_lstm, re_zero_bilinear
-    p.use_attn_residual_norm = False
-    p.bare_attn_activation = 'linear'  # tanh, linear
-    p.bare_attn_pre_activation = 'tanh'  # tanh, linear
-    p.detach_tree_encoder = True
+    p.emb_sz = p.hidden_sz = 256
+    p.tree_encoder = 're_zero_bilinear'
+    p.tree_training_lr_factor = 1e-2
     return p
 
 def get_grammar_tutor(p, vocab):
@@ -159,18 +151,57 @@ def get_cfq_tailored_tutor(p, vocab):
     gt = GrammarTutor(vocab.get_vocab_size(ns_s), ordered_lhs, ordered_rhs_options)
     return ett, gt
 
+def get_tree_encoder(p, vocab):
+    import models.neural_pda.partial_tree_encoder as partial_tree
+    from models.modules.decomposed_bilinear import DecomposedBilinear
+    from allennlp.nn.activations import Activation
+
+    # embedding will be transformed into hid size with lhs_symbol_mapper,
+    # thus tree encoder input will be hid_sz by default
+    if p.tree_encoder == 'lstm':
+        tree_encoder = partial_tree.TopDownLSTMEncoder(
+            p.hidden_sz, p.hidden_sz, p.hidden_sz // 2, dropout=p.dropout
+        )
+
+    elif p.tree_encoder == 'bare_dot_prod_attn':
+        tree_encoder = partial_tree.BareDotProdAttnEncoder(
+            activation=Activation.by_name(p.bare_attn_activation)(),
+            pre_activation=Activation.by_name(p.bare_attn_pre_activation)(),
+        )
+
+    elif p.tree_encoder == 'bilinear_tree_lstm':
+        tree_encoder = partial_tree.TopDownBilinearLSTMEncoder(
+            p.hidden_sz, p.hidden_sz,
+            p.bilinear_rank, p.bilinear_pool, p.bilinear_linear, p.bilinear_bias, p.dropout,
+        )
+
+    elif p.tree_encoder.startswith('re_zero'):
+        if p.tree_encoder.endswith('bilinear'):
+            layer_encoder = partial_tree.SingleStepBilinear(DecomposedBilinear(
+                p.hidden_sz, p.hidden_sz, p.hidden_sz,
+                p.bilinear_rank, p.bilinear_pool, p.bilinear_linear, p.bilinear_bias, p.dropout,
+            ))
+        elif p.tree_encoder.endswith('dot_prod'):
+            layer_encoder = partial_tree.SingleStepDotProd()
+        else:
+            raise NotImplementedError
+
+        tree_encoder = partial_tree.ReZeroEncoder(num_layers=p.num_re_zero_layer, layer_encoder=layer_encoder)
+
+    else:
+        raise NotImplementedError
+
+    return tree_encoder
+
 def get_model(p, vocab: NSVocabulary):
     from torch import nn
     from models.neural_pda.seq2pda import Seq2PDA
     from models.neural_pda.npda import NeuralPDA
-    from models.neural_pda.partial_tree_encoder import TopDownLSTMEncoder, BareDotProdAttnEncoder
-    from models.neural_pda.partial_tree_encoder import TopDownBilinearLSTMEncoder, ReZeroParentalBilinearEncoder
     from models.transformer.multi_head_attention import MultiHeadSelfAttention
     from models.neural_pda.rule_scorer import MLPScorerWrapper, HeuristicMLPScorerWrapper, GeneralizedInnerProductScorer
     from models.modules.stacked_encoder import StackedEncoder
     from models.modules.attention_wrapper import get_wrapped_attention
     from models.modules.quantized_token_predictor import QuantTokenPredictor
-    from models.modules.decomposed_bilinear import DecomposedBilinear
     from models.modules.stacked_rnn_cell import StackedRNNCell, StackedLSTMCell, RNNType
     from models.modules.sym_typed_rnn_cell import SymTypedRNNCell
     from models.modules.container import MultiInputsSequential, UnpackedInputsSequential, SelectArgsById
@@ -222,24 +253,11 @@ def get_model(p, vocab: NSVocabulary):
             nn.Linear(p.hidden_sz, 1),
         ))
 
-    # embedding will be transformed into hid size with lhs_symbol_mapper,
-    # thus tree encoder input will be hid_sz by default
-    if p.tree_encoder == 'lstm':
-        tree_encoder = TopDownLSTMEncoder(p.hidden_sz, p.hidden_sz, p.hidden_sz // 2, dropout=p.dropout)
-    elif p.tree_encoder == 'bare_dot_prod_attn':
-        tree_encoder = BareDotProdAttnEncoder(
-            activation=Activation.by_name(p.bare_attn_activation)(),
-            pre_activation=Activation.by_name(p.bare_attn_pre_activation)(),
-        )
-    elif p.tree_encoder == 'bilinear_tree_lstm':
-        tree_encoder = TopDownBilinearLSTMEncoder(p.hidden_sz, p.hidden_sz, p.bilinear_rank, p.bilinear_pool, p.dropout)
-    elif p.tree_encoder == 're_zero_bilinear':
-        tree_encoder = ReZeroParentalBilinearEncoder(
-            mod=DecomposedBilinear(p.hidden_sz, p.hidden_sz, p.hidden_sz, p.bilinear_rank, p.bilinear_pool),
-            num_layers=p.num_re_zero_layer,
-        )
-    else:
-        raise NotImplementedError
+    # although the tree encoder construction needs not be here,
+    # to keep the initialization exactly the same numerically as before (when the best baseline is achieved),
+    # move the construction elsewhere will cause the model initialization different.
+    # Though a robust algorithm should not be so sensitive, we just keep things untouched for better comparison.
+    tree_encoder = get_tree_encoder(p, vocab)
 
     npda = NeuralPDA(
         symbol_embedding=emb_s,
@@ -263,7 +281,7 @@ def get_model(p, vocab: NSVocabulary):
         exact_token_predictor=exact_token_predictor,
         token_tutor=ett,
 
-        pre_tree_encoder=tree_encoder,
+        pre_tree_encoder=tree_encoder, #get_tree_encoder(p, vocab),
         pre_tree_self_attn=UnpackedInputsSequential(
             MultiHeadSelfAttention(p.num_heads, p.hidden_sz, p.hidden_sz, p.hidden_sz, 0.,),
             SelectArgsById(0),
@@ -295,6 +313,50 @@ def get_model(p, vocab: NSVocabulary):
     )
 
     return model
+
+class PDATrainingUpdater(TrainingUpdater):
+    @classmethod
+    def from_bot(cls, bot: TrialBot) -> 'PDATrainingUpdater':
+        import torch
+        from trialbot.data import RandomIterator
+        from models.neural_pda.seq2pda import Seq2PDA
+        model: Seq2PDA
+        args, p, model, logger = bot.args, bot.hparams, bot.model, bot.logger
+
+        if p.tree_training_lr_factor < 1:
+            lr_conds = [
+                (lambda k: 'pre_tree_encoder' in k, p.tree_training_lr_factor),
+                (lambda k: 'npda' in k and 'embedder' in k, 1 - 0.2 * p.tree_training_lr_factor),
+            ]
+            params = [
+                { 'params': list(v for k, v in model.named_parameters() if cond(k)), 'lr': p.ADAM_LR * lr_factor }
+                for cond, lr_factor in lr_conds
+            ]
+            others = list(v for k, v in model.named_parameters() if all(not cond(k) for cond, _ in lr_conds))
+            if len(others) > 0:
+                params.append({'params': others})
+            logger.info(f"parameters group defined as {params}")
+
+        else:
+            params = model.parameters()
+
+        if hasattr(p, "OPTIM") and isinstance(p.OPTIM, str) and p.OPTIM.lower() == "sgd":
+            optim = torch.optim.SGD(params, p.SGD_LR, weight_decay=p.WEIGHT_DECAY)
+        elif hasattr(p, "OPTIM") and isinstance(p.OPTIM, str) and p.OPTIM.lower() == "radam":
+            from radam import RAdam
+            optim = RAdam(params, lr=p.ADAM_LR, weight_decay=p.WEIGHT_DECAY)
+        else:
+            optim = torch.optim.Adam(params, p.ADAM_LR, p.ADAM_BETAS, weight_decay=p.WEIGHT_DECAY)
+
+        logger.info(f"Using the optimizer {str(optim)}")
+
+        repeat_iter = shuffle_iter = not args.debug
+        iterator = RandomIterator(bot.train_set, p.batch_sz, bot.translator, shuffle=shuffle_iter, repeat=repeat_iter)
+        if args.debug and args.skip:
+            iterator.reset(args.skip)
+
+        updater = cls(model, iterator, optim, args.device, args.dry_run)
+        return updater
 
 def main():
     from utils.trialbot_setup import setup
@@ -343,6 +405,8 @@ def main():
         if args.debug:
             from utils.trial_bot_extensions import track_pytorch_module_forward_time
             bot.add_event_handler(Events.STARTED, track_pytorch_module_forward_time, 100)
+
+        bot.updater = PDATrainingUpdater.from_bot(bot)
 
     else:
         @bot.attach_extension(Events.ITERATION_COMPLETED)

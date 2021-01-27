@@ -194,11 +194,16 @@ class TopDownBilinearLSTMEncoder(TopDownTreeEncoder):
                  hidden_sz: int,
                  bilinear_rank: int,
                  bilinear_pool: int,
+                 use_linear: bool = False,
+                 use_bias: bool = False,
                  dropout=0.):
         super().__init__()
-        self.o_gate = DecomposedBilinear(input_sz, hidden_sz, hidden_sz, bilinear_rank, bilinear_pool)
-        self.f_gate = DecomposedBilinear(input_sz, hidden_sz, hidden_sz, bilinear_rank, bilinear_pool)
-        self.z = DecomposedBilinear(input_sz, hidden_sz, hidden_sz, bilinear_rank, bilinear_pool)
+        self.o_gate = DecomposedBilinear(input_sz, hidden_sz, hidden_sz, bilinear_rank, bilinear_pool,
+                                         use_linear=use_linear, use_bias=use_bias,)
+        self.f_gate = DecomposedBilinear(input_sz, hidden_sz, hidden_sz, bilinear_rank, bilinear_pool,
+                                         use_linear=use_linear, use_bias=use_bias,)
+        self.z = DecomposedBilinear(input_sz, hidden_sz, hidden_sz, bilinear_rank, bilinear_pool,
+                                    use_linear = use_linear, use_bias = use_bias,)
         self.input_dropout = VariationalDropout(dropout)
         self.hidden_dropout = VariationalDropout(dropout)
 
@@ -250,18 +255,50 @@ class TopDownBilinearLSTMEncoder(TopDownTreeEncoder):
         tree_h = torch.stack(tree_hs, dim=1)
         return tree_h, (tree_hs, tree_cs, node_mask)
 
+class SingleStepTreeEncoder(nn.Module):
+    def forward(self, tree_embedding, node_connection, node_mask) -> torch.Tensor:
+        """
+        :param tree_embedding: (batch, node_num, input_sz)
+        :param node_connection: (batch, node_num)
+        :param node_mask: (batch, node_num)
+        :return: (batch, node_num, hidden_sz)
+        """
+        raise NotImplementedError
 
-class ReZeroParentalBilinearEncoder(TopDownTreeEncoder):
-    def __init__(self,
-                 mod: DecomposedBilinear,
-                 num_layers: int,
-                 ):
+class ReZeroEncoder(TopDownTreeEncoder):
+    def __init__(self, num_layers: int, layer_encoder: SingleStepTreeEncoder):
         super().__init__()
-        self.mod = mod
+        self._layer_enc = layer_encoder
         self.num_layers = num_layers
         self.alpha = nn.Parameter(torch.zeros(num_layers))
 
-    def forward(self, tree_embedding, node_connection, node_mask, tree_hx=None):
+    def forward(self, tree_embedding, node_connection, node_mask, tree_hx=None) -> Tuple[torch.Tensor, Any]:
+        """
+        :param tree_embedding: (batch, node_num, hidden_sz), requires input_size == output_size
+        :param node_connection: (batch, node_num)
+        :param node_mask: (batch, node_num)
+        :return: (batch, node_num, hidden_sz)
+        """
+        layer_hid = tree_embedding
+        for depth in range(self.num_layers):
+            new_hid = self._layer_enc(layer_hid, node_connection, node_mask)
+            layer_hid = layer_hid + new_hid * self.alpha[depth]
+
+        return layer_hid, None
+
+class SingleStepBilinear(SingleStepTreeEncoder):
+    def __init__(self, mod: DecomposedBilinear):
+        super().__init__()
+        self.mod = mod
+
+    def forward(self, tree_embedding, node_connection, node_mask) -> torch.Tensor:
+        batch, node_num, hid_sz = tree_embedding.size()
+        batch_index = torch.arange(batch, dtype=torch.long, device=tree_embedding.device)
+        parent_hid = tree_embedding[batch_index.unsqueeze(-1), node_connection]
+        return self.mod(tree_embedding, parent_hid)
+
+class SingleStepDotProd(SingleStepTreeEncoder):
+    def forward(self, tree_embedding, node_connection, node_mask) -> torch.Tensor:
         """
         :param tree_embedding: (batch, node_num, hidden_sz), requires input_size == output_size
         :param node_connection: (batch, node_num)
@@ -270,13 +307,17 @@ class ReZeroParentalBilinearEncoder(TopDownTreeEncoder):
         """
         batch, node_num, hid_sz = tree_embedding.size()
         batch_index = torch.arange(batch, dtype=torch.long, device=tree_embedding.device)
-        layer_hid = tree_embedding
-        for depth in range(self.num_layers):
-            parent_hid = layer_hid[batch_index.unsqueeze(-1), node_connection]
-            layer_hid = layer_hid + self.mod(layer_hid, parent_hid) * self.alpha[depth]
+        # parent_h: (batch, node, hid)
+        parent_h = tree_embedding[batch_index.unsqueeze(-1), node_connection]
+        # alpha, beta, w_h, w_x: (batch, node, 1)
+        alpha = ((parent_h * tree_embedding).sum(dim=-1, keepdim=True) / math.sqrt(hid_sz)).exp()
+        beta = ((tree_embedding * tree_embedding).sum(dim=-1, keepdim=True) / math.sqrt(hid_sz)).exp()
+        w_h = (alpha + 1e-15) / (alpha + beta + 1e-15)
+        w_x = beta / (alpha + beta + 1e-15)
 
-        return layer_hid, None
-
+        # h: (batch, hid)
+        h = (w_h * parent_h + w_x * tree_embedding)
+        return h
 
 if __name__ == '__main__':
     enc = TopDownLSTMEncoder(300, 128, 64)

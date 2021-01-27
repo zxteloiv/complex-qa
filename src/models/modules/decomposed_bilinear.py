@@ -25,6 +25,7 @@ class DecomposedBilinear(nn.Module):
                  decomposed_rank: Optional[int] = None,
                  pool_size: Optional[int] = None,
                  ignore_mapping_for_equal_pool: bool = True,
+                 use_linear: bool = False,
                  use_bias: bool = False
                  ):
         super().__init__()
@@ -38,15 +39,18 @@ class DecomposedBilinear(nn.Module):
 
         if ignore_mapping_for_equal_pool and out_size == pool_size:
             self.w_o = None
-
         else:
             self.w_o = nn.Parameter(torch.empty(pool_size, out_size))
             nn.init.kaiming_uniform_(self.w_o, nonlinearity='tanh')
 
+        self.linear_a = self.linear_b = None
+        if use_linear:
+            self.linear_a = nn.Linear(left_size, out_size, bias=False)
+            self.linear_b = nn.Linear(right_size, out_size, bias=False)
+
+        self.b = None
         if use_bias:
             self.b = nn.Parameter(torch.zeros(out_size))
-        else:
-            self.b = None
 
     def forward(self, left: torch.Tensor, right: torch.Tensor) -> torch.Tensor:
         """
@@ -58,15 +62,12 @@ class DecomposedBilinear(nn.Module):
         left = left.reshape(-1, left_size[-1])
         right = right.reshape(-1, right_size[-1])
 
-        # left: (-1, 1, 1, left)
-        # right: (-1, 1, 1, right)
-        left = left.unsqueeze(-2).unsqueeze(-2)
-        right = right.unsqueeze(-2).unsqueeze(-2)
-
+        # left_unsqueezed: (-1, 1, 1, left)
+        # right_unsqueezed: (-1, 1, 1, right)
         # wa_left: (-1, pool, rank)
         # wb_right: (-1, pool, rank)
-        wa_left = (self.w_a * left).sum(dim=-1)
-        wb_right = (self.w_b * right).sum(dim=-1)
+        wa_left = (self.w_a * left.unsqueeze(-2).unsqueeze(-2)).sum(dim=-1)
+        wb_right = (self.w_b * right.unsqueeze(-2).unsqueeze(-2)).sum(dim=-1)
 
         # lwr: (-1, pool)
         lwr = (wa_left * wb_right).sum(dim=-1)
@@ -77,6 +78,9 @@ class DecomposedBilinear(nn.Module):
 
         if self.b is not None:
             lwr = lwr + self.b
+
+        if self.linear_a is not None and self.linear_b is not None:
+            lwr = lwr + self.linear_a(left)  + self.linear_b(right)
 
         # lwr: (*, out_size)
         return lwr.reshape(*left_size[:-1], -1)

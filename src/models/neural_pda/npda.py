@@ -231,10 +231,13 @@ class NeuralPDA(nn.Module):
         # attn_mask[batch_index.unsqueeze(-1), stack_pos] = 0
         attn_mask[batch_index.unsqueeze(-1), node_parent] = 0
         attn_mask[batch_index, top_pos] = 1 # the node itself must be involved into self-attention
-        tree_hidden = self._pre_tree_self_attn(tree_hidden, attn_mask)
+        tree_hid_att = self._pre_tree_self_attn(tree_hidden, attn_mask)
+        if self._residual_norm is not None:
+            tree_hid_att = tree_hid_att + tree_hidden
+            tree_hid_att = self._residual_norm(tree_hid_att)
 
         # tree_state: (batch, hid)
-        tree_state = tree_hidden[batch_index, top_pos]
+        tree_state = tree_hid_att[batch_index, top_pos]
         return tree_state
 
     def _select_node(self) -> Tuple[LT, LT, LT]:
