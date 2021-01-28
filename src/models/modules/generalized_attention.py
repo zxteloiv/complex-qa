@@ -67,7 +67,7 @@ class GeneralizedBilinearAttention(Attention):
             self.a_linear = self.b_linear = None
 
         # without a nonlinear activation, the bias is useless because the softmax will erase the differences
-        self.bias = nn.Parameter(torch.randn(1,)) if use_bias and activation is not None else None
+        self.bias = nn.Parameter(torch.zeros(1,)) if use_bias and activation is not None else None
         self.activation = activation
 
         self.reset_parameters()

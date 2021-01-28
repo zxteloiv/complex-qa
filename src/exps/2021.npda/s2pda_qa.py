@@ -61,7 +61,7 @@ def cfq_pda():
     p.num_exact_token_mixture = 1
     p.exact_token_quant_criterion = "dot_product"
 
-    p.rule_scorer = "triple_inner_product" # heuristic, mlp, triple_inner_product, triple_cosine
+    p.rule_scorer = "triple_inner_product" # heuristic, mlp, triple_inner_product
     return p
 
 @Registry.hparamset()
@@ -88,6 +88,24 @@ def cfq_pda_3():
     p = cfq_pda()
     p.emb_sz = p.hidden_sz = 256
     p.tree_encoder = 're_zero_bilinear'
+    p.tree_training_lr_factor = 1e-2
+    return p
+
+@Registry.hparamset()
+def cfq_pda_4():
+    p = cfq_pda()
+    p.emb_sz = p.hidden_sz = 256
+    p.tree_encoder = 're_zero_bilinear'
+    p.tree_training_lr_factor = .1
+    p.encoder = 'bilstm'
+    p.enc_attn = 'generalized_bilinear'
+    p.attn_use_bias = True
+    p.rule_scorer = 'mlp'
+    return p
+
+@Registry.hparamset()
+def cfq_pda_5():
+    p = cfq_pda_4()
     p.tree_training_lr_factor = 1e-2
     return p
 
@@ -178,8 +196,8 @@ def get_tree_encoder(p, vocab):
     elif p.tree_encoder.startswith('re_zero'):
         if p.tree_encoder.endswith('bilinear'):
             layer_encoder = partial_tree.SingleStepBilinear(DecomposedBilinear(
-                p.hidden_sz, p.hidden_sz, p.hidden_sz,
-                p.bilinear_rank, p.bilinear_pool, p.bilinear_linear, p.bilinear_bias, p.dropout,
+                p.hidden_sz, p.hidden_sz, p.hidden_sz, p.bilinear_rank, p.bilinear_pool,
+                use_linear=p.bilinear_linear, use_bias=p.bilinear_bias,
             ))
         elif p.tree_encoder.endswith('dot_prod'):
             layer_encoder = partial_tree.SingleStepDotProd()
@@ -243,14 +261,18 @@ def get_model(p, vocab: NSVocabulary):
         ))
     elif p.rule_scorer == "triple_inner_product":
         rule_scorer = GeneralizedInnerProductScorer()
-    elif p.rule_scorer == "triple_cosine":
-        rule_scorer = GeneralizedInnerProductScorer(normalized=True)
     else:
         rule_scorer = MLPScorerWrapper(MultiInputsSequential(
-            nn.Linear(encoder.get_output_dim() + p.hidden_sz * 2, p.hidden_sz),
+            nn.Linear(encoder.get_output_dim() + p.hidden_sz * 2, p.hidden_sz // p.num_heads),
+            nn.LayerNorm(p.hidden_sz // p.num_heads),
             nn.Dropout(p.dropout),
-            Activation.by_name('tanh')(),
+            nn.Tanh(),
+            nn.Linear(p.hidden_sz // p.num_heads, p.hidden_sz),
+            nn.LayerNorm(p.hidden_sz),
+            nn.Dropout(p.dropout),
+            Activation.by_name('mish')(),
             nn.Linear(p.hidden_sz, 1),
+            nn.Sigmoid(),
         ))
 
     # although the tree encoder construction needs not be here,
@@ -328,6 +350,10 @@ class PDATrainingUpdater(TrainingUpdater):
                 (lambda k: 'pre_tree_encoder' in k, p.tree_training_lr_factor),
                 (lambda k: 'npda' in k and 'embedder' in k, 1 - 0.2 * p.tree_training_lr_factor),
             ]
+            params_names = [
+                { 'params': list(k for k, v in model.named_parameters() if cond(k)), 'lr': p.ADAM_LR * lr_factor }
+                for cond, lr_factor in lr_conds
+            ]
             params = [
                 { 'params': list(v for k, v in model.named_parameters() if cond(k)), 'lr': p.ADAM_LR * lr_factor }
                 for cond, lr_factor in lr_conds
@@ -335,7 +361,8 @@ class PDATrainingUpdater(TrainingUpdater):
             others = list(v for k, v in model.named_parameters() if all(not cond(k) for cond, _ in lr_conds))
             if len(others) > 0:
                 params.append({'params': others})
-            logger.info(f"parameters group defined as {params}")
+
+            logger.info(f"param_groups defined as {params_names}")
 
         else:
             params = model.parameters()
