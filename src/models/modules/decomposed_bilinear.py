@@ -52,25 +52,29 @@ class DecomposedBilinear(nn.Module):
         if use_bias:
             self.b = nn.Parameter(torch.zeros(out_size))
 
-    def forward(self, left: torch.Tensor, right: torch.Tensor) -> torch.Tensor:
+    def forward(self, left: torch.Tensor, right: Optional[torch.Tensor] = None) -> torch.Tensor:
         """
         :param left: (*, left)
         :param right: (*, right)
         :return:
         """
-        left_size, right_size = left.size(), right.size()
+        left_size = left.size()
         left = left.reshape(-1, left_size[-1])
-        right = right.reshape(-1, right_size[-1])
-
         # left_unsqueezed: (-1, 1, 1, left)
-        # right_unsqueezed: (-1, 1, 1, right)
         # wa_left: (-1, pool, rank)
-        # wb_right: (-1, pool, rank)
         wa_left = (self.w_a * left.unsqueeze(-2).unsqueeze(-2)).sum(dim=-1)
-        wb_right = (self.w_b * right.unsqueeze(-2).unsqueeze(-2)).sum(dim=-1)
 
-        # lwr: (-1, pool)
-        lwr = (wa_left * wb_right).sum(dim=-1)
+        if right is not None:
+            right = right.reshape(-1, right.size()[-1])
+
+            # right_unsqueezed: (-1, 1, 1, right)
+            # wb_right: (-1, pool, rank)
+            wb_right = (self.w_b * right.unsqueeze(-2).unsqueeze(-2)).sum(dim=-1)
+
+            # lwr: (-1, pool)
+            lwr = (wa_left * wb_right).sum(dim=-1)
+        else:
+            lwr = wa_left.sum(dim=-1)
 
         if self.w_o is not None:
             # lwr: (-1, out_size)
@@ -79,8 +83,11 @@ class DecomposedBilinear(nn.Module):
         if self.b is not None:
             lwr = lwr + self.b
 
-        if self.linear_a is not None and self.linear_b is not None:
-            lwr = lwr + self.linear_a(left)  + self.linear_b(right)
+        if self.linear_a is not None:
+            lwr = lwr + self.linear_a(left)
+
+        if self.linear_b is not None and right is not None:
+            lwr = lwr + self.linear_b(right)
 
         # lwr: (*, out_size)
         return lwr.reshape(*left_size[:-1], -1)

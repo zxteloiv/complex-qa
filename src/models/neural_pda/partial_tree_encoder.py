@@ -17,11 +17,10 @@ class TopDownTreeEncoder(nn.Module):
         raise NotImplementedError
 
 class TopDownLSTMEncoder(TopDownTreeEncoder):
-    def __init__(self, input_sz: int, hidden_sz: int, transition_matrix_rank: int = 0, dropout=0.):
+    def __init__(self, input_sz: int, hidden_sz: int, transition_matrix_rank: int = 0, dropout=0.,
+                 parent_detach: bool = False):
         super().__init__()
-        self.inp_mapping_o = nn.Linear(input_sz, hidden_sz)
-        self.inp_mapping_f = nn.Linear(input_sz, hidden_sz)
-        self.inp_mapping_z = nn.Linear(input_sz, hidden_sz)
+        self.inp_mapping = nn.Linear(input_sz, hidden_sz * 3)
         self.input_dropout = VariationalDropout(dropout)
         self.hidden_dropout = VariationalDropout(dropout)
 
@@ -39,6 +38,7 @@ class TopDownLSTMEncoder(TopDownTreeEncoder):
         self.inp_sz = input_sz
         self.hid_sz = hidden_sz
         self.trans_sz = transition_matrix_rank
+        self.parent_detach = parent_detach
 
     def forward(self, tree_embedding, node_connection, node_mask, tree_hx=None):
         """
@@ -53,9 +53,7 @@ class TopDownLSTMEncoder(TopDownTreeEncoder):
         tree_embedding = self.input_dropout(tree_embedding)
 
         # inp_*: (batch, node_num, hidden_sz)
-        inp_f = self.inp_mapping_f(tree_embedding)
-        inp_o = self.inp_mapping_o(tree_embedding)
-        inp_z = self.inp_mapping_z(tree_embedding)
+        inp_f, inp_o, inp_z = self.inp_mapping(tree_embedding).split(self.hid_sz, dim=-1)
 
         # tree_h, tree_c: [(batch, hid)]
         if tree_hx is None:
@@ -74,8 +72,13 @@ class TopDownLSTMEncoder(TopDownTreeEncoder):
 
             if node_id > 0:
                 parent_h = torch.stack(tree_hs, dim=1)[batch_index, parent_node_id]
-                parent_h = self.hidden_dropout(parent_h)
                 parent_c = torch.stack(tree_cs, dim=1)[batch_index, parent_node_id]
+                if self.parent_detach:
+                    parent_h = parent_h.detach()
+                    parent_c = parent_c.detach()
+
+                parent_h = self.hidden_dropout(parent_h)
+                parent_c = self.hidden_dropout(parent_c)
                 parent = (parent_h, parent_c)
             else:
                 parent = None
@@ -133,61 +136,6 @@ class TopDownLSTMEncoder(TopDownTreeEncoder):
         """:return: (hid, hid)"""
         return torch.matmul(self.hid_trans_z.t(), self.hid_trans_z)
 
-class BareDotProdAttnEncoder(TopDownTreeEncoder):
-    def __init__(self, activation: nn.Module = None, pre_activation = None):
-        super().__init__()
-        self.pre_activation = pre_activation
-        self.activation = activation
-
-    def forward(self, tree_embedding, node_connection, node_mask, tree_hx=None):
-        """
-        :param tree_embedding: (batch, node_num, input_sz)
-        :param node_connection: (batch, node_num)
-        :param node_mask: (batch, node_num)
-        :return: (batch, node_num, hidden_sz)
-        """
-        batch, node_num, hid_sz = tree_embedding.size()
-        batch_index = torch.arange(batch, dtype=torch.long, device=tree_embedding.device)
-        if self.pre_activation is not None:
-            tree_embedding = self.pre_activation(tree_embedding)
-
-        # tree_hs: [(batch, hid)]
-        if tree_hx is None:
-            tree_hs = []
-            start_node = 0
-        else:
-            tree_hs, last_node_mask = tree_hx
-            # in hs and cs there are padding values indicated by the node mask at previous time
-            # these values are invalid and must be recomputed now.
-            start_node = last_node_mask.sum(-1).min().item()
-
-        for node_id in range(start_node, node_num):
-            node_emb = tree_embedding[batch_index, node_id]
-            if node_id == 0:
-                h = node_emb
-
-            else:
-                parent_node_id = node_connection[:, node_id]    # parent_node_id: (batch,)
-                parent_h = torch.stack(tree_hs, dim=1)[batch_index, parent_node_id]
-                # alpha, beta, w_h, w_x: (batch,)
-                alpha = ((parent_h * node_emb).sum(dim=-1, keepdim=True) / math.sqrt(hid_sz)).exp()
-                beta = ((node_emb * node_emb).sum(dim=-1, keepdim=True) / math.sqrt(hid_sz)).exp()
-                w_h = alpha / (alpha + beta + 1e-15)
-                w_x = beta / (alpha + beta + 1e-15)
-
-                # h: (batch, hid)
-                h = (w_h * parent_h + w_x * node_emb)
-                if self.activation is not None:
-                    h = self.activation(h)
-
-            if node_id < len(tree_hs):
-                tree_hs[node_id] = h
-            else:
-                tree_hs.append(h)
-
-        tree_h = torch.stack(tree_hs, dim=1)
-        return tree_h, (tree_hs, node_mask)
-
 class TopDownBilinearLSTMEncoder(TopDownTreeEncoder):
     def __init__(self,
                  input_sz: int,
@@ -196,7 +144,9 @@ class TopDownBilinearLSTMEncoder(TopDownTreeEncoder):
                  bilinear_pool: int,
                  use_linear: bool = False,
                  use_bias: bool = False,
-                 dropout=0.):
+                 dropout=0.,
+                 parent_detach: bool = False,
+                 ):
         super().__init__()
         self.o_gate = DecomposedBilinear(input_sz, hidden_sz, hidden_sz, bilinear_rank, bilinear_pool,
                                          use_linear=use_linear, use_bias=use_bias,)
@@ -206,6 +156,7 @@ class TopDownBilinearLSTMEncoder(TopDownTreeEncoder):
                                     use_linear = use_linear, use_bias = use_bias,)
         self.input_dropout = VariationalDropout(dropout)
         self.hidden_dropout = VariationalDropout(dropout)
+        self.parent_detach = parent_detach
 
     def forward(self, tree_embedding, node_connection, node_mask, tree_hx=None):
         """
@@ -216,6 +167,7 @@ class TopDownBilinearLSTMEncoder(TopDownTreeEncoder):
         """
         batch, node_num, hid_sz = tree_embedding.size()
         batch_index = torch.arange(batch, dtype=torch.long, device=tree_embedding.device)
+        tree_embedding = self.input_dropout(tree_embedding)
 
         # tree_hs: [(batch, hid)]
         if tree_hx is None:
@@ -229,21 +181,26 @@ class TopDownBilinearLSTMEncoder(TopDownTreeEncoder):
         for node_id in range(start_node, node_num):
             node_emb = tree_embedding[batch_index, node_id]
             if node_id == 0:
-                c = node_emb
-                h = c.tanh()
+                parent_c = 0
+                parent_h = None
 
             else:
                 parent_node_id = node_connection[:, node_id]    # parent_node_id: (batch,)
                 parent_h = torch.stack(tree_hs, dim=1)[batch_index, parent_node_id]
                 parent_c = torch.stack(tree_cs, dim=1)[batch_index, parent_node_id]
+                if self.parent_detach:
+                    parent_h = parent_h.detach()
+                    parent_c = parent_c.detach()
 
-                f = self.f_gate(node_emb, parent_h).sigmoid()
-                o = self.o_gate(node_emb, parent_h).sigmoid()
-                z = self.z(node_emb, parent_h).tanh()
+                parent_h = self.hidden_dropout(parent_h)
+                parent_c = self.hidden_dropout(parent_c)
 
-                c = parent_c * f - (1 - f) * z
+            f = self.f_gate(node_emb, parent_h).sigmoid()
+            o = self.o_gate(node_emb, parent_h).sigmoid()
+            z = self.z(node_emb, parent_h).tanh()
 
-                h = o * c.tanh()
+            c = parent_c * f + (1 - f) * z
+            h = o * c.tanh()
 
             if node_id < len(tree_hs):
                 tree_cs[node_id] = c

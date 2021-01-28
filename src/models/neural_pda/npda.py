@@ -41,6 +41,7 @@ class NeuralPDA(nn.Module):
                  max_derivation_step: int = 1000,
                  detach_tree_encoder: bool = False,
                  dropout: float = 0.2,
+                 detach_tree_embedding: bool = False,
                  ):
         super().__init__()
         self._expander = rhs_expander
@@ -62,6 +63,7 @@ class NeuralPDA(nn.Module):
         self.grammar_entry = grammar_entry
         self.max_derivation_step = max_derivation_step  # a very large upper limit for the runtime storage
         self.detach_tree_encoder = detach_tree_encoder
+        self.detach_tree_embedding = detach_tree_embedding
 
         # -------------------
         # the helpful storage for runtime forwarding
@@ -131,7 +133,8 @@ class NeuralPDA(nn.Module):
         # nodes_emb: (batch, n_d, emb)
         # tree_hid: (batch, n_d, hid)
         nodes_emb = self._embedder(tree_nodes)
-        nodes_emb = self._lhs_symbol_mapper(nodes_emb)
+        if self.detach_tree_embedding:
+            nodes_emb = nodes_emb.detach()
         tree_hid, _ = self._pre_tree_encoder(nodes_emb, node_parents, tree_mask)
         if self.detach_tree_encoder:
             tree_hid = tree_hid.detach()
@@ -208,7 +211,6 @@ class NeuralPDA(nn.Module):
 
         # node_emb: (batch, node_num, emb_sz)
         node_emb = self._embedder(node_val)
-        node_emb = self._lhs_symbol_mapper(node_emb)
 
         # tree_hidden: (batch, node_num, hidden_sz)
         tree_hidden, tree_hx = self._pre_tree_encoder(node_emb, node_parent, node_mask, self._tree_hx)
