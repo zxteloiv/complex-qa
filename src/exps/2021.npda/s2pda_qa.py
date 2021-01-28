@@ -67,46 +67,29 @@ def cfq_pda():
 @Registry.hparamset()
 def cfq_pda_0():
     p = cfq_pda()
-    p.emb_sz = p.hidden_sz = 256
+    p.emb_sz = p.hidden_sz = 64
+    p.tree_training_lr_factor = 5e-2
     return p
 
 @Registry.hparamset()
 def cfq_pda_1():
     p = cfq_pda()
-    p.tree_training_lr_factor = 1e-2
+    p.tree_encoder = 're_zero_bilinear'
+    p.bilinear_linear = p.bilinear_bias = True
+    p.tree_training_lr_factor = 5e-2 / p.num_re_zero_layer
     return p
 
 @Registry.hparamset()
 def cfq_pda_2():
     p = cfq_pda()
-    p.emb_sz = p.hidden_sz = 256
-    p.tree_training_lr_factor = 1e-2
-    return p
-
-@Registry.hparamset()
-def cfq_pda_3():
-    p = cfq_pda()
-    p.emb_sz = p.hidden_sz = 256
+    p.emb_sz = p.hidden_sz = 64
     p.tree_encoder = 're_zero_bilinear'
-    p.tree_training_lr_factor = 1e-2
-    return p
-
-@Registry.hparamset()
-def cfq_pda_4():
-    p = cfq_pda()
-    p.emb_sz = p.hidden_sz = 256
-    p.tree_encoder = 're_zero_bilinear'
-    p.tree_training_lr_factor = .1
+    p.bilinear_linear = p.bilinear_bias = True
+    p.tree_training_lr_factor = 5e-2 / p.num_re_zero_layer
     p.encoder = 'bilstm'
     p.enc_attn = 'generalized_bilinear'
     p.attn_use_bias = True
     p.rule_scorer = 'mlp'
-    return p
-
-@Registry.hparamset()
-def cfq_pda_5():
-    p = cfq_pda_4()
-    p.tree_training_lr_factor = 1e-2
     return p
 
 def get_grammar_tutor(p, vocab):
@@ -224,6 +207,7 @@ def get_model(p, vocab: NSVocabulary):
     from models.modules.sym_typed_rnn_cell import SymTypedRNNCell
     from models.modules.container import MultiInputsSequential, UnpackedInputsSequential, SelectArgsById
     from models.modules.mixture_softmax import MoSProjection
+    from models.modules.variational_dropout import VariationalDropout
     from allennlp.nn.activations import Activation
 
     encoder = StackedEncoder.get_encoder(p)
@@ -255,24 +239,28 @@ def get_model(p, vocab: NSVocabulary):
         assert encoder.get_output_dim() == p.hidden_sz, "attention outputs must have the same size with the hidden_size"
         rule_scorer = HeuristicMLPScorerWrapper(MultiInputsSequential(
             nn.Linear(encoder.get_output_dim() + p.hidden_sz * 2 + p.hidden_sz * 2, p.hidden_sz),
-            nn.Dropout(p.dropout),
-            Activation.by_name('tanh')(),
-            nn.Linear(p.hidden_sz, 1),
+            VariationalDropout(p.dropout),
+            nn.LayerNorm(p.hidden_sz // p.num_heads),
+            nn.Tanh(),
+            nn.Linear(p.hidden_sz // p.num_heads, p.hidden_sz),
+            VariationalDropout(p.dropout),
+            nn.LayerNorm(p.hidden_sz),
+            Activation.by_name('mish')(),
+            nn.Linear(p.hidden_sz, 1)
         ))
     elif p.rule_scorer == "triple_inner_product":
         rule_scorer = GeneralizedInnerProductScorer()
     else:
         rule_scorer = MLPScorerWrapper(MultiInputsSequential(
             nn.Linear(encoder.get_output_dim() + p.hidden_sz * 2, p.hidden_sz // p.num_heads),
+            VariationalDropout(p.dropout),
             nn.LayerNorm(p.hidden_sz // p.num_heads),
-            nn.Dropout(p.dropout),
             nn.Tanh(),
             nn.Linear(p.hidden_sz // p.num_heads, p.hidden_sz),
+            VariationalDropout(p.dropout),
             nn.LayerNorm(p.hidden_sz),
-            nn.Dropout(p.dropout),
             Activation.by_name('mish')(),
-            nn.Linear(p.hidden_sz, 1),
-            nn.Sigmoid(),
+            nn.Linear(p.hidden_sz, 1)
         ))
 
     # although the tree encoder construction needs not be here,
@@ -285,8 +273,11 @@ def get_model(p, vocab: NSVocabulary):
         symbol_embedding=emb_s,
         lhs_symbol_mapper=MultiInputsSequential(
             nn.Linear(p.emb_sz, p.hidden_sz // p.num_heads),
-            nn.Dropout(p.dropout),
+            VariationalDropout(p.dropout),
+            nn.LayerNorm(p.hidden_sz // p.num_heads),
             nn.Linear(p.hidden_sz // p.num_heads, p.hidden_sz),
+            VariationalDropout(p.dropout),
+            nn.LayerNorm(p.hidden_sz),
             nn.Tanh(),
         ) if p.emb_sz != p.hidden_sz else Activation.by_name('linear')(),   # `linear` returns the identity function
         grammar_tutor=gt,
@@ -303,7 +294,7 @@ def get_model(p, vocab: NSVocabulary):
         exact_token_predictor=exact_token_predictor,
         token_tutor=ett,
 
-        pre_tree_encoder=tree_encoder, #get_tree_encoder(p, vocab),
+        pre_tree_encoder=tree_encoder,
         pre_tree_self_attn=UnpackedInputsSequential(
             MultiHeadSelfAttention(p.num_heads, p.hidden_sz, p.hidden_sz, p.hidden_sz, 0.,),
             SelectArgsById(0),
@@ -348,7 +339,8 @@ class PDATrainingUpdater(TrainingUpdater):
         if p.tree_training_lr_factor < 1:
             lr_conds = [
                 (lambda k: 'pre_tree_encoder' in k, p.tree_training_lr_factor),
-                (lambda k: 'npda' in k and 'embedder' in k, 1 - 0.2 * p.tree_training_lr_factor),
+                # the symbol embedding is used at many places, only will the grad from the tree-encoder be discounted
+                (lambda k: 'npda' in k and 'embedder' in k, 0.8 + 0.2 * p.tree_training_lr_factor),
             ]
             params_names = [
                 { 'params': list(k for k, v in model.named_parameters() if cond(k)), 'lr': p.ADAM_LR * lr_factor }
