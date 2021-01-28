@@ -98,6 +98,8 @@ def cfq_pda_1():
 @Registry.hparamset()
 def cfq_pda_2():
     p = cfq_pda_0()
+    p.emb_sz = 128
+    p.hidden_sz = 128
     p.tree_encoder = 're_zero_bilinear'
     p.bilinear_linear = p.bilinear_bias = True
     p.tree_training_lr_factor = 5e-2 / p.num_re0_layer
@@ -185,13 +187,13 @@ def get_tree_encoder(p, vocab):
         )
 
     elif p.tree_encoder.startswith('re_zero'):
+        assert p.emb_sz == p.hidden_sz, "re0-net requires the embedding and hidden sizes are equal"
         if p.tree_encoder.endswith('bilinear'):
             layer_encoder = partial_tree.SingleStepBilinear(DecomposedBilinear(
                 p.emb_sz, p.hidden_sz, p.hidden_sz, p.bilinear_rank, p.bilinear_pool,
                 use_linear=p.bilinear_linear, use_bias=p.bilinear_bias,
             ))
         elif p.tree_encoder.endswith('dot_prod'):
-            assert p.emb_sz == p.hidden_sz, "tree dot prod requires the embedding and hidden sizes are equal"
             layer_encoder = partial_tree.SingleStepDotProd()
         else:
             raise NotImplementedError
