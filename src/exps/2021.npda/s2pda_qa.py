@@ -4,9 +4,11 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
 import logging
 from collections import defaultdict
 
+from trialbot.utils.move_to_device import move_to_device
+import torch.nn
 from trialbot.training import TrialBot, Registry
 from trialbot.data import NSVocabulary
-from trialbot.training.updater import TrainingUpdater
+from trialbot.training.updater import Updater
 
 import datasets.cfq
 import datasets.cfq_translator
@@ -21,6 +23,7 @@ def cfq_pda():
     p.OPTIM = "RAdam"
     p.batch_sz = 32
     p.WEIGHT_DECAY = .2
+    p.GRAD_CLIPPING = 0
 
     p.tutor_usage = "from_dataset" # from_grammar, from_dataset
 
@@ -76,13 +79,13 @@ def cfq_pda():
 def cfq_pda_0():
     p = cfq_pda()
     p.WEIGHT_DECAY = .1
+    p.GRAD_CLIPPING = .2    # grad norm required to be <= 2
     p.dropout = .2
     p.encoder = 'bilstm'
     p.enc_attn = 'generalized_bilinear'
     p.emb_sz = 64
     p.hidden_sz = 128
     p.tree_training_lr_factor = 5e-2
-    p.tree_parent_detach = True
     p.detach_tree_embedding = True
     return p
 
@@ -91,7 +94,6 @@ def cfq_pda_1():
     p = cfq_pda_0()
     p.tree_encoder = 'bilinear_tree_lstm'
     p.bilinear_linear = p.bilinear_bias = True
-    p.tree_parent_detach = True
     p.detach_tree_embedding = True
     return p
 
@@ -338,7 +340,32 @@ def get_model(p, vocab: NSVocabulary):
 
     return model
 
-class PDATrainingUpdater(TrainingUpdater):
+class PDATrainingUpdater(Updater):
+    def __init__(self, models, iterators, optims, device=-1, clip_grad: float = 0.):
+        super().__init__(models, iterators, optims, device)
+        self.clip_grad = clip_grad
+
+    def update_epoch(self):
+        model, optim, iterator = self._models[0], self._optims[0], self._iterators[0]
+        if iterator.is_new_epoch:
+            self.stop_epoch()
+
+        device = self._device
+        model.train()
+        optim.zero_grad()
+        batch: Dict[str, torch.Tensor] = next(iterator)
+
+        if device >= 0:
+            batch = move_to_device(batch, device)
+
+        output = model(**batch)
+        loss = output['loss']
+        loss.backward()
+        if self.clip_grad > 0:
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=self.clip_grad)
+        optim.step()
+        return output
+
     @classmethod
     def from_bot(cls, bot: TrialBot) -> 'PDATrainingUpdater':
         import torch
@@ -389,7 +416,7 @@ class PDATrainingUpdater(TrainingUpdater):
         if args.debug and args.skip:
             iterator.reset(args.skip)
 
-        updater = cls(model, iterator, optim, args.device, args.dry_run)
+        updater = cls(model, iterator, optim, args.device, p.GRAD_CLIPPING)
         return updater
 
 def main():
