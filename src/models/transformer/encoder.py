@@ -3,9 +3,10 @@ import torch
 import torch.nn
 
 from allennlp.modules import FeedForward
-from torch.nn import LayerNorm
+# from torch.nn import LayerNorm
 from utils.nn import add_positional_features, add_depth_features_to_single_position
 from allennlp.nn import Activation
+from allennlp.modules.layer_norm import LayerNorm
 
 from .multi_head_attention import MultiHeadSelfAttention
 
@@ -16,7 +17,7 @@ class TransformerEncoder(torch.nn.Module):
                  num_layers: int = 6,
                  num_heads: int = 8,
                  feedforward_hidden_dim: int = None,
-                 feedforward_hidden_activation: str = "mish",
+                 feedforward_hidden_activation: str = "relu",
                  feedforward_dropout: float = 0.1,
                  residual_dropout: float = 0.1,
                  attention_dropout: float = 0.1,
