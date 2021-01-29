@@ -131,7 +131,7 @@ def seq_cross_ent(logits: torch.FloatTensor,
     :param average: reduction method
     :return (batch, ) if average mode is batch or (0,) if average mode is token or None
     """
-    if average not in {None, "token", "batch", "none"}:
+    if average not in {None, "token", "batch", "scaled_batch", "none"}:
         raise ValueError("Got average f{average}, expected one of "
                          "None, 'token', or 'batch'")
 
@@ -156,6 +156,13 @@ def seq_cross_ent(logits: torch.FloatTensor,
     if average == "batch":
         # shape : (batch_size,)
         per_batch_loss = sum_to_batch_size(negative_log_likelihood) / (sum_to_batch_size(weights) + 1e-13)
+        num_non_empty_sequences = ((sum_to_batch_size(weights) > 0).float().sum() + 1e-13)
+        return per_batch_loss.sum() / num_non_empty_sequences
+    elif average == "scaled_batch":
+        # shape : (batch_size,)
+        scale_ = sum_to_batch_size(weights)
+        scale_ = scale_ * (scale_ + 1) / 2
+        per_batch_loss = sum_to_batch_size(negative_log_likelihood) / (scale_ + 1e-15)
         num_non_empty_sequences = ((sum_to_batch_size(weights) > 0).float().sum() + 1e-13)
         return per_batch_loss.sum() / num_non_empty_sequences
     elif average == "token":

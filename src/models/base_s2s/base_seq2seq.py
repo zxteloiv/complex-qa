@@ -30,7 +30,8 @@ class BaseSeq2Seq(torch.nn.Module):
                  intermediate_dropout: float = .1,
                  concat_attn_to_dec_input: bool = False,
                  padding_index: int = 0,
-                 decoder_init_strategy: str = "forward_all"
+                 decoder_init_strategy: str = "forward_all",
+                 training_average: str = "batch",
                  ):
         super().__init__()
         self.vocab = vocab
@@ -63,6 +64,7 @@ class BaseSeq2Seq(torch.nn.Module):
 
         self._padding_index = padding_index
         self._strategy = decoder_init_strategy
+        self._training_avg = training_average
 
         self.bleu = BLEU(exclude_indices={padding_index, self._start_id, self._eos_id})
         self.ppl = Perplexity()
@@ -90,7 +92,8 @@ class BaseSeq2Seq(torch.nn.Module):
             # predictions: (batch, seq_len)
             # logits: (batch, seq_len, vocab_size)
             predictions, logits = self._forward_loop(state, source_mask, init_hidden, target, target_mask)
-            loss = seq_cross_ent(logits, target[:, 1:].contiguous(), target_mask[:, 1:].contiguous())
+            loss = seq_cross_ent(logits, target[:, 1:].contiguous(), target_mask[:, 1:].contiguous(),
+                                 average=self._training_avg)
             output['loss'] = loss
         else:
             runtime_default_len = -1 if target is None else target.size()[1] - 1
@@ -363,6 +366,7 @@ class BaseSeq2Seq(torch.nn.Module):
             concat_attn_to_dec_input=p.concat_attn_to_dec_input,
             padding_index=0,
             decoder_init_strategy=p.decoder_init_strategy,
+            training_average=getattr(p, "training_average", "batch"),
         )
         return model
 
