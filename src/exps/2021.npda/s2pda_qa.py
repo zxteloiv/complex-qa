@@ -66,6 +66,8 @@ def cfq_pda():
     p.detach_tree_encoder = False   # whether to stop-gradient for the tree encoder parameters, applies to non-parametric encoders
     p.tree_training_lr_factor = 1.  # applied on the learning rate for tree encoder parameters
 
+    p.tree_self_attn = 'seq_mha'    # seq_mha, generalized_dot_product
+
     # ----------- end of tree settings -------------
 
     p.exact_token_predictor = "quant" # linear, mos, quant
@@ -171,7 +173,6 @@ def get_cfq_tailored_tutor(p, vocab):
 def get_tree_encoder(p, vocab):
     import models.neural_pda.partial_tree_encoder as partial_tree
     from models.modules.decomposed_bilinear import DecomposedBilinear
-    from allennlp.nn.activations import Activation
 
     # embedding will be transformed into hid size with lhs_symbol_mapper,
     # thus tree encoder input will be hid_sz by default
@@ -211,12 +212,11 @@ def get_model(p, vocab: NSVocabulary):
     from torch import nn
     from models.neural_pda.seq2pda import Seq2PDA
     from models.neural_pda.npda import NeuralPDA
-    from models.transformer.multi_head_attention import MultiHeadSelfAttention
     from models.neural_pda.rule_scorer import MLPScorerWrapper, HeuristicMLPScorerWrapper, GeneralizedInnerProductScorer
     from models.modules.stacked_encoder import StackedEncoder
     from models.modules.attention_wrapper import get_wrapped_attention
     from models.modules.quantized_token_predictor import QuantTokenPredictor
-    from models.modules.stacked_rnn_cell import StackedRNNCell, StackedLSTMCell, RNNType
+    from models.modules.stacked_rnn_cell import StackedRNNCell
     from models.modules.sym_typed_rnn_cell import SymTypedRNNCell
     from models.modules.container import MultiInputsSequential, UnpackedInputsSequential, SelectArgsById
     from models.modules.mixture_softmax import MoSProjection
@@ -302,7 +302,12 @@ def get_model(p, vocab: NSVocabulary):
 
         pre_tree_encoder=get_tree_encoder(p, vocab),
         pre_tree_self_attn=UnpackedInputsSequential(
-            MultiHeadSelfAttention(p.num_heads, p.hidden_sz, p.hidden_sz, p.hidden_sz, 0.,),
+            get_wrapped_attention(p.tree_self_attn, p.hidden_sz, encoder.get_output_dim(),
+                                  num_heads=p.num_heads,
+                                  use_linear=p.attn_use_linear,
+                                  use_bias=p.attn_use_bias,
+                                  use_tanh_activation=p.attn_use_tanh_activation,
+                                  ),
             SelectArgsById(0),
         ),
         residual_norm_after_self_attn=nn.LayerNorm(p.hidden_sz) if p.use_attn_residual_norm else None,

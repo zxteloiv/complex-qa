@@ -146,7 +146,7 @@ class NeuralPDA(nn.Module):
                   expansion_frontiers] = 1
         # the root has the id equal to the padding and must be excluded from attention targets except for itself.
         attn_mask[:, 1:, 0] = 0
-        tree_hid_att = self._pre_tree_self_attn(tree_hid, tree_mask, attn_mask)
+        tree_hid_att = self._pre_tree_self_attn(tree_hid, tree_hid, tree_mask, attn_mask)
         if self._residual_norm is not None:
             tree_hid_att = tree_hid_att + tree_hid
             tree_hid_att = self._residual_norm(tree_hid_att)
@@ -233,7 +233,7 @@ class NeuralPDA(nn.Module):
         # attn_mask[batch_index.unsqueeze(-1), stack_pos] = 0
         attn_mask[batch_index.unsqueeze(-1), node_parent] = 0
         attn_mask[batch_index, top_pos] = 1 # the node itself must be involved into self-attention
-        tree_hid_att = self._pre_tree_self_attn(tree_hidden, attn_mask)
+        tree_hid_att = self._pre_tree_self_attn(tree_hidden, tree_hidden, attn_mask)
         if self._residual_norm is not None:
             tree_hid_att = tree_hid_att + tree_hidden
             tree_hid_att = self._residual_norm(tree_hid_att)
