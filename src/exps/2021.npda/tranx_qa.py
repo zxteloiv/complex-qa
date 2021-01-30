@@ -174,7 +174,7 @@ def cfq_mod_ent_tranx():
 @Registry.hparamset()
 def cfq_mod_ent_moderate_tranx():
     p = cfq_mod_ent_tranx()
-    p.TRAINING_LIMIT = 5  # in num of epochs
+    p.TRAINING_LIMIT = 10  # in num of epochs
     p.WEIGHT_DECAY = .1
     p.emb_sz = 128
     p.hidden_sz = 128
@@ -184,8 +184,10 @@ def cfq_mod_ent_moderate_tranx():
 @Registry.hparamset()
 def cfq_mod_ent_moderate_tranx_scaled():
     p = cfq_mod_ent_tranx()
-    p.TRAINING_LIMIT = 5  # in num of epochs
+    p.TRAINING_LIMIT = 10  # in num of epochs
     p.WEIGHT_DECAY = .1
+    p.OPTIM = "RAdam"
+    p.ADAM_LR = 6.
     p.emb_sz = 128
     p.hidden_sz = 128
     p.dec_hist_attn = 'none'
