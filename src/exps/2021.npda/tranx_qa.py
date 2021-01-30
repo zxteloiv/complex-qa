@@ -113,25 +113,14 @@ def main():
             print(str(bot.models))
 
         from trialbot.training.extensions import every_epoch_model_saver
-        from utils.trial_bot_extensions import end_with_nan_loss, save_model_every_num_iters
+        from utils.trial_bot_extensions import end_with_nan_loss
         from utils.trial_bot_extensions import evaluation_on_dev_every_epoch, collect_garbage
         bot.add_event_handler(Events.EPOCH_STARTED, collect_garbage, 95)
         bot.add_event_handler(Events.ITERATION_COMPLETED, end_with_nan_loss, 100)
         bot.add_event_handler(Events.ITERATION_COMPLETED, collect_garbage, 95)
-        bot.add_event_handler(Events.ITERATION_COMPLETED, save_model_every_num_iters, 100)
         bot.add_event_handler(Events.EPOCH_COMPLETED, evaluation_on_dev_every_epoch, 90)
         bot.add_event_handler(Events.EPOCH_COMPLETED, collect_garbage, 95)
-        # bot.add_event_handler(Events.EPOCH_COMPLETED, every_epoch_model_saver, 100)
-
-        # @bot.attach_extension(Events.ITERATION_COMPLETED)
-        def batch_data_size(bot: TrialBot):
-            output = bot.state.output
-            if output is None:
-                return
-
-            print("source_size:", output['source'].size(),
-                  "target_size:", output['target'].size(),
-                  "pred_size:", output['predictions'].size())
+        bot.add_event_handler(Events.EPOCH_COMPLETED, every_epoch_model_saver, 100)
 
         bot.updater = TranXTrainingUpdater.from_bot(bot)
     elif args.debug:
