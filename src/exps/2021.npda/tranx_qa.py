@@ -178,7 +178,7 @@ def cfq_mod_ent_moderate_tranx():
     p.WEIGHT_DECAY = .1
     p.emb_sz = 128
     p.hidden_sz = 128
-    p.dec_hist_attn = 'none'
+    p.dec_hist_attn = "dot_product"
     return p
 
 @Registry.hparamset()
@@ -190,7 +190,7 @@ def cfq_mod_ent_moderate_tranx_scaled():
     p.ADAM_LR = 6.
     p.emb_sz = 128
     p.hidden_sz = 128
-    p.dec_hist_attn = 'none'
+    p.dec_hist_attn = "dot_product"
 
     src_len_fn = lambda batch: (batch['source_tokens'] != 0).sum(dim=-1).float().mean().item()
     tgt_len_fn = lambda batch: (batch['target_tokens'] != 0).sum(dim=-1).float().mean().item()
