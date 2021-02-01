@@ -78,6 +78,36 @@ def cfq_pda():
     p.rule_scorer = "triple_inner_product" # heuristic, mlp, triple_inner_product
     return p
 
+@Registry.hparamset()
+def cfq_pda_0():
+    p = cfq_pda()
+    p.tree_self_attn = 'generalized_dot_prod'
+    return p
+
+@Registry.hparamset()
+def cfq_pda_1():
+    p = cfq_pda()
+    p.num_re0_layer = 6
+    return p
+
+@Registry.hparamset()
+def cfq_pda_2():
+    p = cfq_pda()
+    p.tree_training_lr_factor = 1.
+    return p
+
+@Registry.hparamset()
+def cfq_pda_3():
+    p = cfq_pda()
+    p.GRAD_CLIPPING = 0
+    return p
+
+@Registry.hparamset()
+def cfq_pda_4():
+    p = cfq_pda()
+    p.detach_tree_embedding = False
+    return p
+
 def get_grammar_tutor(p, vocab):
     ns_symbol, ns_exact_token = p.tgt_ns
     import torch
@@ -351,12 +381,6 @@ class PDATrainingUpdater(Updater):
             lr_conds = [
                 (lambda k: 'pre_tree_encoder' in k, p.tree_training_lr_factor),
             ]
-            if not p.detach_tree_embedding:
-                # the symbol embedding is used at many places, only will the grad from the tree-encoder be discounted
-                lr_conds.append(
-                    (lambda k: 'npda' in k and 'embedder' in k, 0.8 + 0.2 * p.tree_training_lr_factor)
-                )
-
             params_names = [
                 { 'params': list(k for k, v in model.named_parameters() if cond(k)), 'lr': p.ADAM_LR * lr_factor }
                 for cond, lr_factor in lr_conds
