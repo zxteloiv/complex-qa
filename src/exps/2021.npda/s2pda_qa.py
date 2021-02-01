@@ -22,8 +22,8 @@ def cfq_pda():
     p.TRAINING_LIMIT = 10
     p.OPTIM = "RAdam"
     p.batch_sz = 32
-    p.WEIGHT_DECAY = .2
-    p.GRAD_CLIPPING = 0
+    p.WEIGHT_DECAY = .1
+    p.GRAD_CLIPPING = .2    # grad norm required to be <= 2
 
     p.tutor_usage = "from_dataset" # from_grammar, from_dataset
 
@@ -31,18 +31,18 @@ def cfq_pda():
     p.tgt_ns = datasets.cfq_translator.UNIFIED_TREE_NS
 
     # transformer requires input embedding equal to hidden size
-    p.encoder = "lstm"
+    p.encoder = "bilstm"
     p.num_enc_layers = 2
     p.emb_sz = 128
     p.hidden_sz = 128
     p.num_heads = 4
 
-    p.enc_attn = "generalized_dot_product"
+    p.enc_attn = 'generalized_bilinear'
     p.attn_use_linear = False
     p.attn_use_bias = False
     p.attn_use_tanh_activation = False
 
-    p.dropout = .4
+    p.dropout = .2
     p.num_expander_layer = 1
     p.max_derivation_step = 200
     p.max_expansion_len = 11
@@ -50,21 +50,22 @@ def cfq_pda():
 
     # ----------- tree encoder settings -------------
 
-    p.tree_encoder = 'lstm' # lstm, bilinear_tree_lstm, re_zero_bilinear
+    p.tree_encoder = 're_zero_bilinear'
 
     p.tree_parent_detach = False
-    p.detach_tree_embedding = False
+    p.detach_tree_embedding = True
 
     p.bilinear_rank = 1
     p.bilinear_pool = p.hidden_sz // p.num_heads
-    p.bilinear_linear = False   # by default do not use linear mappings within bilinear modules
-    p.bilinear_bias = False     # by default do not use bias within bilinear modules
+    p.bilinear_linear = True
+    p.bilinear_bias = True
 
     p.num_re0_layer = 18
 
     p.use_attn_residual_norm = True
     p.detach_tree_encoder = False   # whether to stop-gradient for the tree encoder parameters, applies to non-parametric encoders
-    p.tree_training_lr_factor = 1.  # applied on the learning rate for tree encoder parameters
+    # applied on the learning rate for tree encoder parameters
+    p.tree_training_lr_factor = 5e-2 / p.num_re0_layer
 
     p.tree_self_attn = 'seq_mha'    # seq_mha, generalized_dot_product
 
@@ -75,39 +76,6 @@ def cfq_pda():
     p.exact_token_quant_criterion = "dot_product"
 
     p.rule_scorer = "triple_inner_product" # heuristic, mlp, triple_inner_product
-    return p
-
-@Registry.hparamset()
-def cfq_pda_0():
-    p = cfq_pda()
-    p.WEIGHT_DECAY = .1
-    p.GRAD_CLIPPING = .2    # grad norm required to be <= 2
-    p.dropout = .2
-    p.encoder = 'bilstm'
-    p.enc_attn = 'generalized_bilinear'
-    p.emb_sz = 64
-    p.hidden_sz = 128
-    p.tree_training_lr_factor = 5e-2
-    p.detach_tree_embedding = True
-    return p
-
-@Registry.hparamset()
-def cfq_pda_1():
-    p = cfq_pda_0()
-    p.tree_encoder = 'bilinear_tree_lstm'
-    p.bilinear_linear = p.bilinear_bias = True
-    p.detach_tree_embedding = True
-    return p
-
-@Registry.hparamset()
-def cfq_pda_2():
-    p = cfq_pda_0()
-    p.emb_sz = 128
-    p.hidden_sz = 128
-    p.tree_encoder = 're_zero_bilinear'
-    p.bilinear_linear = p.bilinear_bias = True
-    p.tree_training_lr_factor = 5e-2 / p.num_re0_layer
-    p.detach_tree_embedding = True
     return p
 
 def get_grammar_tutor(p, vocab):
@@ -302,7 +270,7 @@ def get_model(p, vocab: NSVocabulary):
 
         pre_tree_encoder=get_tree_encoder(p, vocab),
         pre_tree_self_attn=UnpackedInputsSequential(
-            get_wrapped_attention(p.tree_self_attn, p.hidden_sz, encoder.get_output_dim(),
+            get_wrapped_attention(p.tree_self_attn, p.hidden_sz, p.hidden_sz,
                                   num_heads=p.num_heads,
                                   use_linear=p.attn_use_linear,
                                   use_bias=p.attn_use_bias,
