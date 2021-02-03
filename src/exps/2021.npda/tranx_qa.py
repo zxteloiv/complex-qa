@@ -36,8 +36,8 @@ class TranXTrainingUpdater(Updater):
 
         output = model(**batch)
         if not self._dry_run:
-            # loss = output['loss']
-            # loss.backward()
+            loss = output['loss']
+            loss.backward()
             if self.param_group_conf is not None:
                 group_grad_norms = []
                 for group in optim.param_groups:
@@ -68,13 +68,13 @@ class TranXTrainingUpdater(Updater):
                     optim.param_groups[i]['lr'] = optim.defaults['lr'] * factor_fn(batch) #delta # factor_fn(batch) * delta
 
             # lbfgs requires the closure but sgd
-            def closure():
-                optim.zero_grad()
-                loss = model(**batch)['loss']
-                loss.backward()
-                return loss
+            # def closure():
+            #     optim.zero_grad()
+            #     loss = model(**batch)['loss']
+            #     loss.backward()
+            #     return loss
 
-            loss = optim.step(closure=closure)
+            optim.step()
         return output
 
     @staticmethod
