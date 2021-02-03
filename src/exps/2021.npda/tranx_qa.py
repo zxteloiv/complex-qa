@@ -211,6 +211,7 @@ def cfq_mod_ent_moderate_tranx_scaled():
     p.WEIGHT_DECAY = .1
     p.OPTIM = "eadam"
     p.ADAM_LR = 1e-3
+    p.ADAM_BETAS = (0.9, 0.999)
     p.lr = 0.8  # only for lbfgs
     p.emb_sz = 128
     p.hidden_sz = 128

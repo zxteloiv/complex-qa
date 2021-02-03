@@ -92,6 +92,7 @@ def cfq_pda_1():
 
     # optimization improvement
     p.OPTIM = "eadam"
+    p.ADAM_BETAS = (0.9, 0.999)
     return p
 
 @Registry.hparamset()
@@ -99,6 +100,7 @@ def cfq_pda_2():
     p = cfq_pda()
     # optimization improvement but not detached embeddings
     p.OPTIM = "eadam"
+    p.ADAM_BETAS = (0.9, 0.999)
     p.tree_training_lr_factor = 1
     return p
 
@@ -107,6 +109,7 @@ def cfq_pda_3():
     p = cfq_pda()
     # completely optimization improvement, no change for grad and lr
     p.OPTIM = "eadam"
+    p.ADAM_BETAS = (0.9, 0.999)
     p.tree_training_lr_factor = 1
     p.detach_tree_embedding = False
     return p
