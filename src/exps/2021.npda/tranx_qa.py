@@ -1,4 +1,4 @@
-from typing import Dict, List, Tuple, Callable, Any
+from typing import Dict, List, Tuple, Callable, Any, Union
 from os.path import join, abspath, dirname
 import sys
 sys.path.insert(0, abspath(join(dirname(__file__), '..', '..')))   # up to src
@@ -14,7 +14,7 @@ import datasets.cfq_translator
 class TranXTrainingUpdater(Updater):
     def __init__(self, models, iterators, optims, device=-1,
                  dry_run: bool = False,
-                 param_group_conf: List[Tuple[str, Callable[..., float]]] = None,
+                 param_group_conf: List[Tuple[str, Callable[..., float], List[Union[None, int]]]] = None,
                  ):
         super().__init__(models, iterators, optims, device)
         self._dry_run = dry_run
@@ -36,23 +36,56 @@ class TranXTrainingUpdater(Updater):
 
         output = model(**batch)
         if not self._dry_run:
-            loss = output['loss']
-            loss.backward()
+            # loss = output['loss']
+            # loss.backward()
             if self.param_group_conf is not None:
-                for i, (_, factor_fn) in enumerate(self.param_group_conf):
-                    optim.param_groups[i]['lr'] = optim.defaults['lr'] * factor_fn(batch)
-            optim.step()
+                group_grad_norms = []
+                for group in optim.param_groups:
+                    count = acc = 0
+                    for p in group["params"]:
+                        if p.grad is not None:
+                            count += 1
+                            acc += p.grad.abs().mean()
+                    group_grad_norms.append(None if count == 0 else acc / count)
+
+                for i, (_, factor_fn, dep_groups) in enumerate(self.param_group_conf):
+                    # dep_grad_norms = []
+                    # for g_id in dep_groups: # Union[None, int]
+                    #     if g_id is None:
+                    #         dep_grad_norms.append(1)
+                    #         continue
+                    #
+                    #     group_grad_norm = group_grad_norms[g_id]
+                    #     if group_grad_norm is not None:
+                    #         # group grad norm is represented by the mean of all parameters in the group
+                    #         dep_grad_norms.append(group_grad_norm)
+                    #
+                    # # delta by adding norms from different groups , and multiplied by the group num
+                    # if len(dep_grad_norms) > 0:
+                    #     delta = len(dep_grad_norms) / sum(dep_grad_norms)
+                    # else:
+                    #     delta = 1
+                    optim.param_groups[i]['lr'] = optim.defaults['lr'] * factor_fn(batch) #delta # factor_fn(batch) * delta
+
+            # lbfgs requires the closure but sgd
+            def closure():
+                optim.zero_grad()
+                loss = model(**batch)['loss']
+                loss.backward()
+                return loss
+
+            loss = optim.step(closure=closure)
         return output
 
     @staticmethod
-    def param_pattern_match(model: torch.nn.Module, group_conf: List[Tuple[str, Callable[..., float]]]):
+    def param_pattern_match(model: torch.nn.Module, group_conf: List[Tuple[str, Callable[..., float], List[Union[None, int]]]]):
         params = [{"params": []} for _ in range(len(group_conf) + 1)]
         logging.getLogger(__name__).info(f"param group len={len(params)}")
         for k, v in model.named_parameters():
-            for i, (key_pref, _) in enumerate(group_conf):
+            for i, (key_pref, _, dep_groups) in enumerate(group_conf):
                 if k.startswith(key_pref):
                     params[i]["params"].append(v)
-                    logging.getLogger(__name__).info(f"param {k} assigned to group {i}")
+                    logging.getLogger(__name__).info(f"param {k} assigned to group {i}, depends on group {dep_groups}")
                     break
             else:
                 params[-1]["params"].append(v)
@@ -63,10 +96,11 @@ class TranXTrainingUpdater(Updater):
     @classmethod
     def from_bot(cls, bot: TrialBot) -> 'TranXTrainingUpdater':
         args, p, model, logger = bot.args, bot.hparams, bot.model, bot.logger
+        from utils.select_optim import select_optim
 
         group_conf = getattr(p, 'group_conf', None)
         params = model.parameters() if group_conf is None else cls.param_pattern_match(model, group_conf)
-        optim = cls.get_optim(p, params)
+        optim = select_optim(p, params)
         logger.info(f"Using Optimizer {optim}")
 
         device, dry_run = args.device, args.dry_run
@@ -78,17 +112,6 @@ class TranXTrainingUpdater(Updater):
 
         updater = cls(model, iterator, optim, device, dry_run, group_conf)
         return updater
-
-    @classmethod
-    def get_optim(cls, p, params):
-        if hasattr(p, "OPTIM") and isinstance(p.OPTIM, str) and p.OPTIM.lower() == "sgd":
-            optim = torch.optim.SGD(params, p.SGD_LR, weight_decay=p.WEIGHT_DECAY)
-        elif hasattr(p, "OPTIM") and isinstance(p.OPTIM, str) and p.OPTIM.lower() == "radam":
-            from radam import RAdam
-            optim = RAdam(params, lr=p.ADAM_LR, weight_decay=p.WEIGHT_DECAY)
-        else:
-            optim = torch.optim.Adam(params, p.ADAM_LR, p.ADAM_BETAS, weight_decay=p.WEIGHT_DECAY)
-        return optim
 
 def main():
     from utils.trialbot_setup import setup
@@ -149,7 +172,7 @@ def cfq_mod_ent_tranx():
     from trialbot.training.hparamset import HyperParamSet
     from trialbot.utils.root_finder import find_root
     p = HyperParamSet.common_settings(find_root())
-    p.TRAINING_LIMIT = 200  # in num of epochs
+    p.TRAINING_LIMIT = 10  # in num of epochs
     p.OPTIM = "RAdam"
     p.batch_sz = 32
 
@@ -186,36 +209,33 @@ def cfq_mod_ent_moderate_tranx_scaled():
     p = cfq_mod_ent_tranx()
     p.TRAINING_LIMIT = 10  # in num of epochs
     p.WEIGHT_DECAY = .1
-    p.OPTIM = "RAdam"
-    p.ADAM_LR = 6.
+    p.OPTIM = "eadam"
+    p.ADAM_LR = 1e-3
+    p.lr = 0.8  # only for lbfgs
     p.emb_sz = 128
     p.hidden_sz = 128
     p.dec_hist_attn = "dot_product"
 
-    src_len_fn = lambda batch: (batch['source_tokens'] != 0).sum(dim=-1).float().mean().item()
-    tgt_len_fn = lambda batch: (batch['target_tokens'] != 0).sum(dim=-1).float().mean().item()
-
-    group_conf: List[Tuple[str, Callable[..., float]]] = [
-        # every target loss will be back-propagated
-        ("_encoder", lambda batch: 1. / (src_len_fn(batch) * tgt_len_fn(batch))),
-        ("_src_embedding", lambda batch: 1. / tgt_len_fn(batch)),
-
-        # the i-th step receives (n - i) updates, yielding a total of n(n+1)/2
-        ("_decoder", lambda batch: 2. / (tgt_len_fn(batch) * (1 + tgt_len_fn(batch)))),
-
-        # encoder attention weights are updated by (N x M) times
-        ("_enc_attn", lambda batch: 1. / (src_len_fn(batch) * tgt_len_fn(batch))),
-        # decoder history attention weights are updated also by n(n+1)/2 times
-        ("_dec_hist_attn", lambda batch: 2. / (tgt_len_fn(batch) * (1 + tgt_len_fn(batch)))),
-
-        # target_embedding is tied to output projection, the parameters are updated by n + 1 times
-        ("_tgt_embedding", lambda batch: 1. / (tgt_len_fn(batch) + 1)),
-        # output projection is only bias weight when tied, which is updated by n times
-        ("_output_projection", lambda batch: 1. / tgt_len_fn(batch)),
-    ]
-    p.group_conf = group_conf
-    # only the batch scale is averaged out, other loss are summed together and rely on the group_conf
-    p.training_average = 'bare_batch'
+    # src_len_fn = lambda batch: (batch['source_tokens'] != 0).sum(dim=-1).float().mean().item()
+    # tgt_len_fn = lambda batch: (batch['target_tokens'] != 0).sum(dim=-1).float().mean().item()
+    #
+    # group_conf: List[Tuple[str, Callable[..., float], List[Union[None, int]]]] = [
+    #     ("_decoder", lambda batch: src_len_fn(batch) * 1. / (1 + tgt_len_fn(batch)), [None]),
+    # ]
+    # group_conf: List[Tuple[str, Callable[..., float], List[Union[None, int]]]] = [
+    #     ("_encoder", lambda batch: .5 / src_len_fn(batch), [2, 3]),   # 0
+    #     ("_src_embedding", lambda batch: .5 / src_len_fn(batch), [0]),   # 1
+    #
+    #     ("_decoder", lambda batch: 1. / (1 + tgt_len_fn(batch)), [3, 6, 4]), # 2
+    #
+    #     ("_enc_attn", lambda batch: 1. / src_len_fn(batch), [6]),  # 3
+    #     ("_dec_hist_attn", lambda batch: 1., [6]),   # 4
+    #
+    #     ("_tgt_embedding", lambda batch: 1., [None, 2]), # 5
+    #     ("_output_projection", lambda batch: 1., [None]),   # 6
+    # ]
+    # p.group_conf = group_conf
+    p.training_average = 'batch'
     return p
 
 @Registry.hparamset()

@@ -51,6 +51,7 @@ def cfq_pda():
     # ----------- tree encoder settings -------------
 
     p.tree_encoder = 're_zero_bilinear'
+    p.tree_encoder_weight_norm = False
 
     p.tree_parent_detach = False
     p.detach_tree_embedding = True
@@ -60,7 +61,7 @@ def cfq_pda():
     p.bilinear_linear = True
     p.bilinear_bias = True
 
-    p.num_re0_layer = 18
+    p.num_re0_layer = 6
 
     p.use_attn_residual_norm = True
     p.detach_tree_encoder = False   # whether to stop-gradient for the tree encoder parameters, applies to non-parametric encoders
@@ -87,24 +88,26 @@ def cfq_pda_0():
 @Registry.hparamset()
 def cfq_pda_1():
     p = cfq_pda()
-    p.num_re0_layer = 6
+    # based on less-layer ablation setting
+
+    # optimization improvement
+    p.OPTIM = "eadam"
     return p
 
 @Registry.hparamset()
 def cfq_pda_2():
     p = cfq_pda()
-    p.tree_training_lr_factor = 1.
+    # optimization improvement but not detached embeddings
+    p.OPTIM = "eadam"
+    p.tree_training_lr_factor = 1
     return p
 
 @Registry.hparamset()
 def cfq_pda_3():
     p = cfq_pda()
-    p.GRAD_CLIPPING = 0
-    return p
-
-@Registry.hparamset()
-def cfq_pda_4():
-    p = cfq_pda()
+    # completely optimization improvement, no change for grad and lr
+    p.OPTIM = "eadam"
+    p.tree_training_lr_factor = 1
     p.detach_tree_embedding = False
     return p
 
@@ -190,10 +193,15 @@ def get_tree_encoder(p, vocab):
     elif p.tree_encoder.startswith('re_zero'):
         assert p.emb_sz == p.hidden_sz, "re0-net requires the embedding and hidden sizes are equal"
         if p.tree_encoder.endswith('bilinear'):
-            layer_encoder = partial_tree.SingleStepBilinear(DecomposedBilinear(
+            bilinear_mod = DecomposedBilinear(
                 p.emb_sz, p.hidden_sz, p.hidden_sz, p.bilinear_rank, p.bilinear_pool,
                 use_linear=p.bilinear_linear, use_bias=p.bilinear_bias,
-            ))
+            )
+            if p.tree_encoder_weight_norm:
+                # apply weight norm per-pool
+                bilinear_mod = torch.nn.utils.weight_norm(bilinear_mod, 'w_o', dim=0)
+            layer_encoder = partial_tree.SingleStepBilinear(bilinear_mod)
+
         elif p.tree_encoder.endswith('dot_prod'):
             layer_encoder = partial_tree.SingleStepDotProd()
         else:
@@ -398,14 +406,8 @@ class PDATrainingUpdater(Updater):
         else:
             params = model.parameters()
 
-        if hasattr(p, "OPTIM") and isinstance(p.OPTIM, str) and p.OPTIM.lower() == "sgd":
-            optim = torch.optim.SGD(params, p.SGD_LR, weight_decay=p.WEIGHT_DECAY)
-        elif hasattr(p, "OPTIM") and isinstance(p.OPTIM, str) and p.OPTIM.lower() == "radam":
-            from radam import RAdam
-            optim = RAdam(params, lr=p.ADAM_LR, weight_decay=p.WEIGHT_DECAY)
-        else:
-            optim = torch.optim.Adam(params, p.ADAM_LR, p.ADAM_BETAS, weight_decay=p.WEIGHT_DECAY)
-
+        from utils.select_optim import select_optim
+        optim = select_optim(p, params)
         logger.info(f"Using the optimizer {str(optim)}")
 
         repeat_iter = shuffle_iter = not args.debug
