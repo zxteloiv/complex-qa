@@ -208,11 +208,11 @@ def cfq_mod_ent_moderate_tranx():
 def cfq_mod_ent_moderate_tranx_scaled():
     p = cfq_mod_ent_tranx()
     p.TRAINING_LIMIT = 10  # in num of epochs
-    p.WEIGHT_DECAY = .1
-    p.OPTIM = "eadam"
+    p.OPTIM = "adabelief"
     p.ADAM_LR = 1e-3
+    p.WEIGHT_DECAY = .1
     p.ADAM_BETAS = (0.9, 0.999)
-    p.lr = 0.8  # only for lbfgs
+    p.optim_kwargs = {"eps": 1e-16}
     p.emb_sz = 128
     p.hidden_sz = 128
     p.dec_hist_attn = "dot_product"
