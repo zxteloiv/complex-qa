@@ -30,6 +30,12 @@ def select_optim(p, params):
         optim = AdaBelief(params, p.ADAM_LR, p.ADAM_BETAS,
                           weight_decay=p.WEIGHT_DECAY,
                           **getattr(p, 'optim_kwargs', dict()))
+    elif name == "ranger_adabelief":
+        from ranger_adabelief import RangerAdaBelief
+        optim = RangerAdaBelief(params, p.ADAM_LR,
+                                betas=p.ADAM_BETAS,
+                                weight_decay=p.WEIGHT_DECAY,
+                                **getattr(p, 'optim_kwargs', dict()))
     else:
         optim = torch.optim.Adam(params, p.ADAM_LR, p.ADAM_BETAS, weight_decay=p.WEIGHT_DECAY)
     return optim

@@ -91,9 +91,9 @@ def cfq_pda_1():
     # based on less-layer ablation setting
 
     # optimization improvement
-    p.OPTIM = "adabelief"
+    p.OPTIM = "ranger_adabelief"
     p.WEIGHT_DECAY = .1
-    p.ADAM_BETAS = (0.9, 0.999)
+    p.ADAM_BETAS = (0.95, 0.999)
     p.optim_kwargs = {"eps": 1e-16}
     return p
 
@@ -101,9 +101,9 @@ def cfq_pda_1():
 def cfq_pda_2():
     p = cfq_pda()
     # optimization improvement but not detached embeddings
-    p.OPTIM = "adabelief"
+    p.OPTIM = "ranger_adabelief"
     p.WEIGHT_DECAY = .1
-    p.ADAM_BETAS = (0.9, 0.999)
+    p.ADAM_BETAS = (0.95, 0.999)
     p.optim_kwargs = {"eps": 1e-16}
     p.tree_training_lr_factor = 1
     return p
@@ -112,9 +112,9 @@ def cfq_pda_2():
 def cfq_pda_3():
     p = cfq_pda()
     # completely optimization improvement, no change for grad and lr
-    p.OPTIM = "adabelief"
+    p.OPTIM = "ranger_adabelief"
     p.WEIGHT_DECAY = .1
-    p.ADAM_BETAS = (0.9, 0.999)
+    p.ADAM_BETAS = (0.95, 0.999)
     p.optim_kwargs = {"eps": 1e-16}
     p.tree_training_lr_factor = 1
     p.detach_tree_embedding = False
