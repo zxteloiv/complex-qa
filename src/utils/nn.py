@@ -131,7 +131,7 @@ def seq_cross_ent(logits: torch.FloatTensor,
     :param average: reduction method
     :return (batch, ) if average mode is batch or (0,) if average mode is token or None
     """
-    if average not in {None, "token", "batch", "none"}:
+    if average not in {None, "token", "batch", "scaled_batch", "bare_batch", "none"}:
         raise ValueError("Got average f{average}, expected one of "
                          "None, 'token', or 'batch'")
 
@@ -158,8 +158,17 @@ def seq_cross_ent(logits: torch.FloatTensor,
         per_batch_loss = sum_to_batch_size(negative_log_likelihood) / (sum_to_batch_size(weights) + 1e-13)
         num_non_empty_sequences = ((sum_to_batch_size(weights) > 0).float().sum() + 1e-13)
         return per_batch_loss.sum() / num_non_empty_sequences
+    elif average == "scaled_batch":
+        # shape : (batch_size,)
+        scale_ = sum_to_batch_size(weights)
+        scale_ = scale_ * (scale_ + 1) / 2
+        per_batch_loss = sum_to_batch_size(negative_log_likelihood) / (scale_ + 1e-15)
+        num_non_empty_sequences = ((sum_to_batch_size(weights) > 0).float().sum() + 1e-13)
+        return per_batch_loss.sum() / num_non_empty_sequences
     elif average == "token":
         return negative_log_likelihood.sum() / (weights.sum().float() + 1e-13)
+    elif average == "bare_batch":
+        return negative_log_likelihood.mean(0).sum()
     else:
         # shape : (batch_size,)
         per_batch_loss = sum_to_batch_size(negative_log_likelihood) / (sum_to_batch_size(weights) + 1e-13)
@@ -309,8 +318,8 @@ def get_decoder_initial_states(layer_state: List[torch.Tensor],
     return init_state
 
 def init_state_for_stacked_rnn(src_agg: List[torch.Tensor],
-                                num_layers: int,
-                                policy: Literal["lowest", "all", "parallel"]):
+                               num_layers: int,
+                               policy: Literal["lowest", "all", "parallel"]):
     if policy == "lowest": # use the top layer aggregated state for the decoder bottom, zero for others
         init_state = [src_agg[-1]] + [torch.zeros_like(src_agg[-1]) for _ in range(num_layers - 1)]
 

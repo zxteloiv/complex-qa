@@ -44,7 +44,7 @@ class SingleTokenMHAttentionWrapper(IAttn):
         super(SingleTokenMHAttentionWrapper, self).__init__()
         self._attn = attn
 
-    def forward(self, inputs, attend_over, attend_mask = None):
+    def forward(self, inputs, attend_over, attend_mask = None, structural_mask = None):
         """
         Do a multi-head attention for _input_ tokens over the _attend_over_ tokens.
         _attend_mask_ is used to wipe out padded tokens in the corresponding sequences.
@@ -60,7 +60,7 @@ class SingleTokenMHAttentionWrapper(IAttn):
         inputs = inputs.unsqueeze(1)
 
         # a: (batch, max_input_length, max_attend_length)
-        c, a = self._attn(inputs, attend_over, attend_mask)
+        c, a = self._attn(inputs, attend_over, attend_mask, structural_mask)
 
         c = c.squeeze(1)
         # a = a.squeeze(1)
@@ -68,9 +68,9 @@ class SingleTokenMHAttentionWrapper(IAttn):
         return c
 
 
-def get_wrapped_attention(attn_type: Literal["bilinear", "dot_product", "mha"],
-                          vector_dim: int,
-                          matrix_dim: int,
+def get_wrapped_attention(attn_type: str,
+                          vector_dim: int = 0,
+                          matrix_dim: int = 0,
                           attention_dropout: float = 0.,
                           **kwargs):
     """
@@ -118,6 +118,17 @@ def get_wrapped_attention(attn_type: Literal["bilinear", "dot_product", "mha"],
                                          output_dim=matrix_dim,
                                          attention_dropout=attention_dropout,)
         attn = SingleTokenMHAttentionWrapper(attn)
+
+    elif attn_type == "seq_mha":
+        from ..transformer.multi_head_attention import GeneralMultiHeadAttention
+        num_heads = kwargs.get('num_heads', 8)
+        attn = GeneralMultiHeadAttention(num_heads,
+                                         input_dim=vector_dim,
+                                         total_attention_dim=vector_dim,
+                                         total_value_dim=vector_dim,
+                                         attend_to_dim=matrix_dim,
+                                         output_dim=matrix_dim,
+                                         attention_dropout=attention_dropout,)
 
     elif attn_type == "none":
         attn = None

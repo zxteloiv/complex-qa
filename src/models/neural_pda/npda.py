@@ -14,7 +14,6 @@ from .partial_tree_encoder import TopDownTreeEncoder
 from .tree import Tree
 from .rule_scorer import RuleScorer
 from utils.nn import init_state_for_stacked_rnn, get_final_encoder_states
-from ..transformer.multi_head_attention import MultiHeadSelfAttention
 from utils.nn import prepare_input_mask, expand_tensor_size_at_dim
 
 from .tensor_typing_util import *
@@ -29,8 +28,9 @@ class NeuralPDA(nn.Module):
                  token_tutor,
                  rhs_expander: StackedRNNCell,
 
-                 pre_tree_updater: TopDownTreeEncoder,
-                 pre_tree_self_attn: Nullable[MultiHeadSelfAttention],
+                 pre_tree_encoder: TopDownTreeEncoder,
+                 pre_tree_self_attn: nn.Module,
+                 residual_norm_after_self_attn: nn.Module,
 
                  rule_scorer: RuleScorer,
 
@@ -39,7 +39,9 @@ class NeuralPDA(nn.Module):
                  # configuration
                  grammar_entry: int,
                  max_derivation_step: int = 1000,
+                 detach_tree_encoder: bool = False,
                  dropout: float = 0.2,
+                 detach_tree_embedding: bool = False,
                  ):
         super().__init__()
         self._expander = rhs_expander
@@ -51,14 +53,17 @@ class NeuralPDA(nn.Module):
 
         self._dropout = nn.Dropout(dropout)
 
-        self._pre_tree_updater = pre_tree_updater
+        self._pre_tree_encoder = pre_tree_encoder
         self._pre_tree_self_attn = pre_tree_self_attn
         self._rule_scorer = rule_scorer
+        self._residual_norm = residual_norm_after_self_attn
 
         # -------------------
         # configurations
         self.grammar_entry = grammar_entry
         self.max_derivation_step = max_derivation_step  # a very large upper limit for the runtime storage
+        self.detach_tree_encoder = detach_tree_encoder
+        self.detach_tree_embedding = detach_tree_embedding
 
         # -------------------
         # the helpful storage for runtime forwarding
@@ -68,6 +73,7 @@ class NeuralPDA(nn.Module):
         self._stack: Optional[TensorBatchStack] = None
         self._partial_tree: Optional[Tree] = None
         self._tree_hx = None
+        self.diagnosis = dict()
 
     def init_automata(self, batch_sz: int, device: torch.device, query_attn_fn: Callable,
                       max_derivation_step: int = 0):
@@ -112,15 +118,8 @@ class NeuralPDA(nn.Module):
         self._partial_tree = None
         self._stack = None
 
-    def forward(self, token_based=False, **kwargs):
-        if self.training:
-            return self._forward_parallel_training(**kwargs)
-
-        if not token_based:
-            return self._forward_derivation_step()
-
-        else:
-            raise NotImplementedError
+    def forward(self, **kwargs):
+        return self._forward_parallel_training(**kwargs)
 
     def _forward_parallel_training(self,
                                    tree_nodes,  # (batch, n_d), the tree nodes = #lhs = num_derivations
@@ -128,12 +127,17 @@ class NeuralPDA(nn.Module):
                                    expansion_frontiers,  # (batch, n_d, max_runtime_stack_size),
                                    derivations,  # (batch, n_d, max_seq), the gold derivations for choice checking
                                    ):
+        self.diagnosis = dict()
         _, tree_mask = prepare_input_mask(tree_nodes)
 
         # nodes_emb: (batch, n_d, emb)
         # tree_hid: (batch, n_d, hid)
         nodes_emb = self._embedder(tree_nodes)
-        tree_hid, _ = self._pre_tree_updater(nodes_emb, node_parents, tree_mask)
+        if self.detach_tree_embedding:
+            nodes_emb = nodes_emb.detach()
+        tree_hid, _ = self._pre_tree_encoder(nodes_emb, node_parents, tree_mask)
+        if self.detach_tree_encoder:
+            tree_hid = tree_hid.detach()
 
         batch, n_d = tree_nodes.size()
         attn_mask = tree_mask.new_zeros((batch, n_d, n_d))
@@ -142,7 +146,10 @@ class NeuralPDA(nn.Module):
                   expansion_frontiers] = 1
         # the root has the id equal to the padding and must be excluded from attention targets except for itself.
         attn_mask[:, 1:, 0] = 0
-        tree_hid_att, _ = self._pre_tree_self_attn(tree_hid, tree_mask, structural_mask=attn_mask)
+        tree_hid_att = self._pre_tree_self_attn(tree_hid, tree_hid, tree_mask, attn_mask)
+        if self._residual_norm is not None:
+            tree_hid_att = tree_hid_att + tree_hid
+            tree_hid_att = self._residual_norm(tree_hid_att)
 
         # tree_grammar: (batch, n_d, opt_num, 4, max_seq)
         tree_grammar = self._gt(tree_nodes)
@@ -157,6 +164,7 @@ class NeuralPDA(nn.Module):
 
         exact_logit = self._predict_exact_token_after_derivation(derivations, tree_hid_att, query_context)
 
+        self.diagnosis.update(tree_hid=tree_hid, tree_hid_att=tree_hid_att)
         return opt_prob, exact_logit, tree_grammar
 
     def _forward_derivation_step(self):
@@ -205,7 +213,7 @@ class NeuralPDA(nn.Module):
         node_emb = self._embedder(node_val)
 
         # tree_hidden: (batch, node_num, hidden_sz)
-        tree_hidden, tree_hx = self._pre_tree_updater(node_emb, node_parent, node_mask, self._tree_hx)
+        tree_hidden, tree_hx = self._pre_tree_encoder(node_emb, node_parent, node_mask, self._tree_hx)
         self._tree_hx = tree_hx
 
         batch_index = torch.arange(self._stack.max_batch_size, device=node_val.device).long()
@@ -225,10 +233,13 @@ class NeuralPDA(nn.Module):
         # attn_mask[batch_index.unsqueeze(-1), stack_pos] = 0
         attn_mask[batch_index.unsqueeze(-1), node_parent] = 0
         attn_mask[batch_index, top_pos] = 1 # the node itself must be involved into self-attention
-        tree_hidden, _ = self._pre_tree_self_attn(tree_hidden, attn_mask)
+        tree_hid_att = self._pre_tree_self_attn(tree_hidden, tree_hidden, attn_mask)
+        if self._residual_norm is not None:
+            tree_hid_att = tree_hid_att + tree_hidden
+            tree_hid_att = self._residual_norm(tree_hid_att)
 
         # tree_state: (batch, hid)
-        tree_state = tree_hidden[batch_index, top_pos]
+        tree_state = tree_hid_att[batch_index, top_pos]
         return tree_state
 
     def _select_node(self) -> Tuple[LT, LT, LT]:

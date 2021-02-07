@@ -1,3 +1,4 @@
+from torch import nn
 from torch.nn import Sequential
 
 class MultiInputsSequential(Sequential):
@@ -15,5 +16,15 @@ class UnpackedInputsSequential(Sequential):
             if not isinstance(args, tuple):
                 args = (args,)
 
-        return args
+        return args if len(args) > 1 else args[0]
+
+
+class SelectArgsById(nn.Module):
+    def __init__(self, i):
+        super().__init__()
+        self.i = i
+
+    def forward(self, *args):
+        return args[self.i]
+
 

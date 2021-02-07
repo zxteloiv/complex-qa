@@ -14,7 +14,7 @@ class RuleScorer(nn.Module, ABC):
 
         :param rule_option: (batch, opt_num, hid)
         :param query_context: (batch, opt_num, context_sz)
-        :param tree_state: (batch, hid)
+        :param tree_state: (batch, opt_num, hid)
         :return: the logits over the rule options.
         """
         raise NotImplementedError
@@ -36,3 +36,24 @@ class HeuristicMLPScorerWrapper(RuleScorer):
     def forward(self, rule_option: FT, query_context: FT, tree_state: FT) -> FT:
         inp = torch.cat([rule_option, query_context, tree_state, query_context - tree_state, query_context * tree_state], dim=-1)
         return self._module(inp).squeeze(-1)
+
+class GeneralizedInnerProductScorer(RuleScorer):
+    def __init__(self, normalized: bool = False):
+        super().__init__()
+        self.normalized = normalized
+
+    def forward(self, rule_option: FT, query_context: FT, tree_state: FT) -> FT:
+        """
+        Use dot product for all
+        :param rule_option: (batch, opt_num, hid)
+        :param query_context: (batch, opt_num, hid)
+        :param tree_state: (batch, opt_num, hid)
+        :return: the logits over the rule options. (batch, opt_num)
+        """
+        inp = (rule_option * query_context * tree_state).sum(dim=-1)
+        if self.normalized:
+            inp = inp / (rule_option.norm(dim=-1) + 1e-15)
+            inp = inp / (query_context.norm(dim=-1) + 1e-15)
+            inp = inp / (tree_state.norm(dim=-1) + 1e-15)
+
+        return inp
