@@ -51,7 +51,7 @@ class Seq2PDA(nn.Module):
         token_loss = self.token_loss.get_metric(reset)
         topo_loss = self.topo_loss.get_metric(reset)
         err = self.err.get_metric(reset)
-        output = {"Token Loss": token_loss, "Topo Loss": topo_loss, "ERR": err}
+        output = {"TokenLoss": token_loss, "TopoLoss": topo_loss, "ERR": err}
 
         if diagnosis:
             tree_hid_norm = [m.get_metric(reset) for m in self.tree_hid_norm]

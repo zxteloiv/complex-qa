@@ -20,9 +20,11 @@ def cfq_pda():
     ROOT = find_root()
     p = HyperParamSet.common_settings(ROOT)
     p.TRAINING_LIMIT = 10
-    p.OPTIM = "RAdam"
+    p.OPTIM = "adabelief"
     p.batch_sz = 32
     p.WEIGHT_DECAY = .1
+    p.ADAM_BETAS = (0.9, 0.999)
+    p.optim_kwargs = {"eps": 1e-16}
     p.GRAD_CLIPPING = .2    # grad norm required to be <= 2
 
     p.tutor_usage = "from_dataset" # from_grammar, from_dataset
@@ -54,7 +56,7 @@ def cfq_pda():
     p.tree_encoder_weight_norm = False
 
     p.tree_parent_detach = False
-    p.detach_tree_embedding = True
+    p.detach_tree_embedding = False
 
     p.bilinear_rank = 1
     p.bilinear_pool = p.hidden_sz // p.num_heads
@@ -66,7 +68,7 @@ def cfq_pda():
     p.use_attn_residual_norm = True
     p.detach_tree_encoder = False   # whether to stop-gradient for the tree encoder parameters, applies to non-parametric encoders
     # applied on the learning rate for tree encoder parameters
-    p.tree_training_lr_factor = 5e-2 / p.num_re0_layer
+    p.tree_training_lr_factor = 1.
 
     p.tree_self_attn = 'seq_mha'    # seq_mha, generalized_dot_product
 
@@ -82,44 +84,7 @@ def cfq_pda():
 @Registry.hparamset()
 def cfq_pda_0():
     p = cfq_pda()
-    p.tree_self_attn = 'generalized_dot_prod'
-    return p
-
-@Registry.hparamset()
-def cfq_pda_1():
-    p = cfq_pda()
-    # based on less-layer ablation setting
-
-    # optimization improvement
-    p.OPTIM = "adabelief"
-    p.WEIGHT_DECAY = .1
-    p.ADAM_BETAS = (0.9, 0.98)
-    p.optim_kwargs = {"eps": 1e-16}
-    return p
-
-@Registry.hparamset()
-def cfq_pda_2():
-    p = cfq_pda()
-    # optimization improvement but not detached embeddings
-    p.OPTIM = "adabelief"
-    p.WEIGHT_DECAY = .1
-    p.ADAM_BETAS = (0.9, 0.98)
-    p.optim_kwargs = {"eps": 1e-16}
-    p.tree_training_lr_factor = 1
-    p.detach_tree_embedding = False
-    return p
-
-@Registry.hparamset()
-def cfq_pda_3():
-    p = cfq_pda()
-    # completely optimization improvement, no change for grad and lr
-    p.OPTIM = "adabelief"
-    p.WEIGHT_DECAY = .1
-    p.ADAM_BETAS = (0.9, 0.98)
-    p.optim_kwargs = {"eps": 1e-16}
-    p.tree_training_lr_factor = 1
-    p.detach_tree_embedding = False
-    p.tree_encoder_weight_norm = True
+    p.tree_self_attn = 'generalized_dot_product'
     return p
 
 def get_grammar_tutor(p, vocab):
@@ -363,9 +328,10 @@ def get_model(p, vocab: NSVocabulary):
     return model
 
 class PDATrainingUpdater(Updater):
-    def __init__(self, models, iterators, optims, device=-1, clip_grad: float = 0.):
+    def __init__(self, models, iterators, optims, device=-1, clip_grad: float = 0., param_update=False):
         super().__init__(models, iterators, optims, device)
         self.clip_grad = clip_grad
+        self.param_update = param_update
 
     def update_epoch(self):
         model, optim, iterator = self._models[0], self._optims[0], self._iterators[0]
@@ -381,11 +347,23 @@ class PDATrainingUpdater(Updater):
             batch = move_to_device(batch, device)
 
         output = model(**batch)
+        output['param_update'] = None
+        if self.param_update:
+            output['param_update'] =  {
+                name: param.detach().cpu().clone()
+                for name, param in model.named_parameters()
+            }
+
         loss = output['loss']
         loss.backward()
         if self.clip_grad > 0:
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=self.clip_grad)
         optim.step()
+
+        if self.param_update:
+            for name, param in model.named_parameters():
+                output['param_update'][name].sub_(param.detach().cpu())
+
         return output
 
     @classmethod
@@ -426,7 +404,7 @@ class PDATrainingUpdater(Updater):
         if args.debug and args.skip:
             iterator.reset(args.skip)
 
-        updater = cls(model, iterator, optim, args.device, p.GRAD_CLIPPING)
+        updater = cls(model, iterator, optim, args.device, p.GRAD_CLIPPING, param_update=True)
         return updater
 
 def main():
@@ -465,12 +443,12 @@ def main():
             import json
             print(json.dumps(bot.model.get_metric()))
 
-        # from utils.trial_bot_extensions import init_tensorboard_writer
-        # from utils.trial_bot_extensions import write_batch_info_to_tensorboard
-        # from utils.trial_bot_extensions import close_tensorboard
-        # bot.add_event_handler(Events.STARTED, init_tensorboard_writer, 100)
-        # bot.add_event_handler(Events.ITERATION_COMPLETED, write_batch_info_to_tensorboard, 100)
-        # bot.add_event_handler(Events.COMPLETED, close_tensorboard, 100)
+        from utils.trial_bot_extensions import init_tensorboard_writer
+        from utils.trial_bot_extensions import write_batch_info_to_tensorboard
+        from utils.trial_bot_extensions import close_tensorboard
+        bot.add_event_handler(Events.STARTED, init_tensorboard_writer, 100, interval=4, histogram_interval=100)
+        bot.add_event_handler(Events.ITERATION_COMPLETED, write_batch_info_to_tensorboard, 100)
+        bot.add_event_handler(Events.COMPLETED, close_tensorboard, 100)
 
         # debug strange errors by inspecting running time, data size, etc.
         if args.debug:
