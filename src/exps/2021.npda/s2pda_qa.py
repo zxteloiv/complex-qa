@@ -84,20 +84,31 @@ def cfq_pda():
 @Registry.hparamset()
 def cfq_pda_0():
     p = cfq_pda()
-    p.ADAM_BETAS = (0.9, 0.9997)
+    p.ADAM_BETAS = (0.9, 0.999)
+    p.optim_kwargs['rectify'] = False
     return p
 
 @Registry.hparamset()
 def cfq_pda_1():
     p = cfq_pda()
-    p.OPTIM = 'mod_adabelief'
+    p.ADAM_BETAS = (0.9, 0.98)
+    p.optim_kwargs['rectify'] = False
     return p
 
 @Registry.hparamset()
 def cfq_pda_2():
     p = cfq_pda()
     p.OPTIM = 'mod_adabelief'
-    p.ADAM_BETAS = (0.9, 0.9997)
+    p.ADAM_BETAS = (0.9, 0.999)
+    p.optim_kwargs['rectify'] = False
+    return p
+
+@Registry.hparamset()
+def cfq_pda_3():
+    p = cfq_pda()
+    p.OPTIM = 'mod_adabelief'
+    p.ADAM_BETAS = (0.9, 0.98)
+    p.optim_kwargs['rectify'] = False
     return p
 
 def get_grammar_tutor(p, vocab):
