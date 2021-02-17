@@ -81,35 +81,24 @@ def cfq_pda():
     p.rule_scorer = "triple_inner_product" # heuristic, mlp, triple_inner_product
     return p
 
-@Registry.hparamset()
-def cfq_pda_0():
+from trialbot.utils.grid_search_helper import import_grid_search_parameters
+def cfq_pda_base():
     p = cfq_pda()
-    p.ADAM_BETAS = (0.9, 0.999)
-    p.optim_kwargs['rectify'] = False
+    p.tree_training_lr_factor = 1.
+    p.ADAM_BETAS = (.9, .999)
+    p.optim_kwargs = {'eps': 1e-8}
+    p.detach_tree_embedding = False
     return p
 
-@Registry.hparamset()
-def cfq_pda_1():
-    p = cfq_pda()
-    p.ADAM_BETAS = (0.9, 0.98)
-    p.optim_kwargs['rectify'] = False
-    return p
-
-@Registry.hparamset()
-def cfq_pda_2():
-    p = cfq_pda()
-    p.OPTIM = 'mod_adabelief'
-    p.ADAM_BETAS = (0.9, 0.999)
-    p.optim_kwargs['rectify'] = False
-    return p
-
-@Registry.hparamset()
-def cfq_pda_3():
-    p = cfq_pda()
-    p.OPTIM = 'mod_adabelief'
-    p.ADAM_BETAS = (0.9, 0.98)
-    p.optim_kwargs['rectify'] = False
-    return p
+import_grid_search_parameters(
+    grid_conf={
+        "OPTIM": ['Adam', 'RAdam'],
+        'ADAM_BETAS': [(.9, .999), (.9, .98)],
+        'detach_tree_embedding': [True, False],
+    },
+    base_param_fn=cfq_pda_base,
+    name_prefix='cfq_pda_',
+)
 
 def get_grammar_tutor(p, vocab):
     ns_symbol, ns_exact_token = p.tgt_ns

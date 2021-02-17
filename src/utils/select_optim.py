@@ -41,7 +41,10 @@ def select_optim(p, params):
                                 betas=p.ADAM_BETAS,
                                 weight_decay=p.WEIGHT_DECAY,
                                 **getattr(p, 'optim_kwargs', dict()))
+    elif name == "adam":
+        optim = torch.optim.Adam(params, p.ADAM_LR, p.ADAM_BETAS, weight_decay=p.WEIGHT_DECAY,
+                                 **getattr(p, 'optim_kwargs', dict()))
     else:
-        optim = torch.optim.Adam(params, p.ADAM_LR, p.ADAM_BETAS, weight_decay=p.WEIGHT_DECAY)
+        raise ValueError(f"Optim {name} not found.")
     return optim
 
