@@ -84,17 +84,17 @@ def cfq_pda():
 from trialbot.utils.grid_search_helper import import_grid_search_parameters
 def cfq_pda_base():
     p = cfq_pda()
+    p.OPTIM = "adabelief"
     p.tree_training_lr_factor = 1.
     p.ADAM_BETAS = (.9, .999)
-    p.optim_kwargs = {'eps': 1e-8}
-    p.detach_tree_embedding = False
+    p.optim_kwargs = {'eps': 1e-16}
+    p.detach_tree_embedding = True
     return p
 
 import_grid_search_parameters(
     grid_conf={
-        "OPTIM": ['Adam', 'RAdam'],
         'ADAM_BETAS': [(.9, .999), (.9, .98)],
-        'detach_tree_embedding': [True, False],
+        'optim_kwargs': [{'eps': 1e-16, 'rectify': False}, {'eps': 1e-16, 'rectify': True}]
     },
     base_param_fn=cfq_pda_base,
     name_prefix='cfq_pda_',
