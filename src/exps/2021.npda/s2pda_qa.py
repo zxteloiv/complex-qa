@@ -93,6 +93,11 @@ def cfq_pda_sgd():
     p.detach_tree_embedding = False
     return p
 
+from trialbot.utils.grid_search_helper import import_grid_search_parameters
+import_grid_search_parameters(
+    grid_conf={'WEIGHT_DECAY': [0., 0.1]}, base_param_fn=cfq_pda_sgd,
+)
+
 def get_grammar_tutor(p, vocab):
     ns_symbol, ns_exact_token = p.tgt_ns
     import torch
