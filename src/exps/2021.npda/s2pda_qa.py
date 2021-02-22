@@ -81,24 +81,17 @@ def cfq_pda():
     p.rule_scorer = "triple_inner_product" # heuristic, mlp, triple_inner_product
     return p
 
-from trialbot.utils.grid_search_helper import import_grid_search_parameters
-def cfq_pda_base():
+@Registry.hparamset()
+def cfq_pda_sgd():
     p = cfq_pda()
-    p.OPTIM = "adabelief"
+    p.TRAINING_LIMIT = 50
+    p.OPTIM = "sgd"
     p.tree_training_lr_factor = 1.
-    p.ADAM_BETAS = (.9, .999)
-    p.optim_kwargs = {'eps': 1e-16}
-    p.detach_tree_embedding = True
+    p.SGD_LR = 1e-2
+    p.optim_kwargs = {}
+    p.WEIGHT_DECAY = 0.
+    p.detach_tree_embedding = False
     return p
-
-import_grid_search_parameters(
-    grid_conf={
-        'ADAM_BETAS': [(.9, .999), (.9, .98)],
-        'optim_kwargs': [{'eps': 1e-16, 'rectify': False}, {'eps': 1e-16, 'rectify': True}]
-    },
-    base_param_fn=cfq_pda_base,
-    name_prefix='cfq_pda_',
-)
 
 def get_grammar_tutor(p, vocab):
     ns_symbol, ns_exact_token = p.tgt_ns
@@ -456,12 +449,12 @@ def main():
             import json
             print(json.dumps(bot.model.get_metric()))
 
-        from utils.trial_bot_extensions import init_tensorboard_writer
-        from utils.trial_bot_extensions import write_batch_info_to_tensorboard
-        from utils.trial_bot_extensions import close_tensorboard
-        bot.add_event_handler(Events.STARTED, init_tensorboard_writer, 100, interval=4, histogram_interval=100)
-        bot.add_event_handler(Events.ITERATION_COMPLETED, write_batch_info_to_tensorboard, 100)
-        bot.add_event_handler(Events.COMPLETED, close_tensorboard, 100)
+        # from utils.trial_bot_extensions import init_tensorboard_writer
+        # from utils.trial_bot_extensions import write_batch_info_to_tensorboard
+        # from utils.trial_bot_extensions import close_tensorboard
+        # bot.add_event_handler(Events.STARTED, init_tensorboard_writer, 100, interval=4, histogram_interval=100)
+        # bot.add_event_handler(Events.ITERATION_COMPLETED, write_batch_info_to_tensorboard, 100)
+        # bot.add_event_handler(Events.COMPLETED, close_tensorboard, 100)
 
         # debug strange errors by inspecting running time, data size, etc.
         if args.debug:
