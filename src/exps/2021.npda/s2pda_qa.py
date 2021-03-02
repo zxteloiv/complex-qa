@@ -20,11 +20,11 @@ def cfq_pda():
     ROOT = find_root()
     p = HyperParamSet.common_settings(ROOT)
     p.TRAINING_LIMIT = 10
-    p.OPTIM = "adabelief"
+    p.OPTIM = "radam"
     p.batch_sz = 32
     p.WEIGHT_DECAY = .1
     p.ADAM_BETAS = (0.9, 0.999)
-    p.optim_kwargs = {"eps": 1e-16}
+    p.optim_kwargs = {"eps": 1e-8}
     p.GRAD_CLIPPING = .2    # grad norm required to be <= 2
 
     p.tutor_usage = "from_dataset" # from_grammar, from_dataset
@@ -56,7 +56,7 @@ def cfq_pda():
     p.tree_encoder_weight_norm = False
 
     p.tree_parent_detach = False
-    p.detach_tree_embedding = False
+    p.detach_tree_embedding = True
 
     p.bilinear_rank = 1
     p.bilinear_pool = p.hidden_sz // p.num_heads
@@ -67,8 +67,6 @@ def cfq_pda():
 
     p.use_attn_residual_norm = True
     p.detach_tree_encoder = False   # whether to stop-gradient for the tree encoder parameters, applies to non-parametric encoders
-    # applied on the learning rate for tree encoder parameters
-    p.tree_training_lr_factor = 1.
 
     p.tree_self_attn = 'seq_mha'    # seq_mha, generalized_dot_product
 
@@ -80,23 +78,6 @@ def cfq_pda():
 
     p.rule_scorer = "triple_inner_product" # heuristic, mlp, triple_inner_product
     return p
-
-@Registry.hparamset()
-def cfq_pda_sgd():
-    p = cfq_pda()
-    p.TRAINING_LIMIT = 50
-    p.OPTIM = "sgd"
-    p.tree_training_lr_factor = 1.
-    p.SGD_LR = 1e-2
-    p.optim_kwargs = {}
-    p.WEIGHT_DECAY = 0.
-    p.detach_tree_embedding = False
-    return p
-
-from trialbot.utils.grid_search_helper import import_grid_search_parameters
-import_grid_search_parameters(
-    grid_conf={'WEIGHT_DECAY': [0., 0.1]}, base_param_fn=cfq_pda_sgd,
-)
 
 def get_grammar_tutor(p, vocab):
     ns_symbol, ns_exact_token = p.tgt_ns
@@ -385,27 +366,7 @@ class PDATrainingUpdater(Updater):
         model: Seq2PDA
         args, p, model, logger = bot.args, bot.hparams, bot.model, bot.logger
 
-        if p.tree_training_lr_factor < 1:
-            lr_conds = [
-                (lambda k: 'pre_tree_encoder' in k, p.tree_training_lr_factor),
-            ]
-            params_names = [
-                { 'params': list(k for k, v in model.named_parameters() if cond(k)), 'lr': p.ADAM_LR * lr_factor }
-                for cond, lr_factor in lr_conds
-            ]
-            params = [
-                { 'params': list(v for k, v in model.named_parameters() if cond(k)), 'lr': p.ADAM_LR * lr_factor }
-                for cond, lr_factor in lr_conds
-            ]
-            others = list(v for k, v in model.named_parameters() if all(not cond(k) for cond, _ in lr_conds))
-            if len(others) > 0:
-                params.append({'params': others})
-
-            logger.info(f"param_groups defined as {params_names}")
-
-        else:
-            params = model.parameters()
-
+        params = model.parameters()
         from utils.select_optim import select_optim
         optim = select_optim(p, params)
         logger.info(f"Using the optimizer {str(optim)}")
