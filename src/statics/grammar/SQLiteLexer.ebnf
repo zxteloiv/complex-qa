@@ -1,0 +1,269 @@
+/* converted on Tue Apr 6, 2021, 17:11 (UTC+08) by antlr_4-to-w3c v0.51 which is Copyright (c) 2011-2021 by Gunther Rademacher <grd@gmx.net> */
+
+WS        ::= SINGLE_LINE_COMMENT
+           | SPACES
+          /* ws: definition */
+
+SCOL     ::= ';'
+DOT      ::= '.'
+OPEN_PAR ::= '('
+CLOSE_PAR
+         ::= ')'
+COMMA    ::= ','
+ASSIGN   ::= '='
+STAR     ::= '*'
+PLUS     ::= '+'
+MINUS    ::= '-'
+TILDE    ::= '~'
+PIPE2    ::= '||'
+DIV      ::= '/'
+MOD      ::= '%'
+LT2      ::= '<<'
+GT2      ::= '>>'
+AMP      ::= '&'
+PIPE     ::= '|'
+LT       ::= '<'
+LT_EQ    ::= '<='
+GT       ::= '>'
+GT_EQ    ::= '>='
+EQ       ::= '=='
+NOT_EQ1  ::= '!='
+NOT_EQ2  ::= '<>'
+ABORT    ::= CH_A CH_B CH_O CH_R CH_T 
+ACTION   ::= CH_A CH_C CH_T CH_I CH_O CH_N 
+ADD      ::= CH_A CH_D CH_D 
+AFTER    ::= CH_A CH_F CH_T CH_E CH_R 
+ALL      ::= CH_A CH_L CH_L 
+ALTER    ::= CH_A CH_L CH_T CH_E CH_R 
+ANALYZE  ::= CH_A CH_N CH_A CH_L CH_Y CH_Z CH_E 
+AND      ::= CH_A CH_N CH_D 
+AS       ::= CH_A CH_S 
+ASC      ::= CH_A CH_S CH_C 
+ATTACH   ::= CH_A CH_T CH_T CH_A CH_C CH_H 
+AUTOINCREMENT
+         ::= CH_A CH_U CH_T CH_O CH_I CH_N CH_C CH_R CH_E CH_M CH_E CH_N CH_T 
+BEFORE   ::= CH_B CH_E CH_F CH_O CH_R CH_E 
+BEGIN    ::= CH_B CH_E CH_G CH_I CH_N 
+BETWEEN  ::= CH_B CH_E CH_T CH_W CH_E CH_E CH_N 
+BY       ::= CH_B CH_Y 
+CASCADE  ::= CH_C CH_A CH_S CH_C CH_A CH_D CH_E 
+CASE     ::= CH_C CH_A CH_S CH_E 
+CAST     ::= CH_C CH_A CH_S CH_T 
+CHECK    ::= CH_C CH_H CH_E CH_C CH_K 
+COLLATE  ::= CH_C CH_O CH_L CH_L CH_A CH_T CH_E 
+COLUMN   ::= CH_C CH_O CH_L CH_U CH_M CH_N 
+COMMIT   ::= CH_C CH_O CH_M CH_M CH_I CH_T 
+CONFLICT ::= CH_C CH_O CH_N CH_F CH_L CH_I CH_C CH_T 
+CONSTRAINT
+         ::= CH_C CH_O CH_N CH_S CH_T CH_R CH_A CH_I CH_N CH_T 
+CREATE   ::= CH_C CH_R CH_E CH_A CH_T CH_E 
+CROSS    ::= CH_C CH_R CH_O CH_S CH_S 
+CURRENT_DATE
+         ::= CH_C CH_U CH_R CH_R CH_E CH_N CH_T '_' CH_D CH_A CH_T CH_E 
+CURRENT_TIME
+         ::= CH_C CH_U CH_R CH_R CH_E CH_N CH_T '_' CH_T CH_I CH_M CH_E 
+CURRENT_TIMESTAMP
+         ::= CH_C CH_U CH_R CH_R CH_E CH_N CH_T '_' CH_T CH_I CH_M CH_E CH_S CH_T CH_A CH_M CH_P 
+DATABASE ::= CH_D CH_A CH_T CH_A CH_B CH_A CH_S CH_E 
+DEFAULT  ::= CH_D CH_E CH_F CH_A CH_U CH_L CH_T 
+DEFERRABLE
+         ::= CH_D CH_E CH_F CH_E CH_R CH_R CH_A CH_B CH_L CH_E 
+DEFERRED ::= CH_D CH_E CH_F CH_E CH_R CH_R CH_E CH_D 
+DELETE   ::= CH_D CH_E CH_L CH_E CH_T CH_E 
+DESC     ::= CH_D CH_E CH_S CH_C 
+DETACH   ::= CH_D CH_E CH_T CH_A CH_C CH_H 
+DISTINCT ::= CH_D CH_I CH_S CH_T CH_I CH_N CH_C CH_T 
+DROP     ::= CH_D CH_R CH_O CH_P 
+EACH     ::= CH_E CH_A CH_C CH_H 
+ELSE     ::= CH_E CH_L CH_S CH_E 
+END      ::= CH_E CH_N CH_D 
+ESCAPE   ::= CH_E CH_S CH_C CH_A CH_P CH_E 
+EXCEPT   ::= CH_E CH_X CH_C CH_E CH_P CH_T 
+EXCLUSIVE
+         ::= CH_E CH_X CH_C CH_L CH_U CH_S CH_I CH_V CH_E 
+EXISTS   ::= CH_E CH_X CH_I CH_S CH_T CH_S 
+EXPLAIN  ::= CH_E CH_X CH_P CH_L CH_A CH_I CH_N 
+FAIL     ::= CH_F CH_A CH_I CH_L 
+FOR      ::= CH_F CH_O CH_R 
+FOREIGN  ::= CH_F CH_O CH_R CH_E CH_I CH_G CH_N 
+FROM     ::= CH_F CH_R CH_O CH_M 
+FULL     ::= CH_F CH_U CH_L CH_L 
+GLOB     ::= CH_G CH_L CH_O CH_B 
+GROUP    ::= CH_G CH_R CH_O CH_U CH_P 
+HAVING   ::= CH_H CH_A CH_V CH_I CH_N CH_G 
+IF       ::= CH_I CH_F 
+IGNORE   ::= CH_I CH_G CH_N CH_O CH_R CH_E 
+IMMEDIATE
+         ::= CH_I CH_M CH_M CH_E CH_D CH_I CH_A CH_T CH_E 
+IN       ::= CH_I CH_N 
+INDEX    ::= CH_I CH_N CH_D CH_E CH_X 
+INDEXED  ::= CH_I CH_N CH_D CH_E CH_X CH_E CH_D 
+INITIALLY
+         ::= CH_I CH_N CH_I CH_T CH_I CH_A CH_L CH_L CH_Y 
+INNER    ::= CH_I CH_N CH_N CH_E CH_R 
+INSERT   ::= CH_I CH_N CH_S CH_E CH_R CH_T 
+INSTEAD  ::= CH_I CH_N CH_S CH_T CH_E CH_A CH_D 
+INTERSECT
+         ::= CH_I CH_N CH_T CH_E CH_R CH_S CH_E CH_C CH_T 
+INTO     ::= CH_I CH_N CH_T CH_O 
+IS       ::= CH_I CH_S 
+ISNULL   ::= CH_I CH_S CH_N CH_U CH_L CH_L 
+JOIN     ::= CH_J CH_O CH_I CH_N 
+KEY      ::= CH_K CH_E CH_Y 
+LEFT     ::= CH_L CH_E CH_F CH_T 
+LIKE     ::= CH_L CH_I CH_K CH_E 
+LIMIT    ::= CH_L CH_I CH_M CH_I CH_T 
+MATCH    ::= CH_M CH_A CH_T CH_C CH_H 
+NATURAL  ::= CH_N CH_A CH_T CH_U CH_R CH_A CH_L 
+NO       ::= CH_N CH_O 
+NOT      ::= CH_N CH_O CH_T 
+NOTNULL  ::= CH_N CH_O CH_T CH_N CH_U CH_L CH_L 
+NULL_    ::= CH_N CH_U CH_L CH_L 
+OF       ::= CH_O CH_F 
+OFFSET   ::= CH_O CH_F CH_F CH_S CH_E CH_T 
+ON       ::= CH_O CH_N 
+OR       ::= CH_O CH_R 
+ORDER    ::= CH_O CH_R CH_D CH_E CH_R 
+OUTER    ::= CH_O CH_U CH_T CH_E CH_R 
+PLAN     ::= CH_P CH_L CH_A CH_N 
+PRAGMA   ::= CH_P CH_R CH_A CH_G CH_M CH_A 
+PRIMARY  ::= CH_P CH_R CH_I CH_M CH_A CH_R CH_Y 
+QUERY    ::= CH_Q CH_U CH_E CH_R CH_Y 
+RAISE    ::= CH_R CH_A CH_I CH_S CH_E 
+RECURSIVE
+         ::= CH_R CH_E CH_C CH_U CH_R CH_S CH_I CH_V CH_E 
+REFERENCES
+         ::= CH_R CH_E CH_F CH_E CH_R CH_E CH_N CH_C CH_E CH_S 
+REGEXP   ::= CH_R CH_E CH_G CH_E CH_X CH_P 
+REINDEX  ::= CH_R CH_E CH_I CH_N CH_D CH_E CH_X 
+RELEASE  ::= CH_R CH_E CH_L CH_E CH_A CH_S CH_E 
+RENAME   ::= CH_R CH_E CH_N CH_A CH_M CH_E 
+REPLACE  ::= CH_R CH_E CH_P CH_L CH_A CH_C CH_E 
+RESTRICT ::= CH_R CH_E CH_S CH_T CH_R CH_I CH_C CH_T 
+RIGHT    ::= CH_R CH_I CH_G CH_H CH_T 
+ROLLBACK ::= CH_R CH_O CH_L CH_L CH_B CH_A CH_C CH_K 
+ROW      ::= CH_R CH_O CH_W 
+ROWS     ::= CH_R CH_O CH_W CH_S 
+SAVEPOINT
+         ::= CH_S CH_A CH_V CH_E CH_P CH_O CH_I CH_N CH_T 
+SELECT   ::= CH_S CH_E CH_L CH_E CH_C CH_T 
+SET      ::= CH_S CH_E CH_T 
+TABLE    ::= CH_T CH_A CH_B CH_L CH_E 
+TEMP     ::= CH_T CH_E CH_M CH_P 
+TEMPORARY
+         ::= CH_T CH_E CH_M CH_P CH_O CH_R CH_A CH_R CH_Y 
+THEN     ::= CH_T CH_H CH_E CH_N 
+TO       ::= CH_T CH_O 
+TRANSACTION
+         ::= CH_T CH_R CH_A CH_N CH_S CH_A CH_C CH_T CH_I CH_O CH_N 
+TRIGGER  ::= CH_T CH_R CH_I CH_G CH_G CH_E CH_R 
+UNION    ::= CH_U CH_N CH_I CH_O CH_N 
+UNIQUE   ::= CH_U CH_N CH_I CH_Q CH_U CH_E 
+UPDATE   ::= CH_U CH_P CH_D CH_A CH_T CH_E 
+USING    ::= CH_U CH_S CH_I CH_N CH_G 
+VACUUM   ::= CH_V CH_A CH_C CH_U CH_U CH_M 
+VALUES   ::= CH_V CH_A CH_L CH_U CH_E CH_S 
+VIEW     ::= CH_V CH_I CH_E CH_W 
+VIRTUAL  ::= CH_V CH_I CH_R CH_T CH_U CH_A CH_L 
+WHEN     ::= CH_W CH_H CH_E CH_N 
+WHERE    ::= CH_W CH_H CH_E CH_R CH_E 
+WITH     ::= CH_W CH_I CH_T CH_H 
+WITHOUT  ::= CH_W CH_I CH_T CH_H CH_O CH_U CH_T 
+FIRST_VALUE
+         ::= CH_F CH_I CH_R CH_S CH_T '_' CH_V CH_A CH_L CH_U CH_E 
+OVER     ::= CH_O CH_V CH_E CH_R 
+PARTITION
+         ::= CH_P CH_A CH_R CH_T CH_I CH_T CH_I CH_O CH_N 
+RANGE    ::= CH_R CH_A CH_N CH_G CH_E 
+PRECEDING
+         ::= CH_P CH_R CH_E CH_C CH_E CH_D CH_I CH_N CH_G 
+UNBOUNDED
+         ::= CH_U CH_N CH_B CH_O CH_U CH_N CH_D CH_E CH_D 
+CURRENT  ::= CH_C CH_U CH_R CH_R CH_E CH_N CH_T 
+FOLLOWING
+         ::= CH_F CH_O CH_L CH_L CH_O CH_W CH_I CH_N CH_G 
+CUME_DIST
+         ::= CH_C CH_U CH_M CH_E '_' CH_D CH_I CH_S CH_T 
+DENSE_RANK
+         ::= CH_D CH_E CH_N CH_S CH_E '_' CH_R CH_A CH_N CH_K 
+LAG      ::= CH_L CH_A CH_G 
+LAST_VALUE
+         ::= CH_L CH_A CH_S CH_T '_' CH_V CH_A CH_L CH_U CH_E 
+LEAD     ::= CH_L CH_E CH_A CH_D 
+NTH_VALUE
+         ::= CH_N CH_T CH_H '_' CH_V CH_A CH_L CH_U CH_E 
+NTILE    ::= CH_N CH_T CH_I CH_L CH_E 
+PERCENT_RANK
+         ::= CH_P CH_E CH_R CH_C CH_E CH_N CH_T '_' CH_R CH_A CH_N CH_K 
+RANK     ::= CH_R CH_A CH_N CH_K 
+ROW_NUMBER
+         ::= CH_R CH_O CH_W '_' CH_N CH_U CH_M CH_B CH_E CH_R 
+GENERATED
+         ::= CH_G CH_E CH_N CH_E CH_R CH_A CH_T CH_E CH_D 
+ALWAYS   ::= CH_A CH_L CH_W CH_A CH_Y CH_S 
+STORED   ::= CH_S CH_T CH_O CH_R CH_E CH_D 
+TRUE_    ::= CH_T CH_R CH_U CH_E 
+FALSE_   ::= CH_F CH_A CH_L CH_S CH_E 
+WINDOW   ::= CH_W CH_I CH_N CH_D CH_O CH_W 
+NULLS    ::= CH_N CH_U CH_L CH_L CH_S 
+FIRST    ::= CH_F CH_I CH_R CH_S CH_T 
+LAST     ::= CH_L CH_A CH_S CH_T 
+FILTER   ::= CH_F CH_I CH_L CH_T CH_E CH_R 
+GROUPS   ::= CH_G CH_R CH_O CH_U CH_P CH_S 
+EXCLUDE  ::= CH_E CH_X CH_C CH_L CH_U CH_D CH_E 
+TIES     ::= CH_T CH_I CH_E CH_S 
+OTHERS   ::= CH_O CH_T CH_H CH_E CH_R CH_S 
+DO       ::= CH_D CH_O 
+NOTHING  ::= CH_N CH_O CH_T CH_H CH_I CH_N CH_G 
+IDENTIFIER
+         ::= '"' ( [^"] | '""' )* '"'
+           | '`' ( [^`] | '``' )* '`'
+           | '[' [^#x5D]* ']'
+           | [a-zA-Z_] [a-zA-Z_0-9]*
+NUMERIC_LITERAL
+         ::= ( DIGIT+ ( '.' DIGIT* )? | '.' DIGIT+ ) ( CH_E [\-+]? DIGIT+ )?
+           | '0x' HEX_DIGIT+
+BIND_PARAMETER
+         ::= '?' DIGIT*
+           | [:@$] IDENTIFIER
+STRING_LITERAL
+         ::= "'" ( [^'] | "''" )* "'"
+BLOB_LITERAL
+         ::= CH_X STRING_LITERAL
+SINGLE_LINE_COMMENT
+         ::= '--' [^#xd#xa]* #xD? #xA /* ( #xD? #xA | EOF ) */
+SPACES   ::= [ #x000B#x9#xd#xa]
+/*
+UNEXPECTED_CHAR
+         ::= .
+*/
+HEX_DIGIT
+         ::= [0-9a-fA-F]
+DIGIT    ::= [0-9]
+ CH_A        ::= [aA]
+ CH_B        ::= [bB]
+ CH_C        ::= [cC]
+ CH_D        ::= [dD]
+ CH_E        ::= [eE]
+ CH_F        ::= [fF]
+ CH_G        ::= [gG]
+ CH_H        ::= [hH]
+ CH_I        ::= [iI]
+ CH_J        ::= [jJ]
+ CH_K        ::= [kK]
+ CH_L        ::= [lL]
+ CH_M        ::= [mM]
+ CH_N        ::= [nN]
+ CH_O        ::= [oO]
+ CH_P        ::= [pP]
+ CH_Q        ::= [qQ]
+ CH_R        ::= [rR]
+ CH_S        ::= [sS]
+ CH_T        ::= [tT]
+ CH_U        ::= [uU]
+ CH_V        ::= [vV]
+ CH_W        ::= [wW]
+ CH_X        ::= [xX]
+ CH_Y        ::= [yY]
+ CH_Z        ::= [zZ]
+/* EOF      ::= $ */

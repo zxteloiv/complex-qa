@@ -13,9 +13,10 @@ import lark
 import re
 from utils.root_finder import find_root
 from typing import List, Union
-import os.path
+from os.path import join
+from datetime import datetime as dt
 
-W3C_EBNF_Grammar = os.path.join(find_root(), 'src', 'statics', 'grammar', 'w3c_ebnf.lark')
+W3C_EBNF_Grammar = join(find_root(), 'src', 'statics', 'grammar', 'w3c_ebnf.lark')
 
 class EBNF2Lark(lark.Transformer):
     def concat(self, children):
@@ -197,10 +198,21 @@ class EBNF2BNF(lark.Visitor):
         self.expansion.terminal_name = False
         return self.expansion.transform(tree)
 
-def compile():
-    grammar_file = os.path.join(find_root(), 'src', 'statics', 'grammar', 'sparql_pattern.ebnf')
+def compile_file(in_file, out_file):
+    text = open(in_file).read()
+    out_text = compile(text)
+    with open(out_file, 'w') as fout:
+        name_suffix = dt.now().strftime('%s')
+        print(f"// This file was automatically compiled"
+              f" from the W3C standard of SparQL grammar at {dt.now().strftime('%Y-%m-%d %H:%M:%S')}"
+              f"\n%import common.WS -> WS_{name_suffix}"
+              f"\n%ignore WS_{name_suffix}\n", file=fout)
+
+        print(out_text, file=fout)
+
+def compile(in_text):
     parser = lark.Lark(open(W3C_EBNF_Grammar))
-    sparql_ebnf_tree = parser.parse(open(grammar_file).read())
+    sparql_ebnf_tree = parser.parse(in_text)
 
     # immediately processing the parse tree will yield a sparql.lark rather than .bnf.lark
     # lark_text = '\n'.join(EBNF2Lark().transform(sparql_ebnf_tree).children)
@@ -210,17 +222,7 @@ def compile():
     bnf_tree.children.extend(bnf_converter.new_rules)
 
     lark_text = '\n'.join(EBNF2Lark().transform(bnf_tree).children)
-
-    tgt_file = os.path.join(find_root(), 'src', 'statics', 'grammar', 'sparql_pattern.bnf.lark')
-    from datetime import datetime as dt
-    with open(tgt_file, 'w') as fout:
-        name_suffix = dt.now().strftime('%s')
-        print(f"// This file was automatically compiled"
-              f" from the W3C standard of SparQL grammar at {dt.now().strftime('%Y-%m-%d %H:%M:%S')}"
-              f"\n%import common.WS -> WS_{name_suffix}"
-              f"\n%ignore WS_{name_suffix}\n", file=fout)
-
-        print(lark_text, file=fout)
+    return lark_text
 
 def pretty_repr_tree(tree: lark.Tree, indent_str='    '):
     Tree = lark.Tree
@@ -259,7 +261,7 @@ def pretty_derivation_tree(tree: lark.Tree):
     return rules
 
 def test():
-    sparql_lark = os.path.join(find_root(), 'src', 'statics', 'grammar', 'sparql_pattern.bnf.lark')
+    sparql_lark = join(find_root(), 'src', 'statics', 'grammar', 'sparql_pattern.bnf.lark')
     sparql_parser = lark.Lark(open(sparql_lark), start="queryunit", keep_all_tokens=True,)
 
     # sparql = r"""
@@ -336,8 +338,44 @@ def test2():
     lark_text = EBNF2Lark().transform(bnf_tree)
     print("\n".join(lark_text.children))
 
+def main(**kwargs):
+    from argparse import ArgumentParser
+    parser = ArgumentParser()
+    grammar_path = kwargs.get('prefix', join(find_root(), 'src', 'statics', 'grammar'))
+    parser.add_argument('--prefix', default=grammar_path, help='the path to grammar directory')
+    parser.add_argument('--grammar', '-g', type=str, choices=['sparql', 'mysql', 'sqlite'], default=kwargs.get('grammar'))
+    args = parser.parse_args()
+
+    if args.grammar == 'sparql':
+        grammar_file = join(args.prefix, 'sparql_pattern.ebnf')
+        tgt_file = join(args.prefix, 'sparql_pattern.bnf.lark')
+        compile_file(grammar_file, tgt_file)
+
+    else:
+        if args.grammar == 'sqlite':
+            lex_file = join(args.prefix, 'SQLiteLexer.ebnf')
+            parser_file = join(args.prefix, 'SQLiteParser.ebnf')
+            tgt_file = join(args.prefix, 'SQLite.lark')
+        elif args.grammar == 'mysql':
+            lex_file = join(args.prefix, 'mysql-workbench', 'MySQLLexer.ebnf')
+            parser_file = join(args.prefix, 'mysql-workbench', 'MySQLParser.ebnf')
+            tgt_file = join(args.prefix, 'MySQL.lark')
+        else:
+            raise ValueError(f'grammar {args.grammar} not defined')
+
+        text = open(lex_file).read() + '\n' + open(parser_file).read()
+        lark_text = compile(text)
+        print(lark_text)
+        with open(tgt_file, 'w') as fout:
+            name_suffix = dt.now().strftime('%s')
+            print(f"// This file was automatically compiled"
+                  f" from the W3C standard of SparQL grammar at {dt.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                  f"\n%import common.WS -> WS_{name_suffix}"
+                  f"\n%ignore WS_{name_suffix}\n", file=fout)
+            print(lark_text, file=fout)
+            print("\n%ignore WS\n", file=fout)
 
 if __name__ == '__main__':
-    # compile()
-    test()
+    main(grammar="sqlite")
+    # test()
     # test2()

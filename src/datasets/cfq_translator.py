@@ -1,5 +1,4 @@
 from trialbot.training import Registry
-from trialbot.data import Translator, START_SYMBOL, END_SYMBOL, PADDING_TOKEN
 from utils.sparql_tokenizer import split_sparql
 from .field import FieldAwareTranslator
 from .seq_field import SeqField
