@@ -1664,9 +1664,9 @@ DOUBLE_QUOTE
 BACK_TICK_QUOTED_ID
          ::= BACK_TICK ( '\'? XML_CHAR )* BACK_TICK
 DOUBLE_QUOTED_TEXT
-         ::= ( DOUBLE_QUOTE ( ( '\' XML_CHAR )? XML_CHAR )* DOUBLE_QUOTE )+
+         ::= ( DOUBLE_QUOTE ( ( '\' XML_CHAR ) | QUOTED_TEXT_CHAR | SINGLE_QUOTE )* DOUBLE_QUOTE )+
 SINGLE_QUOTED_TEXT
-         ::= ( SINGLE_QUOTE ( '\'? XML_CHAR )* SINGLE_QUOTE )+
+         ::= ( SINGLE_QUOTE ( ( '\' XML_CHAR ) | QUOTED_TEXT_CHAR | DOUBLE_QUOTE )* SINGLE_QUOTE )+
 POUND_COMMENT
          ::= '#' [^#xa#xd]*
 DASHDASH_COMMENT
@@ -1689,3 +1689,6 @@ LETTER_WITHOUT_FLOAT_PART
 /* borrowed from W3C XML standard to replace the dot (Any Char) match
    which is not explicitly allowed in the EBNF notations */
 XML_CHAR ::= [#x0001-#xD7FF#xE000-#xFFFD#x00010000-#x0010FFFF]
+XML_CHAR_EXCEPT_QUOTES ::= [#x1-#x21#x23-#x26#x28-#xD7FF#xE000-#xFFFD#x00010000-#x0010FFFF]
+ESCAPED_QUOTES ::= '\"' | "\'"
+QUOTED_TEXT_CHAR ::= XML_CHAR_EXCEPT_QUOTES | ESCAPED_QUOTES

@@ -1,4 +1,4 @@
-/* converted on Tue Apr 6, 2021, 16:35 (UTC+08) by antlr_4-to-w3c v0.51 which is Copyright (c) 2011-2021 by Gunther Rademacher <grd@gmx.net> */
+/* converted on Wed Apr 7, 2021, 13:35 (UTC+08) by antlr_4-to-w3c v0.51 which is Copyright (c) 2011-2021 by Gunther Rademacher <grd@gmx.net> */
 
 /*
 query    ::= EOF
@@ -943,8 +943,10 @@ useCommand
          ::= USE_SYMBOL identifier
 restartServer
          ::= RESTART_SYMBOL
-expr     ::= predicate ( IS_SYMBOL notRule? NULL_SYMBOL | compOp ( predicate | ( ALL_SYMBOL | ANY_SYMBOL ) subquery ) )* ( IS_SYMBOL notRule? ( TRUE_SYMBOL | FALSE_SYMBOL | UNKNOWN_SYMBOL ) )?
+expr     ::= boolPri ( IS_SYMBOL notRule? ( TRUE_SYMBOL | FALSE_SYMBOL | UNKNOWN_SYMBOL ) )?
            | ( NOT_SYMBOL | expr ( AND_SYMBOL | LOGICAL_AND_OPERATOR | XOR_SYMBOL | OR_SYMBOL | LOGICAL_OR_OPERATOR ) ) expr
+boolPri  ::= predicate
+           | boolPri ( IS_SYMBOL notRule? NULL_SYMBOL | compOp ( predicate | ( ALL_SYMBOL | ANY_SYMBOL ) subquery ) )
 compOp   ::= EQUAL_OPERATOR
            | NULL_SAFE_EQUAL_OPERATOR
            | GREATER_OR_EQUAL_OPERATOR
@@ -1127,7 +1129,8 @@ compoundStatement
 returnStatement
          ::= RETURN_SYMBOL expr
 ifStatement
-         ::= IF_SYMBOL expr thenStatement ( ELSEIF_SYMBOL expr thenStatement )* ( ELSE_SYMBOL compoundStatementList )? END_SYMBOL IF_SYMBOL
+         ::= IF_SYMBOL ifBody END_SYMBOL IF_SYMBOL
+ifBody   ::= expr thenStatement ( ELSEIF_SYMBOL ifBody | ELSE_SYMBOL compoundStatementList )?
 thenStatement
          ::= THEN_SYMBOL compoundStatementList
 compoundStatementList

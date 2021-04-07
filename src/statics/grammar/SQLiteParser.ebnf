@@ -1,4 +1,4 @@
-/* converted on Tue Apr 6, 2021, 17:14 (UTC+08) by antlr_4-to-w3c v0.51 which is Copyright (c) 2011-2021 by Gunther Rademacher <grd@gmx.net> */
+/* converted on Tue Apr 6, 2021, 23:32 (UTC+08) by antlr_4-to-w3c v0.51 which is Copyright (c) 2011-2021 by Gunther Rademacher <grd@gmx.net> */
 
 /* parse    ::= ( sql_stmt_list | error )* EOF */
 parse    ::= sql_stmt_list*
@@ -31,7 +31,7 @@ create_table_stmt
 column_def
          ::= column_name type_name? column_constraint*
 type_name
-         ::= name+ ( '(' signed_number ( ',' signed_number )? ')' )?
+         ::= name+ ( '(' signed_number ')' | '(' signed_number ',' signed_number ')' )?
 column_constraint
          ::= ( CONSTRAINT name )? ( PRIMARY KEY asc_desc? conflict_clause? AUTOINCREMENT? | ( NOT NULL_ | UNIQUE ) conflict_clause? | CHECK '(' expr ')' | DEFAULT ( signed_number | literal_value | '(' expr ')' ) | COLLATE collation_name | foreign_key_clause | ( GENERATED ALWAYS )? AS '(' expr ')' ( STORED | VIRTUAL )? )
 signed_number
@@ -68,9 +68,25 @@ expr     ::= literal_value
            | BIND_PARAMETER
            | ( ( schema_name '.' )? table_name '.' )? column_name
            | unary_operator expr
-           | expr ( ( '||' | '*' | '/' | '%' | '+' | '-' | '<<' | '>>' | '&' | '|' | '<' | '<=' | '>' | '>=' | '=' | '==' | '!=' | '<>' | IS NOT? | IN | LIKE | GLOB | MATCH | REGEXP | AND | OR ) expr | COLLATE collation_name | NOT? ( ( ( LIKE | GLOB | REGEXP | MATCH ) ( expr ESCAPE )? | BETWEEN expr AND ) expr | IN ( '(' ( select_stmt | expr ( ',' expr )* )? ')' | ( schema_name '.' )? ( table_name | table_function_name '(' ( expr ( ',' expr )* )? ')' ) ) ) | ISNULL | NOTNULL | NOT NULL_ )
+           | expr AND expr
+           | expr OR expr
+           | expr '||' expr
+           | expr ( '*' | '/' | '%' ) expr
+           | expr ( '+' | '-' ) expr
+           | expr ( '<<' | '>>' | '&' | '|' ) expr
+           | expr ( '<' | '<=' | '>' | '>=' ) expr
+           | expr ( '=' | '==' | '!=' | '<>' | IS | IS NOT | IN | LIKE | GLOB | MATCH | REGEXP ) expr
            | function_name '(' ( DISTINCT? expr ( ',' expr )* | '*' )? ')' filter_clause? over_clause?
-           | ( '(' expr ( ',' expr )* | CAST '(' expr AS type_name | ( NOT? EXISTS )? '(' select_stmt ) ')'
+           | '(' expr ( ',' expr )* ')'
+           | CAST '(' expr AS type_name ')'
+           | expr COLLATE collation_name
+           | expr NOT? ( LIKE | GLOB | REGEXP | MATCH ) expr ( ESCAPE expr )?
+           | expr ( ISNULL | NOTNULL | NOT NULL_ )
+           | expr IS NOT? expr
+           | expr NOT? BETWEEN expr AND expr
+           | expr NOT? IN ( '(' ( select_stmt | expr ( ',' expr )* )? ')' | ( schema_name '.' )? table_name | ( schema_name '.' )? table_function_name '(' ( expr ( ',' expr )* )? ')' )
+           | ( NOT? EXISTS )? '(' select_stmt ')'
+           | ALL '(' select_stmt ')'
            | CASE expr? ( WHEN expr THEN expr )+ ( ELSE expr )? END
            | raise_function
 raise_function
@@ -86,7 +102,7 @@ literal_value
            | CURRENT_DATE
            | CURRENT_TIMESTAMP
 insert_stmt
-         ::= with_clause? ( INSERT ( OR ( REPLACE | ROLLBACK | ABORT | FAIL | IGNORE ) )? | REPLACE ) INTO ( schema_name '.' )? table_name ( AS table_alias )? ( '(' column_name ( ',' column_name )* ')' )? ( VALUES '(' expr ( ',' expr )* ')' ( ',' '(' expr ( ',' expr )* ')' )* | select_stmt ) upsert_clause?
+         ::= with_clause? ( INSERT | REPLACE | INSERT OR ( REPLACE | ROLLBACK | ABORT | FAIL | IGNORE ) ) INTO ( schema_name '.' )? table_name ( AS table_alias )? ( '(' column_name ( ',' column_name )* ')' )? ( VALUES '(' expr ( ',' expr )* ')' ( ',' '(' expr ( ',' expr )* ')' )* | select_stmt ) upsert_clause?
            | DEFAULT VALUES
 upsert_clause
          ::= ON CONFLICT ( '(' indexed_column ( ',' indexed_column )* ')' ( WHERE expr )? )? DO ( NOTHING | UPDATE SET ( column_name | column_name_list ) EQ expr ( ',' ( column_name | column_name_list ) EQ expr )* ( WHERE expr )? )
@@ -112,10 +128,13 @@ simple_select_stmt
 compound_select_stmt
          ::= common_table_stmt? select_core ( ( UNION ALL? | INTERSECT | EXCEPT ) select_core )+ order_by_stmt? limit_stmt?
 table_or_subquery
-         ::= ( schema_name '.' )? ( table_name ( AS? table_alias )? ( INDEXED BY index_name | NOT INDEXED )? | table_function_name '(' expr ( ',' expr )* ')' ( AS? table_alias )? )
-           | '(' ( ( table_or_subquery ( ',' table_or_subquery )* | join_clause ) ')' | select_stmt ')' ( AS? table_alias )? )
+         ::= ( schema_name '.' )? table_name ( AS? table_alias )? ( INDEXED BY index_name | NOT INDEXED )?
+           | ( schema_name '.' )? table_function_name '(' expr ( ',' expr )* ')' ( AS? table_alias )?
+           | '(' ( table_or_subquery ( ',' table_or_subquery )* | join_clause ) ')'
+           | '(' select_stmt ')' ( AS? table_alias )?
 result_column
-         ::= ( table_name '.' )? '*'
+         ::= '*'
+           | table_name '.' '*'
            | expr ( AS? column_alias )?
 join_operator
          ::= ','
@@ -164,18 +183,26 @@ ordering_term
 asc_desc ::= ASC
            | DESC
 frame_left
-         ::= expr ( PRECEDING | FOLLOWING )
+         ::= expr PRECEDING
+           | expr FOLLOWING
            | CURRENT ROW
            | UNBOUNDED PRECEDING
 frame_right
-         ::= expr ( PRECEDING | FOLLOWING )
+         ::= expr PRECEDING
+           | expr FOLLOWING
            | CURRENT ROW
            | UNBOUNDED FOLLOWING
 frame_single
-         ::= ( expr | UNBOUNDED ) PRECEDING
+         ::= expr PRECEDING
+           | UNBOUNDED PRECEDING
            | CURRENT ROW
 window_function
-         ::= ( ( ( FIRST_VALUE | LAST_VALUE ) '(' expr | NTH_VALUE '(' expr ',' signed_number ) ')' OVER '(' partition_by? order_by_expr_asc_desc frame_clause? | ( CUME_DIST | PERCENT_RANK ) '(' ')' OVER '(' partition_by? order_by_expr? | ( ( DENSE_RANK | RANK | ROW_NUMBER ) '(' | ( LAG | LEAD ) '(' expr offset? default_value? | NTILE '(' expr ) ')' OVER '(' partition_by? order_by_expr_asc_desc ) ')'
+         ::= ( FIRST_VALUE | LAST_VALUE ) '(' expr ')' OVER '(' partition_by? order_by_expr_asc_desc frame_clause? ')'
+           | ( CUME_DIST | PERCENT_RANK ) '(' ')' OVER '(' partition_by? order_by_expr? ')'
+           | ( DENSE_RANK | RANK | ROW_NUMBER ) '(' ')' OVER '(' partition_by? order_by_expr_asc_desc ')'
+           | ( LAG | LEAD ) '(' expr offset? default_value? ')' OVER '(' partition_by? order_by_expr_asc_desc ')'
+           | NTH_VALUE '(' expr ',' signed_number ')' OVER '(' partition_by? order_by_expr_asc_desc frame_clause? ')'
+           | NTILE '(' expr ')' OVER '(' partition_by? order_by_expr_asc_desc ')'
 offset   ::= ',' signed_number
 default_value
          ::= ',' signed_number

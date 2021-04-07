@@ -1,6 +1,6 @@
-// This file was automatically compiled from the W3C standard of SparQL grammar at 2021-04-06 18:19:26
-%import common.WS -> WS_1617704366
-%ignore WS_1617704366
+// This file was automatically compiled from the W3C standard of SparQL grammar at 2021-04-07 20:51:40
+%import common.WS -> WS_1617799900
+%ignore WS_1617799900
 
 WS: WHITESPACE | POUND_COMMENT | DASHDASH_COMMENT
 EQUAL_OPERATOR: "="
@@ -847,8 +847,8 @@ BACK_TICK: "`"
 SINGLE_QUOTE: "'"
 DOUBLE_QUOTE: "\""
 BACK_TICK_QUOTED_ID: BACK_TICK (("\\")? XML_CHAR)* BACK_TICK
-DOUBLE_QUOTED_TEXT: (DOUBLE_QUOTE (("\\" XML_CHAR)? XML_CHAR)* DOUBLE_QUOTE)+
-SINGLE_QUOTED_TEXT: (SINGLE_QUOTE (("\\")? XML_CHAR)* SINGLE_QUOTE)+
+DOUBLE_QUOTED_TEXT: (DOUBLE_QUOTE (("\\" XML_CHAR) | QUOTED_TEXT_CHAR | SINGLE_QUOTE)* DOUBLE_QUOTE)+
+SINGLE_QUOTED_TEXT: (SINGLE_QUOTE (("\\" XML_CHAR) | QUOTED_TEXT_CHAR | DOUBLE_QUOTE)* SINGLE_QUOTE)+
 POUND_COMMENT: "#" (/[^\x0a\x0d]/)*
 DASHDASH_COMMENT: DOUBLE_DASH (/[ \x09]/ (/[^\x0a\x0d]/)* | LINEBREAK)
 DOUBLE_DASH: "--"
@@ -858,6 +858,9 @@ LETTER_WHEN_UNQUOTED: DIGIT | LETTER_WHEN_UNQUOTED_NO_DIGIT
 LETTER_WHEN_UNQUOTED_NO_DIGIT: /[a-zA-Z_$\u0080-\uffff]/
 LETTER_WITHOUT_FLOAT_PART: /[a-df-zA-DF-Z_$\u0080-\uffff]/
 XML_CHAR: /[\u0001-\uD7FF\uE000-\uFFFD\U00010000-\U0010FFFF]/
+XML_CHAR_EXCEPT_QUOTES: /[\x01-\x21\x23-\x26\x28-\uD7FF\uE000-\uFFFD\U00010000-\U0010FFFF]/
+ESCAPED_QUOTES: "\\\"" | "\\'"
+QUOTED_TEXT_CHAR: XML_CHAR_EXCEPT_QUOTES | ESCAPED_QUOTES
 query: (simplestatement | beginwork) (SEMICOLON_SYMBOL)?
 simplestatement: alterstatement | createstatement | dropstatement | renametablestatement | truncatetablestatement | importstatement | callstatement | deletestatement | dostatement | handlerstatement | insertstatement | loadstatement | replacestatement | selectstatement | updatestatement | transactionorlockingstatement | replicationstatement | preparedstatement | clonestatement | accountmanagementstatement | tableadministrationstatement | installuninstallstatment | setstatement | showstatement | resourcegroupmanagement | otheradministrativestatement | utilitystatement | getdiagnostics | signalstatement | resignalstatement
 alterstatement: ALTER_SYMBOL (altertable | alterdatabase | (PROCEDURE_SYMBOL procedureref | FUNCTION_SYMBOL functionref) (routinealteroptions)? | alterview | alterevent | altertablespace | alterundotablespace | alterlogfilegroup | alterserver | INSTANCE_SYMBOL ROTATE_SYMBOL textoridentifier MASTER_SYMBOL KEY_SYMBOL)
@@ -1196,12 +1199,13 @@ explainablestatement: selectstatement | deletestatement | insertstatement | repl
 helpcommand: HELP_SYMBOL textoridentifier
 usecommand: USE_SYMBOL identifier
 restartserver: RESTART_SYMBOL
-expr: predicate ext_star_70 (IS_SYMBOL (notrule)? (TRUE_SYMBOL | FALSE_SYMBOL | UNKNOWN_SYMBOL))? | (NOT_SYMBOL | expr (AND_SYMBOL | LOGICAL_AND_OPERATOR | XOR_SYMBOL | OR_SYMBOL | LOGICAL_OR_OPERATOR)) expr
+expr: boolpri (IS_SYMBOL (notrule)? (TRUE_SYMBOL | FALSE_SYMBOL | UNKNOWN_SYMBOL))? | (NOT_SYMBOL | expr (AND_SYMBOL | LOGICAL_AND_OPERATOR | XOR_SYMBOL | OR_SYMBOL | LOGICAL_OR_OPERATOR)) expr
+boolpri: predicate | boolpri (IS_SYMBOL (notrule)? NULL_SYMBOL | compop (predicate | (ALL_SYMBOL | ANY_SYMBOL) subquery))
 compop: EQUAL_OPERATOR | NULL_SAFE_EQUAL_OPERATOR | GREATER_OR_EQUAL_OPERATOR | GREATER_THAN_OPERATOR | LESS_OR_EQUAL_OPERATOR | LESS_THAN_OPERATOR | NOT_EQUAL_OPERATOR
 predicate: bitexpr ((notrule)? predicateoperations | MEMBER_SYMBOL (OF_SYMBOL)? simpleexprwithparentheses | SOUNDS_SYMBOL LIKE_SYMBOL bitexpr)?
 predicateoperations: IN_SYMBOL (subquery | OPEN_PAR_SYMBOL exprlist CLOSE_PAR_SYMBOL) | BETWEEN_SYMBOL bitexpr AND_SYMBOL predicate | LIKE_SYMBOL simpleexpr (ESCAPE_SYMBOL simpleexpr)? | REGEXP_SYMBOL bitexpr
 bitexpr: simpleexpr | bitexpr ((BITWISE_XOR_OPERATOR | MULT_OPERATOR | DIV_OPERATOR | MOD_OPERATOR | DIV_SYMBOL | MOD_SYMBOL | SHIFT_LEFT_OPERATOR | SHIFT_RIGHT_OPERATOR | BITWISE_AND_OPERATOR | BITWISE_OR_OPERATOR) bitexpr | (PLUS_OPERATOR | MINUS_OPERATOR) (bitexpr | INTERVAL_SYMBOL expr interval))
-simpleexpr: variable (equal expr)? | columnref (jsonoperator)? | runtimefunctioncall | functioncall | simpleexpr (COLLATE_SYMBOL textoridentifier | CONCAT_PIPES_SYMBOL simpleexpr) | literal | PARAM_MARKER | sumexpr | groupingoperation | windowfunctioncall | (PLUS_OPERATOR | MINUS_OPERATOR | BITWISE_NOT_OPERATOR | not2rule | BINARY_SYMBOL) simpleexpr | ((ROW_SYMBOL)? OPEN_PAR_SYMBOL exprlist | MATCH_SYMBOL identlistarg AGAINST_SYMBOL OPEN_PAR_SYMBOL bitexpr (fulltextoptions)? | CAST_SYMBOL OPEN_PAR_SYMBOL expr AS_SYMBOL casttype (arraycast)? | (DEFAULT_SYMBOL | VALUES_SYMBOL) OPEN_PAR_SYMBOL simpleidentifier | CONVERT_SYMBOL OPEN_PAR_SYMBOL expr (COMMA_SYMBOL casttype | USING_SYMBOL charsetname)) CLOSE_PAR_SYMBOL | (EXISTS_SYMBOL)? subquery | OPEN_CURLY_SYMBOL identifier expr CLOSE_CURLY_SYMBOL | CASE_SYMBOL (expr)? ext_plus_71 (elseexpression)? END_SYMBOL | INTERVAL_SYMBOL expr interval PLUS_OPERATOR expr
+simpleexpr: variable (equal expr)? | columnref (jsonoperator)? | runtimefunctioncall | functioncall | simpleexpr (COLLATE_SYMBOL textoridentifier | CONCAT_PIPES_SYMBOL simpleexpr) | literal | PARAM_MARKER | sumexpr | groupingoperation | windowfunctioncall | (PLUS_OPERATOR | MINUS_OPERATOR | BITWISE_NOT_OPERATOR | not2rule | BINARY_SYMBOL) simpleexpr | ((ROW_SYMBOL)? OPEN_PAR_SYMBOL exprlist | MATCH_SYMBOL identlistarg AGAINST_SYMBOL OPEN_PAR_SYMBOL bitexpr (fulltextoptions)? | CAST_SYMBOL OPEN_PAR_SYMBOL expr AS_SYMBOL casttype (arraycast)? | (DEFAULT_SYMBOL | VALUES_SYMBOL) OPEN_PAR_SYMBOL simpleidentifier | CONVERT_SYMBOL OPEN_PAR_SYMBOL expr (COMMA_SYMBOL casttype | USING_SYMBOL charsetname)) CLOSE_PAR_SYMBOL | (EXISTS_SYMBOL)? subquery | OPEN_CURLY_SYMBOL identifier expr CLOSE_CURLY_SYMBOL | CASE_SYMBOL (expr)? ext_plus_70 (elseexpression)? END_SYMBOL | INTERVAL_SYMBOL expr interval PLUS_OPERATOR expr
 arraycast: ARRAY_SYMBOL
 jsonoperator: (JSON_SEPARATOR_SYMBOL | JSON_UNQUOTED_SEPARATOR_SYMBOL) textstringliteral
 sumexpr: (((AVG_SYMBOL | MIN_SYMBOL | MAX_SYMBOL | SUM_SYMBOL) OPEN_PAR_SYMBOL (DISTINCT_SYMBOL)? | (BIT_AND_SYMBOL | BIT_OR_SYMBOL | BIT_XOR_SYMBOL | STD_SYMBOL | VARIANCE_SYMBOL | STDDEV_SAMP_SYMBOL | VAR_SAMP_SYMBOL) OPEN_PAR_SYMBOL) insumexpr | GROUP_CONCAT_SYMBOL OPEN_PAR_SYMBOL (DISTINCT_SYMBOL)? exprlist (orderclause)? (SEPARATOR_SYMBOL textstring)? | COUNT_SYMBOL OPEN_PAR_SYMBOL ((ALL_SYMBOL)? MULT_OPERATOR | insumexpr | DISTINCT_SYMBOL exprlist)) CLOSE_PAR_SYMBOL (windowingclause)? | jsonfunction
@@ -1213,19 +1217,19 @@ nulltreatment: (RESPECT_SYMBOL | IGNORE_SYMBOL) NULLS_SYMBOL
 jsonfunction: (JSON_ARRAYAGG_SYMBOL OPEN_PAR_SYMBOL | JSON_OBJECTAGG_SYMBOL OPEN_PAR_SYMBOL insumexpr COMMA_SYMBOL) insumexpr CLOSE_PAR_SYMBOL (windowingclause)?
 insumexpr: (ALL_SYMBOL)? expr
 identlistarg: identlist | OPEN_PAR_SYMBOL identlist CLOSE_PAR_SYMBOL
-identlist: simpleidentifier ext_star_72
+identlist: simpleidentifier ext_star_71
 fulltextoptions: IN_SYMBOL (BOOLEAN_SYMBOL MODE_SYMBOL | NATURAL_SYMBOL LANGUAGE_SYMBOL MODE_SYMBOL (WITH_SYMBOL QUERY_SYMBOL EXPANSION_SYMBOL)?) | WITH_SYMBOL QUERY_SYMBOL EXPANSION_SYMBOL
-runtimefunctioncall: (CHAR_SYMBOL OPEN_PAR_SYMBOL exprlist (USING_SYMBOL charsetname)? | (((((INSERT_SYMBOL OPEN_PAR_SYMBOL expr COMMA_SYMBOL | (IF_SYMBOL | REPLACE_SYMBOL) OPEN_PAR_SYMBOL) expr | (TIMESTAMP_ADD_SYMBOL | TIMESTAMP_DIFF_SYMBOL) OPEN_PAR_SYMBOL intervaltimestamp) COMMA_SYMBOL | (LEFT_SYMBOL | RIGHT_SYMBOL | MOD_SYMBOL | REPEAT_SYMBOL | TRUNCATE_SYMBOL) OPEN_PAR_SYMBOL) expr | GET_FORMAT_SYMBOL OPEN_PAR_SYMBOL datetimettype) COMMA_SYMBOL | EXTRACT_SYMBOL OPEN_PAR_SYMBOL interval FROM_SYMBOL | POSITION_SYMBOL OPEN_PAR_SYMBOL bitexpr IN_SYMBOL | INTERVAL_SYMBOL OPEN_PAR_SYMBOL ext_plus_73 | ((TIMESTAMP_SYMBOL | WEEK_SYMBOL) OPEN_PAR_SYMBOL | FORMAT_SYMBOL OPEN_PAR_SYMBOL expr COMMA_SYMBOL) (expr COMMA_SYMBOL)?) expr | (ADDDATE_SYMBOL | SUBDATE_SYMBOL) OPEN_PAR_SYMBOL expr COMMA_SYMBOL (expr | INTERVAL_SYMBOL expr interval) | (DATE_ADD_SYMBOL | DATE_SUB_SYMBOL) OPEN_PAR_SYMBOL expr COMMA_SYMBOL INTERVAL_SYMBOL expr interval | OLD_PASSWORD_SYMBOL OPEN_PAR_SYMBOL textliteral | WEIGHT_STRING_SYMBOL OPEN_PAR_SYMBOL expr ((AS_SYMBOL CHAR_SYMBOL wsnumcodepoints)? (weightstringlevels)? | AS_SYMBOL BINARY_SYMBOL wsnumcodepoints | COMMA_SYMBOL ulong_number COMMA_SYMBOL ulong_number COMMA_SYMBOL ulong_number)) CLOSE_PAR_SYMBOL | (CURRENT_USER_SYMBOL | CURDATE_SYMBOL | UTC_DATE_SYMBOL) (parentheses)? | (DATE_SYMBOL | DAY_SYMBOL | HOUR_SYMBOL | MINUTE_SYMBOL | MONTH_SYMBOL | SECOND_SYMBOL | TIME_SYMBOL | VALUES_SYMBOL | YEAR_SYMBOL | ASCII_SYMBOL | CHARSET_SYMBOL | COLLATION_SYMBOL | MICROSECOND_SYMBOL | PASSWORD_SYMBOL | QUARTER_SYMBOL | REVERSE_SYMBOL) exprwithparentheses | trimfunction | (USER_SYMBOL | DATABASE_SYMBOL | ROW_COUNT_SYMBOL) parentheses | (CURTIME_SYMBOL | NOW_SYMBOL | SYSDATE_SYMBOL | UTC_TIME_SYMBOL | UTC_TIMESTAMP_SYMBOL) (timefunctionparameters)? | substringfunction | COALESCE_SYMBOL exprlistwithparentheses | geometryfunction
+runtimefunctioncall: (CHAR_SYMBOL OPEN_PAR_SYMBOL exprlist (USING_SYMBOL charsetname)? | (((((INSERT_SYMBOL OPEN_PAR_SYMBOL expr COMMA_SYMBOL | (IF_SYMBOL | REPLACE_SYMBOL) OPEN_PAR_SYMBOL) expr | (TIMESTAMP_ADD_SYMBOL | TIMESTAMP_DIFF_SYMBOL) OPEN_PAR_SYMBOL intervaltimestamp) COMMA_SYMBOL | (LEFT_SYMBOL | RIGHT_SYMBOL | MOD_SYMBOL | REPEAT_SYMBOL | TRUNCATE_SYMBOL) OPEN_PAR_SYMBOL) expr | GET_FORMAT_SYMBOL OPEN_PAR_SYMBOL datetimettype) COMMA_SYMBOL | EXTRACT_SYMBOL OPEN_PAR_SYMBOL interval FROM_SYMBOL | POSITION_SYMBOL OPEN_PAR_SYMBOL bitexpr IN_SYMBOL | INTERVAL_SYMBOL OPEN_PAR_SYMBOL ext_plus_72 | ((TIMESTAMP_SYMBOL | WEEK_SYMBOL) OPEN_PAR_SYMBOL | FORMAT_SYMBOL OPEN_PAR_SYMBOL expr COMMA_SYMBOL) (expr COMMA_SYMBOL)?) expr | (ADDDATE_SYMBOL | SUBDATE_SYMBOL) OPEN_PAR_SYMBOL expr COMMA_SYMBOL (expr | INTERVAL_SYMBOL expr interval) | (DATE_ADD_SYMBOL | DATE_SUB_SYMBOL) OPEN_PAR_SYMBOL expr COMMA_SYMBOL INTERVAL_SYMBOL expr interval | OLD_PASSWORD_SYMBOL OPEN_PAR_SYMBOL textliteral | WEIGHT_STRING_SYMBOL OPEN_PAR_SYMBOL expr ((AS_SYMBOL CHAR_SYMBOL wsnumcodepoints)? (weightstringlevels)? | AS_SYMBOL BINARY_SYMBOL wsnumcodepoints | COMMA_SYMBOL ulong_number COMMA_SYMBOL ulong_number COMMA_SYMBOL ulong_number)) CLOSE_PAR_SYMBOL | (CURRENT_USER_SYMBOL | CURDATE_SYMBOL | UTC_DATE_SYMBOL) (parentheses)? | (DATE_SYMBOL | DAY_SYMBOL | HOUR_SYMBOL | MINUTE_SYMBOL | MONTH_SYMBOL | SECOND_SYMBOL | TIME_SYMBOL | VALUES_SYMBOL | YEAR_SYMBOL | ASCII_SYMBOL | CHARSET_SYMBOL | COLLATION_SYMBOL | MICROSECOND_SYMBOL | PASSWORD_SYMBOL | QUARTER_SYMBOL | REVERSE_SYMBOL) exprwithparentheses | trimfunction | (USER_SYMBOL | DATABASE_SYMBOL | ROW_COUNT_SYMBOL) parentheses | (CURTIME_SYMBOL | NOW_SYMBOL | SYSDATE_SYMBOL | UTC_TIME_SYMBOL | UTC_TIMESTAMP_SYMBOL) (timefunctionparameters)? | substringfunction | COALESCE_SYMBOL exprlistwithparentheses | geometryfunction
 geometryfunction: ((CONTAINS_SYMBOL | POINT_SYMBOL) OPEN_PAR_SYMBOL expr COMMA_SYMBOL expr | GEOMETRYCOLLECTION_SYMBOL OPEN_PAR_SYMBOL (exprlist)?) CLOSE_PAR_SYMBOL | (LINESTRING_SYMBOL | MULTILINESTRING_SYMBOL | MULTIPOINT_SYMBOL | MULTIPOLYGON_SYMBOL | POLYGON_SYMBOL) exprlistwithparentheses
 timefunctionparameters: OPEN_PAR_SYMBOL (fractionalprecision)? CLOSE_PAR_SYMBOL
 fractionalprecision: INT_NUMBER
-weightstringlevels: LEVEL_SYMBOL (real_ulong_number MINUS_OPERATOR real_ulong_number | weightstringlevellistitem ext_star_74)
+weightstringlevels: LEVEL_SYMBOL (real_ulong_number MINUS_OPERATOR real_ulong_number | weightstringlevellistitem ext_star_73)
 weightstringlevellistitem: real_ulong_number (ASC_SYMBOL | DESC_SYMBOL)? (REVERSE_SYMBOL)?
 datetimettype: DATE_SYMBOL | TIME_SYMBOL | DATETIME_SYMBOL | TIMESTAMP_SYMBOL
 trimfunction: TRIM_SYMBOL OPEN_PAR_SYMBOL ((expr | (LEADING_SYMBOL | TRAILING_SYMBOL | BOTH_SYMBOL) (expr)?) FROM_SYMBOL)? expr CLOSE_PAR_SYMBOL
 substringfunction: SUBSTRING_SYMBOL OPEN_PAR_SYMBOL expr (COMMA_SYMBOL (expr COMMA_SYMBOL)? | FROM_SYMBOL (expr FOR_SYMBOL)?) expr CLOSE_PAR_SYMBOL
 functioncall: (pureidentifier OPEN_PAR_SYMBOL (udfexprlist)? | qualifiedidentifier OPEN_PAR_SYMBOL (exprlist)?) CLOSE_PAR_SYMBOL
-udfexprlist: udfexpr ext_star_75
+udfexprlist: udfexpr ext_star_74
 udfexpr: expr (selectalias)?
 variable: uservariable | systemvariable
 uservariable: AT_SIGN_SYMBOL textoridentifier | AT_TEXT_SUFFIX
@@ -1235,7 +1239,7 @@ whenexpression: WHEN_SYMBOL expr
 thenexpression: THEN_SYMBOL expr
 elseexpression: ELSE_SYMBOL expr
 casttype: (BINARY_SYMBOL | nchar) (fieldlength)? | CHAR_SYMBOL (fieldlength)? (charsetwithoptbinary)? | (SIGNED_SYMBOL | UNSIGNED_SYMBOL) (INT_SYMBOL)? | DATE_SYMBOL | (TIME_SYMBOL | DATETIME_SYMBOL) (typedatetimeprecision)? | DECIMAL_SYMBOL (floatoptions)? | JSON_SYMBOL | realtype | FLOAT_SYMBOL (standardfloatoptions)?
-exprlist: expr ext_star_76
+exprlist: expr ext_star_75
 charset: CHAR_SYMBOL SET_SYMBOL | CHARSET_SYMBOL
 notrule: NOT_SYMBOL | NOT2_SYMBOL
 not2rule: LOGICAL_NOT_OPERATOR | NOT2_SYMBOL
@@ -1244,17 +1248,18 @@ intervaltimestamp: MICROSECOND_SYMBOL | SECOND_SYMBOL | MINUTE_SYMBOL | HOUR_SYM
 exprlistwithparentheses: OPEN_PAR_SYMBOL exprlist CLOSE_PAR_SYMBOL
 exprwithparentheses: OPEN_PAR_SYMBOL expr CLOSE_PAR_SYMBOL
 simpleexprwithparentheses: OPEN_PAR_SYMBOL simpleexpr CLOSE_PAR_SYMBOL
-orderlist: orderexpression ext_star_77
+orderlist: orderexpression ext_star_76
 orderexpression: expr (direction)?
-grouplist: groupingexpression ext_star_78
+grouplist: groupingexpression ext_star_77
 groupingexpression: expr
 channel: FOR_SYMBOL CHANNEL_SYMBOL textstringnolinebreak
 compoundstatement: simplestatement | returnstatement | ifstatement | casestatement | labeledblock | unlabeledblock | labeledcontrol | unlabeledcontrol | leavestatement | iteratestatement | cursoropen | cursorfetch | cursorclose
 returnstatement: RETURN_SYMBOL expr
-ifstatement: IF_SYMBOL expr thenstatement ext_star_79 (ELSE_SYMBOL compoundstatementlist)? END_SYMBOL IF_SYMBOL
+ifstatement: IF_SYMBOL ifbody END_SYMBOL IF_SYMBOL
+ifbody: expr thenstatement (ELSEIF_SYMBOL ifbody | ELSE_SYMBOL compoundstatementlist)?
 thenstatement: THEN_SYMBOL compoundstatementlist
-compoundstatementlist: ext_plus_80
-casestatement: CASE_SYMBOL (expr)? ext_plus_81 (elsestatement)? END_SYMBOL CASE_SYMBOL
+compoundstatementlist: ext_plus_78
+casestatement: CASE_SYMBOL (expr)? ext_plus_79 (elsestatement)? END_SYMBOL CASE_SYMBOL
 elsestatement: ELSE_SYMBOL compoundstatementlist
 labeledblock: label beginendblock (labelref)?
 unlabeledblock: beginendblock
@@ -1265,24 +1270,24 @@ unlabeledcontrol: loopblock | whiledoblock | repeatuntilblock
 loopblock: LOOP_SYMBOL compoundstatementlist END_SYMBOL LOOP_SYMBOL
 whiledoblock: WHILE_SYMBOL expr DO_SYMBOL compoundstatementlist END_SYMBOL WHILE_SYMBOL
 repeatuntilblock: REPEAT_SYMBOL compoundstatementlist UNTIL_SYMBOL expr END_SYMBOL REPEAT_SYMBOL
-spdeclarations: ext_plus_82
+spdeclarations: ext_plus_80
 spdeclaration: variabledeclaration | conditiondeclaration | handlerdeclaration | cursordeclaration
 variabledeclaration: DECLARE_SYMBOL identifierlist datatype (collate)? (DEFAULT_SYMBOL expr)?
 conditiondeclaration: DECLARE_SYMBOL identifier CONDITION_SYMBOL FOR_SYMBOL spcondition
 spcondition: ulong_number | sqlstate
 sqlstate: SQLSTATE_SYMBOL (VALUE_SYMBOL)? textliteral
-handlerdeclaration: DECLARE_SYMBOL (CONTINUE_SYMBOL | EXIT_SYMBOL | UNDO_SYMBOL) HANDLER_SYMBOL FOR_SYMBOL handlercondition ext_star_83 compoundstatement
+handlerdeclaration: DECLARE_SYMBOL (CONTINUE_SYMBOL | EXIT_SYMBOL | UNDO_SYMBOL) HANDLER_SYMBOL FOR_SYMBOL handlercondition ext_star_81 compoundstatement
 handlercondition: spcondition | identifier | SQLWARNING_SYMBOL | notrule FOUND_SYMBOL | SQLEXCEPTION_SYMBOL
 cursordeclaration: DECLARE_SYMBOL identifier CURSOR_SYMBOL FOR_SYMBOL selectstatement
 iteratestatement: ITERATE_SYMBOL labelref
 leavestatement: LEAVE_SYMBOL labelref
-getdiagnostics: GET_SYMBOL (CURRENT_SYMBOL | STACKED_SYMBOL)? DIAGNOSTICS_SYMBOL (statementinformationitem ext_star_84 | CONDITION_SYMBOL signalallowedexpr conditioninformationitem ext_star_85)
+getdiagnostics: GET_SYMBOL (CURRENT_SYMBOL | STACKED_SYMBOL)? DIAGNOSTICS_SYMBOL (statementinformationitem ext_star_82 | CONDITION_SYMBOL signalallowedexpr conditioninformationitem ext_star_83)
 signalallowedexpr: literal | variable | qualifiedidentifier
 statementinformationitem: (variable | identifier) EQUAL_OPERATOR (NUMBER_SYMBOL | ROW_COUNT_SYMBOL)
 conditioninformationitem: (variable | identifier) EQUAL_OPERATOR (signalinformationitemname | RETURNED_SQLSTATE_SYMBOL)
 signalinformationitemname: CLASS_ORIGIN_SYMBOL | SUBCLASS_ORIGIN_SYMBOL | CONSTRAINT_CATALOG_SYMBOL | CONSTRAINT_SCHEMA_SYMBOL | CONSTRAINT_NAME_SYMBOL | CATALOG_NAME_SYMBOL | SCHEMA_NAME_SYMBOL | TABLE_NAME_SYMBOL | COLUMN_NAME_SYMBOL | CURSOR_NAME_SYMBOL | MESSAGE_TEXT_SYMBOL | MYSQL_ERRNO_SYMBOL
-signalstatement: SIGNAL_SYMBOL (identifier | sqlstate) (SET_SYMBOL signalinformationitem ext_star_86)?
-resignalstatement: RESIGNAL_SYMBOL (identifier | sqlstate)? (SET_SYMBOL signalinformationitem ext_star_86)?
+signalstatement: SIGNAL_SYMBOL (identifier | sqlstate) (SET_SYMBOL signalinformationitem ext_star_84)?
+resignalstatement: RESIGNAL_SYMBOL (identifier | sqlstate)? (SET_SYMBOL signalinformationitem ext_star_84)?
 signalinformationitem: signalinformationitemname EQUAL_OPERATOR signalallowedexpr
 cursoropen: OPEN_SYMBOL identifier
 cursorclose: CLOSE_SYMBOL identifier
@@ -1294,16 +1299,16 @@ checkconstraint: CHECK_SYMBOL exprwithparentheses
 constraintenforcement: (NOT_SYMBOL)? ENFORCED_SYMBOL
 tableconstraintdef: (KEY_SYMBOL | INDEX_SYMBOL) (indexnameandtype)? keylistvariants ext_star_14 | FULLTEXT_SYMBOL (keyorindex)? (indexname)? keylistvariants ext_star_15 | SPATIAL_SYMBOL (keyorindex)? (indexname)? keylistvariants ext_star_16 | (constraintname)? ((PRIMARY_SYMBOL KEY_SYMBOL | UNIQUE_SYMBOL (keyorindex)?) (indexnameandtype)? keylistvariants ext_star_14 | FOREIGN_SYMBOL KEY_SYMBOL (indexname)? keylist references | checkconstraint (constraintenforcement)?)
 constraintname: CONSTRAINT_SYMBOL (identifier)?
-fielddefinition: datatype ((ext_plus_88)? | (collate)? (GENERATED_SYMBOL ALWAYS_SYMBOL)? AS_SYMBOL exprwithparentheses (VIRTUAL_SYMBOL | STORED_SYMBOL)? (ext_star_87 | ext_plus_88))
+fielddefinition: datatype ((ext_plus_86)? | (collate)? (GENERATED_SYMBOL ALWAYS_SYMBOL)? AS_SYMBOL exprwithparentheses (VIRTUAL_SYMBOL | STORED_SYMBOL)? (ext_star_85 | ext_plus_86))
 columnattribute: (NOT_SYMBOL)? nullliteral | NOT_SYMBOL SECONDARY_SYMBOL | DEFAULT_SYMBOL (signedliteral | NOW_SYMBOL (timefunctionparameters)? | exprwithparentheses) | ON_SYMBOL UPDATE_SYMBOL NOW_SYMBOL (timefunctionparameters)? | AUTO_INCREMENT_SYMBOL | SERIAL_SYMBOL DEFAULT_SYMBOL VALUE_SYMBOL | (PRIMARY_SYMBOL)? KEY_SYMBOL | UNIQUE_SYMBOL (KEY_SYMBOL)? | COMMENT_SYMBOL textliteral | collate | COLUMN_FORMAT_SYMBOL columnformat | STORAGE_SYMBOL storagemedia | SRID_SYMBOL real_ulonglong_number | (constraintname)? checkconstraint | constraintenforcement
 columnformat: FIXED_SYMBOL | DYNAMIC_SYMBOL | DEFAULT_SYMBOL
 storagemedia: DISK_SYMBOL | MEMORY_SYMBOL | DEFAULT_SYMBOL
 gcolattribute: UNIQUE_SYMBOL (KEY_SYMBOL)? | COMMENT_SYMBOL textstring | (notrule)? NULL_SYMBOL | (PRIMARY_SYMBOL)? KEY_SYMBOL
 references: REFERENCES_SYMBOL tableref (identifierlistwithparentheses)? (MATCH_SYMBOL (FULL_SYMBOL | PARTIAL_SYMBOL | SIMPLE_SYMBOL))? (ON_SYMBOL (UPDATE_SYMBOL (deleteoption ON_SYMBOL DELETE_SYMBOL)? | DELETE_SYMBOL (deleteoption ON_SYMBOL UPDATE_SYMBOL)?) deleteoption)?
 deleteoption: RESTRICT_SYMBOL | CASCADE_SYMBOL | SET_SYMBOL nullliteral | NO_SYMBOL ACTION_SYMBOL
-keylist: OPEN_PAR_SYMBOL keypart ext_star_89 CLOSE_PAR_SYMBOL
+keylist: OPEN_PAR_SYMBOL keypart ext_star_87 CLOSE_PAR_SYMBOL
 keypart: identifier (fieldlength)? (direction)?
-keylistwithexpression: OPEN_PAR_SYMBOL keypartorexpression ext_star_90 CLOSE_PAR_SYMBOL
+keylistwithexpression: OPEN_PAR_SYMBOL keypartorexpression ext_star_88 CLOSE_PAR_SYMBOL
 keypartorexpression: keypart | exprwithparentheses (direction)?
 keylistvariants: keylistwithexpression | keylist
 indextype: BTREE_SYMBOL | RTREE_SYMBOL | HASH_SYMBOL
@@ -1318,7 +1323,7 @@ datatype: ((INT_SYMBOL | TINYINT_SYMBOL | SMALLINT_SYMBOL | MEDIUMINT_SYMBOL | B
 nchar: NCHAR_SYMBOL | NATIONAL_SYMBOL CHAR_SYMBOL
 realtype: REAL_SYMBOL | DOUBLE_SYMBOL (PRECISION_SYMBOL)?
 fieldlength: OPEN_PAR_SYMBOL (real_ulonglong_number | DECIMAL_NUMBER) CLOSE_PAR_SYMBOL
-fieldoptions: ext_plus_91
+fieldoptions: ext_plus_89
 charsetwithoptbinary: ascii | unicode | BYTE_SYMBOL | charset charsetname (BINARY_SYMBOL)? | BINARY_SYMBOL (charset charsetname)?
 ascii: ASCII_SYMBOL (BINARY_SYMBOL)? | BINARY_SYMBOL ASCII_SYMBOL
 unicode: UNICODE_SYMBOL (BINARY_SYMBOL)? | BINARY_SYMBOL UNICODE_SYMBOL
@@ -1326,8 +1331,8 @@ wsnumcodepoints: OPEN_PAR_SYMBOL real_ulong_number CLOSE_PAR_SYMBOL
 typedatetimeprecision: OPEN_PAR_SYMBOL INT_NUMBER CLOSE_PAR_SYMBOL
 charsetname: textoridentifier | BINARY_SYMBOL | DEFAULT_SYMBOL
 collationname: textoridentifier | DEFAULT_SYMBOL | BINARY_SYMBOL
-createtableoptions: createtableoption ext_star_92
-createtableoptionsspaceseparated: ext_plus_93
+createtableoptions: createtableoption ext_star_90
+createtableoptionsspaceseparated: ext_plus_91
 createtableoption: ENGINE_SYMBOL (EQUAL_OPERATOR)? engineref | SECONDARY_ENGINE_SYMBOL (equal)? (NULL_SYMBOL | textoridentifier) | (MAX_ROWS_SYMBOL | MIN_ROWS_SYMBOL | AUTO_INCREMENT_SYMBOL) (EQUAL_OPERATOR)? ulonglong_number | (AVG_ROW_LENGTH_SYMBOL | CHECKSUM_SYMBOL | TABLE_CHECKSUM_SYMBOL | DELAY_KEY_WRITE_SYMBOL | KEY_BLOCK_SIZE_SYMBOL) (EQUAL_OPERATOR)? ulong_number | (PASSWORD_SYMBOL | COMMENT_SYMBOL) (EQUAL_OPERATOR)? textstringliteral | (COMPRESSION_SYMBOL | ENCRYPTION_SYMBOL | (DATA_SYMBOL | INDEX_SYMBOL) DIRECTORY_SYMBOL | CONNECTION_SYMBOL) (EQUAL_OPERATOR)? textstring | (PACK_KEYS_SYMBOL | STATS_AUTO_RECALC_SYMBOL | STATS_PERSISTENT_SYMBOL | STATS_SAMPLE_PAGES_SYMBOL) (EQUAL_OPERATOR)? ternaryoption | ROW_FORMAT_SYMBOL (EQUAL_OPERATOR)? (DEFAULT_SYMBOL | DYNAMIC_SYMBOL | FIXED_SYMBOL | COMPRESSED_SYMBOL | REDUNDANT_SYMBOL | COMPACT_SYMBOL) | UNION_SYMBOL (EQUAL_OPERATOR)? OPEN_PAR_SYMBOL tablereflist CLOSE_PAR_SYMBOL | defaultcharset | defaultcollation | INSERT_METHOD_SYMBOL (EQUAL_OPERATOR)? (NO_SYMBOL | FIRST_SYMBOL | LAST_SYMBOL) | TABLESPACE_SYMBOL (EQUAL_OPERATOR)? identifier | STORAGE_SYMBOL (DISK_SYMBOL | MEMORY_SYMBOL)
 ternaryoption: ulong_number | DEFAULT_SYMBOL
 defaultcollation: (DEFAULT_SYMBOL)? COLLATE_SYMBOL (EQUAL_OPERATOR)? collationname
@@ -1337,12 +1342,12 @@ partitionclause: PARTITION_SYMBOL BY_SYMBOL partitiontypedef (PARTITIONS_SYMBOL 
 partitiontypedef: ((LINEAR_SYMBOL)? (KEY_SYMBOL (partitionkeyalgorithm)? OPEN_PAR_SYMBOL (identifierlist)? | HASH_SYMBOL OPEN_PAR_SYMBOL bitexpr) | (RANGE_SYMBOL | LIST_SYMBOL) (OPEN_PAR_SYMBOL bitexpr | COLUMNS_SYMBOL OPEN_PAR_SYMBOL (identifierlist)?)) CLOSE_PAR_SYMBOL
 subpartitions: SUBPARTITION_SYMBOL BY_SYMBOL (LINEAR_SYMBOL)? (HASH_SYMBOL OPEN_PAR_SYMBOL bitexpr CLOSE_PAR_SYMBOL | KEY_SYMBOL (partitionkeyalgorithm)? identifierlistwithparentheses) (SUBPARTITIONS_SYMBOL real_ulong_number)?
 partitionkeyalgorithm: ALGORITHM_SYMBOL EQUAL_OPERATOR real_ulong_number
-partitiondefinitions: OPEN_PAR_SYMBOL partitiondefinition ext_star_94 CLOSE_PAR_SYMBOL
-partitiondefinition: PARTITION_SYMBOL identifier (VALUES_SYMBOL (LESS_SYMBOL THAN_SYMBOL (partitionvalueitemlistparen | MAXVALUE_SYMBOL) | IN_SYMBOL partitionvaluesin))? ext_star_96 (OPEN_PAR_SYMBOL subpartitiondefinition ext_star_95 CLOSE_PAR_SYMBOL)?
-partitionvaluesin: partitionvalueitemlistparen | OPEN_PAR_SYMBOL partitionvalueitemlistparen ext_star_97 CLOSE_PAR_SYMBOL
+partitiondefinitions: OPEN_PAR_SYMBOL partitiondefinition ext_star_92 CLOSE_PAR_SYMBOL
+partitiondefinition: PARTITION_SYMBOL identifier (VALUES_SYMBOL (LESS_SYMBOL THAN_SYMBOL (partitionvalueitemlistparen | MAXVALUE_SYMBOL) | IN_SYMBOL partitionvaluesin))? ext_star_94 (OPEN_PAR_SYMBOL subpartitiondefinition ext_star_93 CLOSE_PAR_SYMBOL)?
+partitionvaluesin: partitionvalueitemlistparen | OPEN_PAR_SYMBOL partitionvalueitemlistparen ext_star_95 CLOSE_PAR_SYMBOL
 partitionoption: TABLESPACE_SYMBOL (EQUAL_OPERATOR)? identifier | (STORAGE_SYMBOL)? ENGINE_SYMBOL (EQUAL_OPERATOR)? engineref | (NODEGROUP_SYMBOL | MAX_ROWS_SYMBOL | MIN_ROWS_SYMBOL) (EQUAL_OPERATOR)? real_ulong_number | ((DATA_SYMBOL | INDEX_SYMBOL) DIRECTORY_SYMBOL | COMMENT_SYMBOL) (EQUAL_OPERATOR)? textliteral
-subpartitiondefinition: SUBPARTITION_SYMBOL textoridentifier ext_star_96
-partitionvalueitemlistparen: OPEN_PAR_SYMBOL partitionvalueitem ext_star_98 CLOSE_PAR_SYMBOL
+subpartitiondefinition: SUBPARTITION_SYMBOL textoridentifier ext_star_94
+partitionvalueitemlistparen: OPEN_PAR_SYMBOL partitionvalueitem ext_star_96 CLOSE_PAR_SYMBOL
 partitionvalueitem: bitexpr | MAXVALUE_SYMBOL
 definerclause: DEFINER_SYMBOL EQUAL_OPERATOR user
 ifexists: IF_SYMBOL EXISTS_SYMBOL
@@ -1352,17 +1357,17 @@ functionparameter: parametername typewithoptcollate
 collate: COLLATE_SYMBOL collationname
 typewithoptcollate: datatype (collate)?
 schemaidentifierpair: OPEN_PAR_SYMBOL schemaref COMMA_SYMBOL schemaref CLOSE_PAR_SYMBOL
-viewreflist: viewref ext_star_99
-updatelist: updateelement ext_star_100
+viewreflist: viewref ext_star_97
+updatelist: updateelement ext_star_98
 updateelement: columnref EQUAL_OPERATOR (expr | DEFAULT_SYMBOL)
 charsetclause: charset charsetname
-fieldsclause: COLUMNS_SYMBOL ext_plus_101
+fieldsclause: COLUMNS_SYMBOL ext_plus_99
 fieldterm: (TERMINATED_SYMBOL | (OPTIONALLY_SYMBOL)? ENCLOSED_SYMBOL | ESCAPED_SYMBOL) BY_SYMBOL textstring
-linesclause: LINES_SYMBOL ext_plus_102
+linesclause: LINES_SYMBOL ext_plus_100
 lineterm: (TERMINATED_SYMBOL | STARTING_SYMBOL) BY_SYMBOL textstring
-userlist: user ext_star_103
-createuserlist: createuserentry ext_star_104
-alteruserlist: alteruserentry ext_star_105
+userlist: user ext_star_101
+createuserlist: createuserentry ext_star_102
+alteruserlist: alteruserentry ext_star_103
 createuserentry: user (IDENTIFIED_SYMBOL (BY_SYMBOL (PASSWORD_SYMBOL)? textstring | WITH_SYMBOL textoridentifier (AS_SYMBOL textstringhash | BY_SYMBOL textstring)? | (WITH_SYMBOL textoridentifier)? BY_SYMBOL RANDOM_SYMBOL PASSWORD_SYMBOL))?
 alteruserentry: user (IDENTIFIED_SYMBOL ((WITH_SYMBOL textoridentifier)? BY_SYMBOL textstring (REPLACE_SYMBOL textstring)? (retaincurrentpassword)? | WITH_SYMBOL textoridentifier (AS_SYMBOL textstringhash (retaincurrentpassword)?)?)? | discardoldpassword)?
 retaincurrentpassword: RETAIN_SYMBOL CURRENT_SYMBOL PASSWORD_SYMBOL
@@ -1378,7 +1383,7 @@ usepartition: PARTITION_SYMBOL identifierlistwithparentheses
 fieldidentifier: dotidentifier | qualifiedidentifier (dotidentifier)?
 columnname: identifier | fieldidentifier
 columninternalref: identifier
-columninternalreflist: OPEN_PAR_SYMBOL columninternalref ext_star_106 CLOSE_PAR_SYMBOL
+columninternalreflist: OPEN_PAR_SYMBOL columninternalref ext_star_104 CLOSE_PAR_SYMBOL
 columnref: fieldidentifier
 insertidentifier: columnref | tablewild
 indexname: identifier
@@ -1408,8 +1413,8 @@ tablename: qualifiedidentifier | dotidentifier
 filtertableref: schemaref dotidentifier
 tablerefwithwildcard: identifier (dotidentifier)? (DOT_SYMBOL MULT_OPERATOR)?
 tableref: qualifiedidentifier | dotidentifier
-tablereflist: tableref ext_star_107
-tablealiasreflist: tablerefwithwildcard ext_star_108
+tablereflist: tableref ext_star_105
+tablealiasreflist: tablerefwithwildcard ext_star_106
 parametername: identifier
 labelidentifier: pureidentifier | labelkeyword
 labelref: labelidentifier
@@ -1421,7 +1426,7 @@ resourcegroupref: identifier
 windowname: identifier
 pureidentifier: IDENTIFIER | BACK_TICK_QUOTED_ID | DOUBLE_QUOTED_TEXT
 identifier: pureidentifier | identifierkeyword
-identifierlist: identifier ext_star_109
+identifierlist: identifier ext_star_107
 identifierlistwithparentheses: OPEN_PAR_SYMBOL identifierlist CLOSE_PAR_SYMBOL
 qualifiedidentifier: identifier (dotidentifier)?
 simpleidentifier: identifier (dotidentifier (dotidentifier)?)? | dotidentifier dotidentifier
@@ -1432,13 +1437,13 @@ ulonglong_number: INT_NUMBER | LONG_NUMBER | ULONGLONG_NUMBER | DECIMAL_NUMBER |
 real_ulonglong_number: INT_NUMBER | HEX_NUMBER | ULONGLONG_NUMBER | LONG_NUMBER
 literal: textliteral | numliteral | temporalliteral | nullliteral | boolliteral | (UNDERSCORE_CHARSET)? (HEX_NUMBER | BIN_NUMBER)
 signedliteral: literal | (PLUS_OPERATOR | MINUS_OPERATOR) ulong_number
-stringlist: OPEN_PAR_SYMBOL textstring ext_star_110 CLOSE_PAR_SYMBOL
+stringlist: OPEN_PAR_SYMBOL textstring ext_star_108 CLOSE_PAR_SYMBOL
 textstringliteral: SINGLE_QUOTED_TEXT | DOUBLE_QUOTED_TEXT
 textstring: textstringliteral | HEX_NUMBER | BIN_NUMBER
 textstringhash: textstringliteral | HEX_NUMBER
-textliteral: ((UNDERSCORE_CHARSET)? textstringliteral | NCHAR_TEXT) ext_star_111
+textliteral: ((UNDERSCORE_CHARSET)? textstringliteral | NCHAR_TEXT) ext_star_109
 textstringnolinebreak: textstringliteral
-textstringliterallist: textstringliteral ext_star_112
+textstringliterallist: textstringliteral ext_star_110
 numliteral: INT_NUMBER | LONG_NUMBER | ULONGLONG_NUMBER | DECIMAL_NUMBER | FLOAT_NUMBER
 boolliteral: TRUE_SYMBOL | FALSE_SYMBOL
 nullliteral: NULL_SYMBOL | NULL2_SYMBOL
@@ -1536,49 +1541,47 @@ ext_star_66: ((COMMA_SYMBOL keyusageelement) ext_star_66)?
 ext_star_67: ((COMMA_SYMBOL preloadkeys) ext_star_67)?
 ext_star_68: (((COMMA_SYMBOL)? vcpunumorrange) ext_star_68)?
 ext_star_69: (((COMMA_SYMBOL)? real_ulong_number) ext_star_69)?
-ext_star_70: ((IS_SYMBOL (notrule)? NULL_SYMBOL | compop (predicate | (ALL_SYMBOL | ANY_SYMBOL) subquery)) ext_star_70)?
-ext_plus_71: (whenexpression thenexpression) (ext_plus_71)?
-ext_star_72: ((COMMA_SYMBOL simpleidentifier) ext_star_72)?
-ext_plus_73: (expr COMMA_SYMBOL) (ext_plus_73)?
-ext_star_74: ((COMMA_SYMBOL weightstringlevellistitem) ext_star_74)?
-ext_star_75: ((COMMA_SYMBOL udfexpr) ext_star_75)?
-ext_star_76: ((COMMA_SYMBOL expr) ext_star_76)?
-ext_star_77: ((COMMA_SYMBOL orderexpression) ext_star_77)?
-ext_star_78: ((COMMA_SYMBOL groupingexpression) ext_star_78)?
-ext_star_79: ((ELSEIF_SYMBOL expr thenstatement) ext_star_79)?
-ext_plus_80: (compoundstatement SEMICOLON_SYMBOL) (ext_plus_80)?
-ext_plus_81: (whenexpression thenstatement) (ext_plus_81)?
-ext_plus_82: (spdeclaration SEMICOLON_SYMBOL) (ext_plus_82)?
-ext_star_83: ((COMMA_SYMBOL handlercondition) ext_star_83)?
-ext_star_84: ((COMMA_SYMBOL statementinformationitem) ext_star_84)?
-ext_star_85: ((COMMA_SYMBOL conditioninformationitem) ext_star_85)?
-ext_star_86: ((COMMA_SYMBOL signalinformationitem) ext_star_86)?
-ext_star_87: ((gcolattribute) ext_star_87)?
-ext_plus_88: (columnattribute) (ext_plus_88)?
-ext_star_89: ((COMMA_SYMBOL keypart) ext_star_89)?
-ext_star_90: ((COMMA_SYMBOL keypartorexpression) ext_star_90)?
-ext_plus_91: (SIGNED_SYMBOL | UNSIGNED_SYMBOL | ZEROFILL_SYMBOL) (ext_plus_91)?
-ext_star_92: (((COMMA_SYMBOL)? createtableoption) ext_star_92)?
-ext_plus_93: (createtableoption) (ext_plus_93)?
-ext_star_94: ((COMMA_SYMBOL partitiondefinition) ext_star_94)?
-ext_star_95: ((COMMA_SYMBOL subpartitiondefinition) ext_star_95)?
-ext_star_96: ((partitionoption) ext_star_96)?
-ext_star_97: ((COMMA_SYMBOL partitionvalueitemlistparen) ext_star_97)?
-ext_star_98: ((COMMA_SYMBOL partitionvalueitem) ext_star_98)?
-ext_star_99: ((COMMA_SYMBOL viewref) ext_star_99)?
-ext_star_100: ((COMMA_SYMBOL updateelement) ext_star_100)?
-ext_plus_101: (fieldterm) (ext_plus_101)?
-ext_plus_102: (lineterm) (ext_plus_102)?
-ext_star_103: ((COMMA_SYMBOL user) ext_star_103)?
-ext_star_104: ((COMMA_SYMBOL createuserentry) ext_star_104)?
-ext_star_105: ((COMMA_SYMBOL alteruserentry) ext_star_105)?
-ext_star_106: ((COMMA_SYMBOL columninternalref) ext_star_106)?
-ext_star_107: ((COMMA_SYMBOL tableref) ext_star_107)?
-ext_star_108: ((COMMA_SYMBOL tablerefwithwildcard) ext_star_108)?
-ext_star_109: ((COMMA_SYMBOL identifier) ext_star_109)?
-ext_star_110: ((COMMA_SYMBOL textstring) ext_star_110)?
-ext_star_111: ((textstringliteral) ext_star_111)?
-ext_star_112: ((COMMA_SYMBOL textstringliteral) ext_star_112)?
+ext_plus_70: (whenexpression thenexpression) (ext_plus_70)?
+ext_star_71: ((COMMA_SYMBOL simpleidentifier) ext_star_71)?
+ext_plus_72: (expr COMMA_SYMBOL) (ext_plus_72)?
+ext_star_73: ((COMMA_SYMBOL weightstringlevellistitem) ext_star_73)?
+ext_star_74: ((COMMA_SYMBOL udfexpr) ext_star_74)?
+ext_star_75: ((COMMA_SYMBOL expr) ext_star_75)?
+ext_star_76: ((COMMA_SYMBOL orderexpression) ext_star_76)?
+ext_star_77: ((COMMA_SYMBOL groupingexpression) ext_star_77)?
+ext_plus_78: (compoundstatement SEMICOLON_SYMBOL) (ext_plus_78)?
+ext_plus_79: (whenexpression thenstatement) (ext_plus_79)?
+ext_plus_80: (spdeclaration SEMICOLON_SYMBOL) (ext_plus_80)?
+ext_star_81: ((COMMA_SYMBOL handlercondition) ext_star_81)?
+ext_star_82: ((COMMA_SYMBOL statementinformationitem) ext_star_82)?
+ext_star_83: ((COMMA_SYMBOL conditioninformationitem) ext_star_83)?
+ext_star_84: ((COMMA_SYMBOL signalinformationitem) ext_star_84)?
+ext_star_85: ((gcolattribute) ext_star_85)?
+ext_plus_86: (columnattribute) (ext_plus_86)?
+ext_star_87: ((COMMA_SYMBOL keypart) ext_star_87)?
+ext_star_88: ((COMMA_SYMBOL keypartorexpression) ext_star_88)?
+ext_plus_89: (SIGNED_SYMBOL | UNSIGNED_SYMBOL | ZEROFILL_SYMBOL) (ext_plus_89)?
+ext_star_90: (((COMMA_SYMBOL)? createtableoption) ext_star_90)?
+ext_plus_91: (createtableoption) (ext_plus_91)?
+ext_star_92: ((COMMA_SYMBOL partitiondefinition) ext_star_92)?
+ext_star_93: ((COMMA_SYMBOL subpartitiondefinition) ext_star_93)?
+ext_star_94: ((partitionoption) ext_star_94)?
+ext_star_95: ((COMMA_SYMBOL partitionvalueitemlistparen) ext_star_95)?
+ext_star_96: ((COMMA_SYMBOL partitionvalueitem) ext_star_96)?
+ext_star_97: ((COMMA_SYMBOL viewref) ext_star_97)?
+ext_star_98: ((COMMA_SYMBOL updateelement) ext_star_98)?
+ext_plus_99: (fieldterm) (ext_plus_99)?
+ext_plus_100: (lineterm) (ext_plus_100)?
+ext_star_101: ((COMMA_SYMBOL user) ext_star_101)?
+ext_star_102: ((COMMA_SYMBOL createuserentry) ext_star_102)?
+ext_star_103: ((COMMA_SYMBOL alteruserentry) ext_star_103)?
+ext_star_104: ((COMMA_SYMBOL columninternalref) ext_star_104)?
+ext_star_105: ((COMMA_SYMBOL tableref) ext_star_105)?
+ext_star_106: ((COMMA_SYMBOL tablerefwithwildcard) ext_star_106)?
+ext_star_107: ((COMMA_SYMBOL identifier) ext_star_107)?
+ext_star_108: ((COMMA_SYMBOL textstring) ext_star_108)?
+ext_star_109: ((textstringliteral) ext_star_109)?
+ext_star_110: ((COMMA_SYMBOL textstringliteral) ext_star_110)?
 
 %ignore WS
 

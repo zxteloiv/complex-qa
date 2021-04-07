@@ -376,6 +376,6 @@ def main(**kwargs):
             print("\n%ignore WS\n", file=fout)
 
 if __name__ == '__main__':
-    main(grammar="sqlite")
+    main(grammar="mysql")
     # test()
     # test2()
