@@ -954,6 +954,7 @@ compOp   ::= EQUAL_OPERATOR
            | LESS_OR_EQUAL_OPERATOR
            | LESS_THAN_OPERATOR
            | NOT_EQUAL_OPERATOR
+           | NOT_EQUAL2_OPERATOR
 predicate
          ::= bitExpr ( notRule? predicateOperations | MEMBER_SYMBOL OF_SYMBOL? simpleExprWithParentheses | SOUNDS_SYMBOL LIKE_SYMBOL bitExpr )?
 predicateOperations
