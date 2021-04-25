@@ -41,7 +41,7 @@ class FlattenSeqDS(CompositionalDataset):
                 for k in range(len(self.dataset[i]['sql'])):
                     self._flat_example_index.append((i, k))
             else:
-                for j in range(len(self.dataset[i]['sentences'])):
+                for j in range(sum([1 for sent in self.dataset[i]['sentences'] if sent['question-split'] != 'exclude'])):
                     # only the first sql will be used, so we don't have to save the index of sql instances.
                     self._flat_example_index.append((i, j))
 
@@ -74,7 +74,7 @@ def _get_sql_ds(data_name: str, *, use_iid: bool, use_only_sql: bool):
     train = FlattenSeqDS(JsonDataset(join(ds_dir, 'aligned_train.json')), sql_only=use_only_sql)
     dev = FlattenSeqDS(JsonDataset(join(ds_dir, 'aligned_final_dev.json')), sql_only=use_only_sql)
     test = FlattenSeqDS(JsonDataset(join(ds_dir, 'final_test.json')), sql_only=use_only_sql)
-    print(f"install dataset: {ds_dir}")
+    print(f"load dataset: {ds_dir}")
     return train, dev, test
 
 def install_datasets():

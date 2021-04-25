@@ -18,5 +18,6 @@ sync.sh
 .DS_Store
 snapshots
 relaysync.sh
+*.pkl
 
 /analysis/
