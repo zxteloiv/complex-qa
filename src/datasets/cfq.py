@@ -25,9 +25,9 @@ def cfq_treebase(split_filename, grammar_file: str, keys):
     get_parse_tree_dataset = lambda d: LarkParserDatasetWrapper(grammar_file, 'queryunit', keys, d)
     return tuple(get_parse_tree_dataset(IndexDataset(store, ds)) for ds in split_idx)
 
-def cfq_preparsed_treebase(split_filename):
+def cfq_preparsed_treebase(split_filename, conn=('localhost', 6379, 0)):
     import lark
-    store = PickleDataset(join(CFQ_PATH, 'parsed_cfq.pkl'), ('localhost', 6379, 0), 'cfq_parse_')
+    store = PickleDataset(join(CFQ_PATH, 'parsed_cfq.pkl'), conn, 'cfq_parse_')
     all_idx = json.load(open(split_filename))
     split_idx = map(all_idx.get, ['trainIdxs', 'devIdxs', 'testIdxs'])
     return tuple(IndexDataset(store, ds) for ds in split_idx)
