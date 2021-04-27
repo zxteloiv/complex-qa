@@ -69,6 +69,7 @@ class BaseSeq2Seq(torch.nn.Module):
         self.bleu = BLEU(exclude_indices={padding_index, self._start_id, self._eos_id})
         self.ppl = Perplexity()
         self.err_rate = Average()
+        self.item_count = 0
 
     def forward(self,
                 source_tokens: torch.LongTensor,
@@ -119,10 +120,16 @@ class BaseSeq2Seq(torch.nn.Module):
         total_err = ((predictions != gold) * gold_mask).sum(list(range(gold_mask.ndim))[1:]) > 0
         for instance_err in total_err:
             self.err_rate(instance_err)
+        self.item_count += predictions.size()[0]
 
     def get_metric(self, reset=False):
-        metric = {"PPL": self.ppl.get_metric(reset), "ERR": self.err_rate.get_metric(reset)}
+        metric = {"PPL": self.ppl.get_metric(reset),
+                  "ERR": self.err_rate.get_metric(reset),
+                  "COUNT": self.item_count}
         metric.update(self.bleu.get_metric(reset))
+        if reset:
+            self.item_count = 0
+
         return metric
 
     # for possible misspelling error

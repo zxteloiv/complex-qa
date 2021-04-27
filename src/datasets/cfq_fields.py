@@ -5,9 +5,10 @@ from torch.nn.utils.rnn import pad_sequence
 from .field import FieldAwareTranslator, Field
 from .seq_field import SeqField
 import lark
-from trialbot.data import START_SYMBOL
+from trialbot.data import START_SYMBOL, END_SYMBOL
 from utils.preprocessing import nested_list_numbers_to_tensors
 _Tree, _Token = lark.Tree, lark.Token
+from itertools import product
 
 class GrammarPatternSeqField(SeqField):
     @classmethod
@@ -33,16 +34,27 @@ class GrammarPatternSeqField(SeqField):
     def generate_namespace_tokens(self, example) -> Generator[Tuple[str, str], None, None]:
         Tree, Token = lark.Tree, lark.Token
         tree: Tree = example.get(self.source_key)
-        assert tree is not None
-        for subtree in tree.iter_subtrees_topdown():
-            rule_str = self._get_rule_str(subtree)
-            yield self.ns, rule_str
+        if tree is not None:
+            for subtree in tree.iter_subtrees_topdown():
+                rule_str = self._get_rule_str(subtree)
+                yield self.ns, rule_str
 
-    def to_tensor(self, example) -> Mapping[str, torch.Tensor]:
+        if self.add_start_end_toks:
+            yield from product([self.ns], [START_SYMBOL, END_SYMBOL])
+
+    def to_tensor(self, example) -> Mapping[str, Optional[torch.Tensor]]:
         Tree, Token = lark.Tree, lark.Token
         tree: Tree = example.get(self.source_key)
-        assert tree is not None
+        if tree is None:
+            return {self.renamed_key: None}
+
         rule_id = [self.vocab.get_token_index(self._get_rule_str(st), namespace=self.ns) for st in tree.iter_subtrees_topdown()]
+
+        if self.add_start_end_toks:
+            start_id = self.vocab.get_token_index(START_SYMBOL, self.ns)
+            end_id = self.vocab.get_token_index(END_SYMBOL, self.ns)
+            rule_id = [start_id] + rule_id + [end_id]
+
         rule_seq_tensor = torch.tensor(rule_id)
         return {self.renamed_key: rule_seq_tensor}
 

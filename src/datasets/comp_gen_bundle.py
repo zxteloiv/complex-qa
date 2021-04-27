@@ -9,7 +9,10 @@
 from trialbot.training import Registry
 from trialbot.data import JsonDataset
 from .composition_dataset import CompositionalDataset
-from utils.root_finder import find_root
+from .redis_dataset import RedisDataset
+from .lark_dataset import LarkParserDatasetWrapper
+from trialbot.utils.root_finder import find_root
+import os
 from os.path import join
 from functools import partial
 
@@ -68,16 +71,49 @@ class FlattenSeqDS(CompositionalDataset):
             }
         return instance
 
-def _get_sql_ds(data_name: str, *, use_iid: bool, use_only_sql: bool):
+def _get_sql_ds(data_name: str, *, use_iid: bool):
     ds_dir = join(ROOT, 'data', 'CompGen', 'sql data', data_name,
                   'new_question_split' if use_iid else 'schema_full_split')
-    train = FlattenSeqDS(JsonDataset(join(ds_dir, 'aligned_train.json')), sql_only=use_only_sql)
-    dev = FlattenSeqDS(JsonDataset(join(ds_dir, 'aligned_final_dev.json')), sql_only=use_only_sql)
-    test = FlattenSeqDS(JsonDataset(join(ds_dir, 'final_test.json')), sql_only=use_only_sql)
+    train = FlattenSeqDS(JsonDataset(join(ds_dir, 'aligned_train.json')), sql_only=True)
+    dev = FlattenSeqDS(JsonDataset(join(ds_dir, 'aligned_final_dev.json')), sql_only=True)
+    test = FlattenSeqDS(JsonDataset(join(ds_dir, 'final_test.json')), sql_only=True)
     print(f"load dataset: {ds_dir}")
     return train, dev, test
 
-def install_datasets():
+def install_sql_datasets():
+    domains = ["atis", "geo", "advising", "scholar"]
+    path_names = ["atis", "geography", "advising", "scholar"]
+    for domain, pathname in zip(domains, path_names):
+        name = f"{domain}_iid"
+        Registry._datasets[name] = partial(_get_sql_ds, pathname, use_iid=True)
+        name = f"{domain}_cg"
+        Registry._datasets[name] = partial(_get_sql_ds, pathname, use_iid=False)
+
+def _get_qa_ds(data_name: str, *, use_iid: bool, grammar_file: str, sql_only: bool):
+    ds_dir = join(ROOT, 'data', 'CompGen', 'sql data', data_name,
+                  'new_question_split' if use_iid else 'schema_full_split')
+    grammar_tag = grammar_file[grammar_file.rfind('/') + 1:grammar_file.index('.lark')]
+    def _build_ds(filename: str, split_tag: str):
+        nonlocal ds_dir, grammar_tag
+        ds = RedisDataset(
+            dataset=LarkParserDatasetWrapper(
+                grammar_filename=grammar_file,
+                startpoint='parse' if 'sqlite' in grammar_file else 'query',
+                parse_keys=['sql'],
+                dataset=FlattenSeqDS(JsonDataset(join(ds_dir, filename)), sql_only=sql_only)
+            ),
+            conn=('localhost', 6379, 1),
+            prefix=split_tag + ('_iid_' if use_iid else '_cg_' ) + grammar_tag,
+        )
+        return ds
+
+    train = _build_ds('aligned_train.json', 'train')
+    dev = _build_ds('aligned_final_dev.json', 'dev')
+    test = _build_ds('final_test.json', 'test')
+    print(f"load dataset: {ds_dir}")
+    return train, dev, test
+
+def install_qa_datasets():
     """
     The obtained instances are
     {
@@ -98,19 +134,20 @@ def install_datasets():
     """
     domains = ["atis", "geo", "advising", "scholar"]
     path_names = ["atis", "geography", "advising", "scholar"]
+    grammar_path = join('..', '..', 'statics', 'grammar')
+    grammars = [join(grammar_path, 'MySQL.lark'), join(grammar_path, 'SQLite.lark')]
+    grammars.extend(join('run', f) for f in os.listdir('./run') if f.endswith('.lark'))
 
     for domain, pathname in zip(domains, path_names):
-        name = f"{domain}_iid"
-        Registry._datasets[name] = partial(_get_sql_ds, pathname, use_iid=True, use_only_sql=False)
-        name = f"{domain}_cg"
-        Registry._datasets[name] = partial(_get_sql_ds, pathname, use_iid=False, use_only_sql=False)
+        Registry._datasets[f"{domain}_iid"] = partial(_get_qa_ds, pathname, use_iid=True, sql_only=False)
+        Registry._datasets[f"{domain}_cg"] = partial(_get_qa_ds, pathname, use_iid=False, sql_only=False)
 
-def install_sql_datasets():
-    domains = ["atis", "geo", "advising", "scholar"]
-    path_names = ["atis", "geography", "advising", "scholar"]
-    for domain, pathname in zip(domains, path_names):
-        name = f"{domain}_iid"
-        Registry._datasets[name] = partial(_get_sql_ds, pathname, use_iid=True, use_only_sql=True)
-        name = f"{domain}_cg"
-        Registry._datasets[name] = partial(_get_sql_ds, pathname, use_iid=False, use_only_sql=True)
+def install_geo_qa_datasets():
+    domain = "geo"
+    path_name = "geography"
+    grammars = list(join('run', f) for f in os.listdir('./run') if f.endswith('.lark'))
+    for g in grammars:
+        tag = g[g.rfind('/') + 1:g.index('.lark')]
+        Registry._datasets[domain + '_iid_' + tag] = partial(_get_qa_ds, path_name, use_iid=True, grammar_file=g, sql_only=False)
+        Registry._datasets[domain + '_cg_' + tag] = partial(_get_qa_ds, path_name, use_iid=False, grammar_file=g, sql_only=False)
 
