@@ -281,11 +281,11 @@ class GreedyIdiomMiner:
             "trees_stat": tree_stats,
         }
 
-    def export_kth_rules(self, k, lex_in):
+    def export_kth_rules(self, k, lex_in, start: cfg.NonTerminal):
         g = self._restore_grammar(self.stat_by_iter[k][0]['rule_dist'])
         # we do not remove the unit rules since the extraction algorithm will remove them during itertaions
         g = cfg.remove_eps_rules(g)
-        g = cfg.remove_useless_rules(g, cfg.NonTerminal('parse'))
+        g = cfg.remove_useless_rules(g, start)
 
         grammar_text = io.StringIO()
         print(open(join(find_root(), 'src', 'statics', 'grammar', lex_in)).read(), file=grammar_text)
@@ -467,8 +467,9 @@ def sql_data_mining(prefix=""):
         miner.mine()
         miner.evaluation()
         lex_file = 'SQLite.lark.lex-in' if 'sqlite' in name.lower() else 'MySQL.lark.lex-in'
+        start = cfg.NonTerminal('parse') if 'sqlite' in name.lower() else cfg.NonTerminal('query')
         for i in range(0, len(miner.stat_by_iter), 10):
-            miner.export_kth_rules(i, lex_file)
+            miner.export_kth_rules(i, lex_file, start)
 
 def cfq_dataset_mining():
     import datasets.cfq as cfq_data

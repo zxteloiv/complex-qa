@@ -31,19 +31,22 @@ def parse_sql(ds_name='atis_iid'):
         try:
             tree = parser.parse(sql)
             print(f"OK {i}")
+        except KeyboardInterrupt:
+            return
         except:
             print(sql)
         # print(pretty_repr_tree(tree))
         # print('\n'.join(pretty_derivation_tree(tree)))
 
 def main():
-    names = filter(lambda n: 'scholar' not in n and 'iid' in n, Registry._datasets.keys())
+    names = filter(lambda n: 'iid' in n, Registry._datasets.keys())
     for name in names:
         print('-' * 30)
         print(name)
         parse_sql(name)
 
 def inspect():
+    from sklearn import decomposition
     # ds_name = 'atis_iid'
     # train, dev, test = Registry.get_dataset(ds_name)
     # print(f"{ds_name}: train: {len(train)}, dev: {len(dev)}, test: {len(test)}")
@@ -88,10 +91,7 @@ def inspect():
     ) AND RIVERalias0.TRAVERSE = "state_name0" ;
     """
     sql3 = """
-    SELECT COUNT( RIVERalias0.RIVER_NAME ) FROM RIVER AS RIVERalias0
-    WHERE RIVERalias0.LENGTH > ALL (
-        SELECT RIVERalias1.LENGTH FROM RIVER AS RIVERalias1 WHERE RIVERalias1.RIVER_NAME = "river_name0"
-    ) AND RIVERalias0.TRAVERSE = "state_na'\\"me0" 
+    SELECT DISTINCT COUNT( PAPERalias0.PAPERID ) FROM AUTHOR AS AUTHORalias0 , PAPER AS PAPERalias0 , WRITES AS WRITESalias0 WHERE AUTHORalias0.AUTHORNAME = "authorname0" AND PAPERalias0.YEAR == YEAR(CURDATE()) - misc0 AND WRITESalias0.AUTHORID = AUTHORalias0.AUTHORID AND WRITESalias0.PAPERID = PAPERalias0.PAPERID ;
     """
 
     from ebnf_compiler import pretty_repr_tree, pretty_derivation_tree

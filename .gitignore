@@ -21,3 +21,5 @@ relaysync.sh
 *.pkl
 
 /analysis/
+
+src/exps/*/run/
