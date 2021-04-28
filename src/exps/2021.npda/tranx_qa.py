@@ -18,6 +18,7 @@ import datasets.cg_bundle_translator
 def get_tranx_updater(bot: TrialBot):
     args, p, model, logger = bot.args, bot.hparams, bot.model, bot.logger
     from utils.select_optim import select_optim
+    from utils.maybe_random_iterator import MaybeRandomIterator
 
     params = model.parameters()
     optim = select_optim(p, params)
@@ -25,7 +26,7 @@ def get_tranx_updater(bot: TrialBot):
 
     device, dry_run = args.device, args.dry_run
     repeat_iter = shuffle_iter = not args.debug
-    iterator = RandomIterator(bot.train_set, p.batch_sz, bot.translator, shuffle=shuffle_iter, repeat=repeat_iter)
+    iterator = MaybeRandomIterator(bot.train_set, p.batch_sz, bot.translator, shuffle=shuffle_iter, repeat=repeat_iter)
     if args.debug and args.skip:
         iterator.reset(args.skip)
 
@@ -144,10 +145,11 @@ def common_sql_tranx():
     from trialbot.training.hparamset import HyperParamSet
     from trialbot.utils.root_finder import find_root
     p = HyperParamSet.common_settings(find_root())
-    p.TRAINING_LIMIT = 10  # in num of epochs
+    p.TRAINING_LIMIT = 100  # in num of epochs
     p.OPTIM = "adabelief"
     p.WEIGHT_DECAY = .1
-    p.batch_sz = 32
+    p.ADAM_BETAS = (0.9, 0.999)
+    p.batch_sz = 16
 
     p.emb_sz = 128
     p.hidden_sz = 128
@@ -158,7 +160,7 @@ def common_sql_tranx():
     p.concat_attn_to_dec_input = False
     p.encoder = "bilstm"
     p.num_enc_layers = 2
-    p.dropout = .2
+    p.dropout = .5
     p.decoder = "lstm"
     p.num_dec_layers = 2
     p.max_decoding_step = 100

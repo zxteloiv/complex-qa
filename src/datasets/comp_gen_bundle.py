@@ -145,9 +145,9 @@ def install_qa_datasets():
 def install_geo_qa_datasets():
     domain = "geo"
     path_name = "geography"
-    grammars = list(join('run', f) for f in os.listdir('./run') if f.endswith('.lark'))
+    grammars = list(join('run', f) for f in os.listdir('./run') if f.endswith('.lark') and f.startswith('geo'))
     for g in grammars:
         tag = g[g.rfind('/') + 1:g.index('.lark')]
-        Registry._datasets[domain + '_iid_' + tag] = partial(_get_qa_ds, path_name, use_iid=True, grammar_file=g, sql_only=False)
-        Registry._datasets[domain + '_cg_' + tag] = partial(_get_qa_ds, path_name, use_iid=False, grammar_file=g, sql_only=False)
+        Registry._datasets[domain + '_iid.' + tag] = partial(_get_qa_ds, path_name, use_iid=True, grammar_file=g, sql_only=False)
+        Registry._datasets[domain + '_cg.' + tag] = partial(_get_qa_ds, path_name, use_iid=False, grammar_file=g, sql_only=False)
 

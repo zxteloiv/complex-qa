@@ -37,7 +37,10 @@ class SeqField(Field):
         return {self.renamed_key: seq_tensor}
 
     def batch_tensor_by_key(self, tensors_by_keys: Mapping[str, List[torch.Tensor]]) -> Mapping[str, torch.Tensor]:
-        tensor_list = tensors_by_keys[self.renamed_key]
+        tensor_list = tensors_by_keys.get(self.renamed_key)
+        if tensor_list is None or len(tensor_list) == 0:
+            raise ValueError('Empty field data confronted. Failed to build the instance tensors')
+
         batch_tensor = pad_sequence(tensor_list, batch_first=True, padding_value=self.padding)
         return {self.renamed_key: batch_tensor}
 

@@ -8,7 +8,7 @@ from utils.root_finder import find_root
 import lark
 TREE, TOKEN = lark.Tree, lark.Token
 import logging
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.INFO)
 from itertools import chain
 from collections import Counter, OrderedDict, defaultdict
 import numpy as np
@@ -27,25 +27,6 @@ def print_dataset_statistics():
         train, dev, test = Registry.get_dataset(name)
         print(f"{name}: train: {len(train)}, dev: {len(dev)}, test: {len(test)}")
 
-def parse_dataset(ds_name='advising_cg',
-                  grammar_filename: Literal['SQLite.lark', 'MySQL.lark'] = 'SQLite.lark',
-                  ):
-    train, dev, test = Registry.get_dataset(ds_name)
-    print(f"{ds_name}: train: {len(train)}, dev: {len(dev)}, test: {len(test)} (test will be omitted during extraction)")
-    lark_text = join(find_root(), 'src', 'statics', 'grammar', grammar_filename)
-    parser = lark.Lark(open(lark_text), start="parse", keep_all_tokens=True, )
-    trees = []
-    for i, example in enumerate(chain(iter(train), iter(dev))):
-        sql = example['sql']
-        try:
-            tree = parser.parse(sql)
-        except:
-            logging.warning(f"failed to parse example {i}: {sql}")
-            continue
-        trees.append(tree)
-        logging.info(f"example {i} parsed")
-    return trees[:len(train)], trees[len(train):]
-
 def compact_hash(t: Union[TREE, TOKEN]):
     if isinstance(t, TOKEN):
         return t.type
@@ -54,16 +35,6 @@ def compact_hash(t: Union[TREE, TOKEN]):
     # only the categories of terminals is considered, the values are not used
     rhs = ' '.join(compact_hash(c) for c in t.children)
     return f"{lhs}: ({rhs})"
-
-def preparse_trees(prefix="",
-                   grammar_filename: Literal['SQLite.lark', 'MySQL.lark'] = 'SQLite.lark',
-                   ):
-    names = filter(lambda n: 'cg' in n, Registry._datasets.keys())
-    for name in names:
-        print('-' * 30)
-        print(name)
-        parse_trees = parse_dataset(name)
-        pickle.dump(parse_trees, open(prefix + f"{name}.sqlite-parse.pkl", "wb"))
 
 def step_evaluation(train_stat: dict, dev_stat: dict, rule_to_id: dict) -> Dict[str, Dict[str, float]]:
     stat = OrderedDict()
@@ -490,18 +461,14 @@ class GreedyIdiomMiner:
 def sql_data_mining(prefix=""):
     names = [n for n in os.listdir(prefix) if n.endswith('parse.pkl')]
     for name in names:
-        # lex_file = 'SQLite.lark.lex-in' if 'sqlite' in name.lower() else 'MySQL.lark.lex-in'
+        logging.info(f"================== {name} ====================")
         trees = pickle.load(open(prefix + name, 'rb'))
-        miner = GreedyIdiomMiner(trees[0], trees[1], name[:name.index('.pkl')], data_prefix=prefix)
-        miner = pickle.load(open('run/geo_cg.sqlite-parse.363.miner_state', 'rb'))
-        # miner.mine()
+        miner = GreedyIdiomMiner(trees[0], trees[1], name[:name.index('.pkl')], data_prefix=prefix, freq_lower_bound=1)
+        miner.mine()
         miner.evaluation()
-        # miner.export_kth_rules(0, 'SQLite.lark.lex-in')
-        # miner.export_kth_rules(21, 'SQLite.lark.lex-in')
-        # miner.export_kth_rules(86, 'SQLite.lark.lex-in')
-        # miner.export_kth_rules(118, 'SQLite.lark.lex-in')
-        # miner.export_kth_rules(267, 'SQLite.lark.lex-in')
-        break
+        lex_file = 'SQLite.lark.lex-in' if 'sqlite' in name.lower() else 'MySQL.lark.lex-in'
+        for i in range(0, len(miner.stat_by_iter), 10):
+            miner.export_kth_rules(i, lex_file)
 
 def cfq_dataset_mining():
     import datasets.cfq as cfq_data
@@ -516,12 +483,11 @@ def cfq_dataset_mining():
 
 def main():
     # sql part
-    # preparse_trees(prefix='run', grammar_filename='MySQL.lark')
-    # print_dataset_statistics()
-    # sql_data_mining(prefix='./run/')
+    print_dataset_statistics()
+    sql_data_mining(prefix='./run/')
 
     # sparql part
-    cfq_dataset_mining()
+    # cfq_dataset_mining()
 
 if __name__ == '__main__':
     main()

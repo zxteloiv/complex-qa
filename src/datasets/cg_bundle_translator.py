@@ -1,7 +1,8 @@
+from typing import List, Mapping, Generator, Tuple, Optional, Any, Literal, Iterable, Union, DefaultDict
 from trialbot.training import Registry
 from .field import FieldAwareTranslator
 from .seq_field import SeqField
-from .cfq_fields import MidOrderTraversalField, GrammarModEntSeqField
+from .cg_bundle_fields import TerminalRuleSeqField
 
 @Registry.translator('sql_s2s')
 class SQLSeq(FieldAwareTranslator):
@@ -12,11 +13,11 @@ class SQLSeq(FieldAwareTranslator):
         ])
 
 @Registry.translator('cg_sql_tranx')
-class TranXModEntTranslator(FieldAwareTranslator):
+class TranXTranslator(FieldAwareTranslator):
     def __init__(self):
         super().__init__(field_list=[
             SeqField(source_key='sent', renamed_key='source_tokens', add_start_end_toks=False,),
-            GrammarModEntSeqField(source_key='sql_tree', renamed_key="target_tokens", namespace="rule_seq",),
+            TerminalRuleSeqField(source_key='sql_tree', renamed_key="target_tokens", namespace="rule_seq",),
         ])
 
     def batch_tensor(self, tensors):
@@ -24,7 +25,11 @@ class TranXModEntTranslator(FieldAwareTranslator):
         batch_dict = self.list_of_dict_to_dict_of_list(tensors)
         output = {}
         for field in self.fields:
-            output.update(field.batch_tensor_by_key(batch_dict))
+            try:
+                output.update(field.batch_tensor_by_key(batch_dict))
+            except:
+                return None
+
         return output
 
 
