@@ -17,9 +17,11 @@ class RedisDataset(CompositionalDataset):
         self.r = None
         if conn is not None:
             host, port, db = conn
-            pool = redis.ConnectionPool(host=host, port=port, db=db)
-            self.r = redis.Redis(connection_pool=pool)
-            if self.r.ping() is None:
+            try:
+                pool = redis.ConnectionPool(host=host, port=port, db=db)
+                self.r = redis.Redis(connection_pool=pool)
+                self.r.ping()
+            except:
                 self.logger.warning('specified redis server is not available, the redis dataset is used passthrough')
                 self.r = None
 
