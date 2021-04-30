@@ -361,7 +361,7 @@ class PDATrainingUpdater(Updater):
     @classmethod
     def from_bot(cls, bot: TrialBot) -> 'PDATrainingUpdater':
         import torch
-        from trialbot.data import RandomIterator
+        from trialbot.data.iterators import RandomIterator
         from models.neural_pda.seq2pda import Seq2PDA
         model: Seq2PDA
         args, p, model, logger = bot.args, bot.hparams, bot.model, bot.logger

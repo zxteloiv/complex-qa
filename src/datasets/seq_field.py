@@ -1,7 +1,8 @@
 from typing import List, Mapping, Generator, Tuple, Optional, Any, Literal
 from .field import Field
 import torch
-from trialbot.data import Translator, START_SYMBOL, END_SYMBOL, PADDING_TOKEN, NSVocabulary
+from trialbot.data import START_SYMBOL, END_SYMBOL, PADDING_TOKEN, NSVocabulary
+from trialbot.data.translator import Translator
 from itertools import product
 from torch.nn.utils.rnn import pad_sequence
 

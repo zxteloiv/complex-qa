@@ -1,4 +1,4 @@
-from trialbot.data import RandomIterator
+from trialbot.data.iterators import RandomIterator
 
 class MaybeRandomIterator(RandomIterator):
     def __next__(self):

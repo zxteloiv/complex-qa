@@ -8,7 +8,7 @@ from fairseq.optim.adafactor import Adafactor
 import trialbot
 from trialbot.training import Registry, TrialBot, Events
 from trialbot.training.hparamset import HyperParamSet
-from trialbot.data import Iterator, RandomIterator
+from trialbot.data.iterators import RandomIterator
 from trialbot.utils.move_to_device import move_to_device
 from trialbot.training.updater import Updater
 from datasets.cached_retriever import IDCacheRetriever, HypIDCacheRetriever

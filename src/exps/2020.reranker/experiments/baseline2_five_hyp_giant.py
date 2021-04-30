@@ -11,7 +11,6 @@ from trialbot.data import NSVocabulary, PADDING_TOKEN
 from trialbot.training import Registry, TrialBot, Events
 from trialbot.training.updater import TrainingUpdater, TestingUpdater
 from trialbot.training.hparamset import HyperParamSet
-from trialbot.data import Iterator, RandomIterator
 from trialbot.utils.move_to_device import move_to_device
 
 from utils.root_finder import find_root

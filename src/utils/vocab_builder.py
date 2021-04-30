@@ -1,5 +1,5 @@
 from typing import List, Any, Dict
-from trialbot.data import Translator
+from trialbot.data.translator import Translator
 from tqdm import tqdm
 
 def get_ns_counter(train_data: List[Any], translator: Translator) -> Dict[str, Dict[str, int]]:

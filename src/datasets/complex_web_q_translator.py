@@ -2,7 +2,8 @@ from typing import Generator, Tuple, List, Mapping, Optional, Any
 import torch
 from torch.nn.utils.rnn import pad_sequence
 from trialbot.training import Registry
-from trialbot.data import Translator, START_SYMBOL, END_SYMBOL, PADDING_TOKEN
+from trialbot.data import START_SYMBOL, END_SYMBOL, PADDING_TOKEN
+from trialbot.data.translator import Translator
 import re
 from itertools import product
 from collections import defaultdict

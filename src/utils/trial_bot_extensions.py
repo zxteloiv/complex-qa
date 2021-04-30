@@ -86,7 +86,7 @@ def evaluation_on_dev_every_epoch(bot: TrialBot, interval: int = 1,
         rewrite_eval_hparams = rewrite_eval_hparams or dict()
         for k, v in rewrite_eval_hparams.items():
             setattr(hparams, k, v)
-        from trialbot.data import RandomIterator
+        from trialbot.data.iterators import RandomIterator
         iterator = RandomIterator(bot.dev_set, hparams.batch_sz, bot.translator, shuffle=False, repeat=False)
         model = bot.model
         device = bot.args.device

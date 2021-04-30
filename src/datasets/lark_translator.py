@@ -1,6 +1,7 @@
 from typing import List, Mapping, Generator, Tuple, Optional, Any, Literal, Dict
 from collections import defaultdict
-from trialbot.data import Translator, START_SYMBOL, END_SYMBOL, PADDING_TOKEN
+from trialbot.data import START_SYMBOL, END_SYMBOL, PADDING_TOKEN
+from trialbot.data.translator import Translator
 import torch
 from .field import FieldAwareTranslator
 from torch.nn.utils.rnn import pad_sequence

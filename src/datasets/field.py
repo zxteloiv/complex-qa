@@ -1,5 +1,6 @@
 from typing import List, Mapping, Generator, Tuple, Optional, Any, Literal
-from trialbot.data import Translator, NSVocabulary
+from trialbot.data import NSVocabulary
+from trialbot.data.translator import Translator
 from collections import defaultdict
 import torch
 
