@@ -6,7 +6,6 @@
 # https://github.com/inbaroren/improving-compgen-in-semparse
 # ##
 
-from trialbot.training import Registry
 from trialbot.data import JsonDataset
 from .composition_dataset import CompositionalDataset
 from .redis_dataset import RedisDataset
@@ -17,6 +16,7 @@ from os.path import join
 from functools import partial
 
 ROOT = find_root()
+CG_DATA_REG = dict()
 
 class FlattenSeqDS(CompositionalDataset):
     """
@@ -80,14 +80,16 @@ def _get_sql_ds(data_name: str, *, use_iid: bool):
     print(f"load dataset: {ds_dir}")
     return train, dev, test
 
-def install_sql_datasets():
+def install_sql_datasets(reg: dict = None):
+    if reg is None:
+        reg = CG_DATA_REG
     domains = ["atis", "geo", "advising", "scholar"]
     path_names = ["atis", "geography", "advising", "scholar"]
     for domain, pathname in zip(domains, path_names):
         name = f"{domain}_iid"
-        Registry._datasets[name] = partial(_get_sql_ds, pathname, use_iid=True)
+        reg[name] = partial(_get_sql_ds, pathname, use_iid=True)
         name = f"{domain}_cg"
-        Registry._datasets[name] = partial(_get_sql_ds, pathname, use_iid=False)
+        reg[name] = partial(_get_sql_ds, pathname, use_iid=False)
 
 def _get_qa_ds(data_name: str, *, use_iid: bool, grammar_file: str, sql_only: bool):
     ds_dir = join(ROOT, 'data', 'CompGen', 'sql data', data_name,
@@ -113,7 +115,7 @@ def _get_qa_ds(data_name: str, *, use_iid: bool, grammar_file: str, sql_only: bo
     print(f"load dataset: {ds_dir}")
     return train, dev, test
 
-def install_qa_datasets():
+def install_qa_datasets(reg: dict = None):
     """
     The obtained instances are
     {
@@ -138,16 +140,21 @@ def install_qa_datasets():
     grammars = [join(grammar_path, 'MySQL.lark'), join(grammar_path, 'SQLite.lark')]
     grammars.extend(join('run', f) for f in os.listdir('./run') if f.endswith('.lark'))
 
-    for domain, pathname in zip(domains, path_names):
-        Registry._datasets[f"{domain}_iid"] = partial(_get_qa_ds, pathname, use_iid=True, sql_only=False)
-        Registry._datasets[f"{domain}_cg"] = partial(_get_qa_ds, pathname, use_iid=False, sql_only=False)
+    if reg is None:
+        reg = CG_DATA_REG
 
-def install_geo_qa_datasets():
+    for domain, pathname in zip(domains, path_names):
+        reg[f"{domain}_iid"] = partial(_get_qa_ds, pathname, use_iid=True, sql_only=False)
+        reg[f"{domain}_cg"] = partial(_get_qa_ds, pathname, use_iid=False, sql_only=False)
+
+def install_geo_qa_datasets(reg: dict = None):
+    if reg is None:
+        reg = CG_DATA_REG
     domain = "geo"
     path_name = "geography"
     grammars = list(join('run', f) for f in os.listdir('./run') if f.endswith('.lark') and f.startswith('geo'))
     for g in grammars:
         tag = g[g.rfind('/') + 1:g.index('.lark')]
-        Registry._datasets[domain + '_iid.' + tag] = partial(_get_qa_ds, path_name, use_iid=True, grammar_file=g, sql_only=False)
-        Registry._datasets[domain + '_cg.' + tag] = partial(_get_qa_ds, path_name, use_iid=False, grammar_file=g, sql_only=False)
+        reg[domain + '_iid.' + tag] = partial(_get_qa_ds, path_name, use_iid=True, grammar_file=g, sql_only=False)
+        reg[domain + '_cg.' + tag] = partial(_get_qa_ds, path_name, use_iid=False, grammar_file=g, sql_only=False)
 

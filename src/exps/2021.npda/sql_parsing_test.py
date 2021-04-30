@@ -4,8 +4,9 @@ sys.path.insert(0, join('..', '..'))
 from utils.root_finder import find_root
 import lark
 
-from datasets.comp_gen_bundle import install_sql_datasets, Registry
-install_sql_datasets()
+from datasets.comp_gen_bundle import install_sql_datasets
+from trialbot.training import Registry
+install_sql_datasets(Registry._datasets)
 
 print(f"all_names: {' '.join(Registry._datasets.keys())}")
 # for dname, fn in Registry._datasets.items():

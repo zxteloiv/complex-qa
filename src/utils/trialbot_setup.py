@@ -1,5 +1,9 @@
 from typing import Mapping, Optional
 
+def install_dataset_into_registry(datasets: dict):
+    from trialbot.training import Registry
+    Registry._datasets.update(datasets)
+
 def setup(**default_args):
     """
     parse the setup and set default function as a boilerplate.

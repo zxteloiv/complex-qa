@@ -12,19 +12,32 @@ class RedisDataset(CompositionalDataset):
                  expire_sec: int = 0,
                  ):
         super().__init__(dataset)
-        host, port, db = conn
-        pool = redis.ConnectionPool(host=host, port=port, db=db)
-        self.r = redis.Redis(connection_pool=pool)
-        self.prefix = prefix if prefix.endswith('_') else prefix + '_'
         self.logger = logging.getLogger(self.__class__.__name__)
+
+        self.r = None
+        if conn is not None:
+            host, port, db = conn
+            pool = redis.ConnectionPool(host=host, port=port, db=db)
+            self.r = redis.Redis(connection_pool=pool)
+            if self.r.ping() is None:
+                self.logger.warning('specified redis server is not available, the redis dataset is used passthrough')
+                self.r = None
+
+        self.prefix = prefix if prefix.endswith('_') else prefix + '_'
         self.dataset = dataset
         self.expire_sec = expire_sec
 
     def _set(self, k, v):
+        if self.r is None:
+            return
+
         arr = pickle.dumps(v)
         self.r.set(k, arr, ex=self.expire_sec if self.expire_sec > 0 else None)
 
     def _read(self, k):
+        if self.r is None:
+            return None
+
         v = self.r.get(k)
         if v is not None:
             v = pickle.loads(v)
