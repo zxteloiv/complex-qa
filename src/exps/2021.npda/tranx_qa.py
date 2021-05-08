@@ -1,17 +1,14 @@
-from typing import Dict, List, Tuple, Callable, Any, Union
 from os.path import join, abspath, dirname
 import sys
 sys.path.insert(0, abspath(join(dirname(__file__), '..', '..')))   # up to src
-import torch
 from trialbot.training import TrialBot, Events, Registry, Updater
-from trialbot.data.iterators import RandomIterator
-from trialbot.utils.move_to_device import move_to_device
 
 import logging
 import datasets.cfq
 import datasets.cfq_translator
 import datasets.comp_gen_bundle as cg_bundle
-cg_bundle.install_geo_qa_datasets()
+# cg_bundle.install_geo_qa_datasets()
+cg_bundle.install_sql_qa_datasets()
 from utils.trialbot_setup import install_dataset_into_registry
 install_dataset_into_registry(cg_bundle.CG_DATA_REG)
 
