@@ -18,13 +18,15 @@ import utils.cfg as cfg
 from datetime import datetime as dt
 from random import sample
 
-from datasets.comp_gen_bundle import install_sql_datasets, Registry
-install_sql_datasets()
+import datasets.comp_gen_bundle as cg_bundle
+cg_bundle.install_sql_datasets()
+from utils.trialbot_setup import install_dataset_into_registry
+install_dataset_into_registry(cg_bundle.CG_DATA_REG)
 
-def print_dataset_statistics():
-    print(f"all_names: {' '.join(Registry._datasets.keys())}")
-    for name in filter(lambda s: 'cg' in s, Registry._datasets.keys()):
-        train, dev, test = Registry.get_dataset(name)
+def print_dataset_statistics(reg: dict):
+    print(f"all_names: {' '.join(reg.keys())}")
+    for name in filter(lambda s: 'cg' in s, reg.keys()):
+        train, dev, test = reg[name]()
         print(f"{name}: train: {len(train)}, dev: {len(dev)}, test: {len(test)}")
 
 def compact_hash(t: Union[TREE, TOKEN]):
@@ -484,8 +486,8 @@ def cfq_dataset_mining():
 
 def main():
     # sql part
-    print_dataset_statistics()
-    sql_data_mining(prefix='./run/')
+    print_dataset_statistics(cg_bundle.CG_DATA_REG)
+    sql_data_mining(prefix='./run-iid/')
 
     # sparql part
     # cfq_dataset_mining()

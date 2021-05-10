@@ -32,6 +32,7 @@ class BaseSeq2Seq(torch.nn.Module):
                  padding_index: int = 0,
                  decoder_init_strategy: str = "forward_all",
                  training_average: str = "batch",
+                 tanh_act_when_attn_is_summed: bool = False
                  ):
         super().__init__()
         self.vocab = vocab
@@ -65,6 +66,7 @@ class BaseSeq2Seq(torch.nn.Module):
         self._padding_index = padding_index
         self._strategy = decoder_init_strategy
         self._training_avg = training_average
+        self._tanh_attn = tanh_act_when_attn_is_summed
 
         self.bleu = BLEU(exclude_indices={padding_index, self._start_id, self._eos_id})
         self.ppl = Perplexity()
@@ -282,6 +284,8 @@ class BaseSeq2Seq(torch.nn.Module):
             proj_input = filter_cat(inputs, dim=-1)
         else:
             proj_input = filter_sum(inputs)
+            if self._tanh_attn:
+                proj_input = proj_input.tanh()
 
         proj_input = self._dropout(proj_input)
         step_logit = self._output_projection(proj_input)
@@ -374,6 +378,7 @@ class BaseSeq2Seq(torch.nn.Module):
             padding_index=0,
             decoder_init_strategy=p.decoder_init_strategy,
             training_average=getattr(p, "training_average", "batch"),
+            tanh_act_when_attn_is_summed=getattr(p, 'tanh_act_for_unconcat_attn', False),
         )
         return model
 
