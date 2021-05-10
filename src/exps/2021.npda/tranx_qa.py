@@ -155,7 +155,7 @@ def common_sql_tranx():
     p.src_namespace = 'sent'
     p.tgt_namespace = 'rule_seq'
     p.enc_attn = "bilinear"
-    p.dec_hist_attn = "dot_product"
+    p.dec_hist_attn = "none"
     p.concat_attn_to_dec_input = False
     p.encoder = "bilstm"
     p.num_enc_layers = 2
