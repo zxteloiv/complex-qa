@@ -1,4 +1,6 @@
 from typing import Literal, List, Dict, Union, Generator, Tuple, Any, Optional, Mapping, Callable, Set
+import logging
+logging.basicConfig(level=logging.INFO)
 import sys
 import os
 from os.path import join
@@ -7,8 +9,6 @@ import pickle
 from utils.root_finder import find_root
 import lark
 TREE, TOKEN = lark.Tree, lark.Token
-import logging
-logging.basicConfig(level=logging.INFO)
 from itertools import chain
 from collections import Counter, OrderedDict, defaultdict
 import numpy as np
@@ -475,22 +475,25 @@ def sql_data_mining(prefix=""):
 
 def cfq_dataset_mining():
     import datasets.cfq as cfq_data
-    # train, dev, test = cfq_data.cfq_preparsed_treebase(join(cfq_data.CFQ_PATH, 'splits', 'mcd1.json'), conn=None)
-    # train_tree = [obj['sparqlPatternModEntities_tree'] for obj in train]
-    # dev_tree = [obj['sparqlPatternModEntities_tree'] for obj in dev]
-    # miner = GreedyIdiomMiner(train_tree, dev_tree, 'cfq_mcd1', freq_lower_bound=3, data_prefix='run/', sample_percentage=.2)
+    train, dev, test = cfq_data.cfq_preparsed_treebase(join(cfq_data.CFQ_PATH, 'splits', 'mcd1.json'))
+    train_tree = [obj['sparqlPatternModEntities_tree'] for obj in train]
+    dev_tree = [obj['sparqlPatternModEntities_tree'] for obj in dev]
+    miner = GreedyIdiomMiner(train_tree, dev_tree, 'cfq_mcd1', freq_lower_bound=3, data_prefix='run/', sample_percentage=.2)
     logging.debug(f"loading pickled cfq miner state .. {dt.now().strftime('%H%M%S')}")
-    miner = pickle.load(open('run/cfq_mcd1.544.miner_state', 'rb'))
-    # miner.mine()
+    # miner = pickle.load(open('run/cfq_mcd1.544.miner_state', 'rb'))
+    miner.mine()
     miner.evaluation()
 
 def main():
-    # sql part
-    print_dataset_statistics(cg_bundle.CG_DATA_REG)
-    sql_data_mining(prefix='./run-iid/')
-
-    # sparql part
-    # cfq_dataset_mining()
+    if len(sys.argv) > 1 and sys.argv[1].lower() == 'cfq':
+        logging.info('run mining for cfq...')
+        # sparql part
+        cfq_dataset_mining()
+    else:
+        logging.info('run mining for sql...')
+        # sql part
+        print_dataset_statistics(cg_bundle.CG_DATA_REG)
+        sql_data_mining(prefix='./run/')
 
 if __name__ == '__main__':
     main()
