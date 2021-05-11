@@ -168,16 +168,27 @@ def common_sql_tranx():
     p.tied_decoder_embedding = True
     return p
 
-from trialbot.utils.grid_search_helper import import_grid_search_parameters
-import_grid_search_parameters(
-    grid_conf={
-        "tied_decoder_embedding": [False],
-        "hidden_sz": [128, 256],
-        "emb_sz": [128, 256],
-    },
-    base_param_fn=common_sql_tranx,
-    name_prefix="hp_tuning_",
-)
+@Registry.hparamset()
+def hp_tuning_0():
+    p = common_sql_tranx()
+    p.tied_decoder_embedding = False
+    p.hidden_sz = 256
+    return p
+
+@Registry.hparamset()
+def hp_tuning_1():
+    p = common_sql_tranx()
+    p.tied_decoder_embedding = False
+    p.emb_sz = 256
+    return p
+
+@Registry.hparamset()
+def hp_tuning_2():
+    p = common_sql_tranx()
+    p.tied_decoder_embedding = False
+    p.hidden_sz = 256
+    p.emb_sz = 256
+    return p
 
 if __name__ == '__main__':
     main()

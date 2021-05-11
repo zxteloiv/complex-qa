@@ -104,7 +104,7 @@ def _get_qa_ds(data_name: str, *, use_iid: bool, grammar_file: str, sql_only: bo
                 parse_keys=['sql'],
                 dataset=FlattenSeqDS(JsonDataset(join(ds_dir, filename)), sql_only=sql_only)
             ),
-            conn=('localhost', 6379, 1),
+            conn=('localhost', 6379, 2),
             prefix=split_tag + ('_iid_' if use_iid else '_cg_' ) + grammar_tag,
         )
         return ds
