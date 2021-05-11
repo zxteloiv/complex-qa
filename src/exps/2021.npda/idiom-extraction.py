@@ -1,6 +1,6 @@
 from typing import Literal, List, Dict, Union, Generator, Tuple, Any, Optional, Mapping, Callable, Set
 import logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG)
 import sys
 import os
 from os.path import join
@@ -231,7 +231,7 @@ class GreedyIdiomMiner:
                 if self.approx < 1:
                     if k > 0 and freq < len(self.trees) * self.approx:
                         self.approx += .1
-                    sample_num = int(len(self.trees) * self.approx)
+                    sample_num = min(int(len(self.trees) * self.approx), len(self.trees))
                     d2tree_freq_table = self.get_d2tree_freq_table(sample(self.trees, sample_num))
                 else:
                     d2tree_freq_table = self.get_d2tree_freq_table(self.trees)
@@ -479,7 +479,7 @@ def cfq_dataset_mining():
     train_tree = [obj['sparqlPatternModEntities_tree'] for obj in train]
     dev_tree = [obj['sparqlPatternModEntities_tree'] for obj in dev]
     miner = GreedyIdiomMiner(train_tree, dev_tree, 'cfq_mcd1', freq_lower_bound=3, data_prefix='run/', sample_percentage=.2)
-    logging.debug(f"loading pickled cfq miner state .. {dt.now().strftime('%H%M%S')}")
+    # logging.debug(f"loading pickled cfq miner state .. {dt.now().strftime('%H%M%S')}")
     # miner = pickle.load(open('run/cfq_mcd1.544.miner_state', 'rb'))
     miner.mine()
     miner.evaluation()
