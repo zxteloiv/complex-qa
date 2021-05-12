@@ -13,7 +13,7 @@ class SQLSeq(FieldAwareTranslator):
         ])
 
 @Registry.translator('cg_sql_tranx')
-class TranXTranslator(FieldAwareTranslator):
+class CGSQLTranXTranslator(FieldAwareTranslator):
     def __init__(self):
         super().__init__(field_list=[
             SeqField(source_key='sent', renamed_key='source_tokens', add_start_end_toks=False,),
@@ -39,7 +39,7 @@ class TranXTranslator(FieldAwareTranslator):
 # UNIFIED_TREE_NS = ('symbol', 'exact_token')
 #
 # @Registry.translator('cg_sql_pda')
-# class CFQFlatDerivations(FieldAwareTranslator):
+# class FlatDerivations(FieldAwareTranslator):
 #     def __init__(self, max_derivation_symbols: int = 11):
 #         super().__init__(field_list=[
 #             SeqField(source_key='sent', renamed_key='source_tokens', add_start_end_toks=False,),

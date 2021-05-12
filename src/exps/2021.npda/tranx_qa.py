@@ -125,21 +125,6 @@ def cfq_mod_ent_moderate_tranx():
     return p
 
 @Registry.hparamset()
-def cfq_mod_ent_moderate_tranx_scaled():
-    p = cfq_mod_ent_tranx()
-    p.TRAINING_LIMIT = 10  # in num of epochs
-    p.OPTIM = "adabelief"
-    p.WEIGHT_DECAY = .1
-    p.ADAM_BETAS = (0.9, 0.98)
-    p.optim_kwargs = {"eps": 1e-16}
-    p.emb_sz = 128
-    p.hidden_sz = 128
-    p.dec_hist_attn = "dot_product"
-
-    p.training_average = 'batch'
-    return p
-
-@Registry.hparamset()
 def common_sql_tranx():
     from trialbot.training.hparamset import HyperParamSet
     from trialbot.utils.root_finder import find_root
@@ -169,25 +154,14 @@ def common_sql_tranx():
     return p
 
 @Registry.hparamset()
-def hp_tuning_0():
+def scholar_common():
     p = common_sql_tranx()
+    p.TRAINING_LIMIT = 150
     p.tied_decoder_embedding = False
-    p.hidden_sz = 256
-    return p
-
-@Registry.hparamset()
-def hp_tuning_1():
-    p = common_sql_tranx()
-    p.tied_decoder_embedding = False
-    p.emb_sz = 256
-    return p
-
-@Registry.hparamset()
-def hp_tuning_2():
-    p = common_sql_tranx()
-    p.tied_decoder_embedding = False
-    p.hidden_sz = 256
-    p.emb_sz = 256
+    p.num_enc_layers = 1
+    p.num_dec_layers = 1
+    p.emb_sz = 384
+    p.hidden_sz = 384
     return p
 
 if __name__ == '__main__':
