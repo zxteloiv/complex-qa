@@ -5,10 +5,16 @@ cg_bundle.install_sql_qa_datasets()
 
 def get_dataset():
     tags = [
+        "atis_iid.atis_cg.sqlite-parse.30",
+        "atis_cg.atis_cg.sqlite-parse.30",
         "atis_iid.atis_cg.sqlite-parse.50",
         "atis_cg.atis_cg.sqlite-parse.50",
         "atis_iid.atis_cg.mysql-parse.70",
         "atis_cg.atis_cg.mysql-parse.70",
+        "advising_iid.advising_cg.sqlite-parse.30",
+        "advising_cg.advising_cg.sqlite-parse.30",
+        "advising_iid.advising_cg.mysql-parse.50",
+        "advising_cg.advising_cg.mysql-parse.50",
         "advising_iid.advising_cg.sqlite-parse.40",
         "advising_cg.advising_cg.sqlite-parse.40",
         "advising_iid.advising_cg.mysql-parse.60",

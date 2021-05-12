@@ -1,4 +1,4 @@
-from os.path import join, abspath, dirname
+from os.path import join, abspath, dirname, expanduser
 import sys
 sys.path.insert(0, abspath(join(dirname(__file__), '..', '..')))   # up to src
 from trialbot.training import TrialBot, Events, Registry, Updater
@@ -28,6 +28,18 @@ def get_tranx_updater(bot: TrialBot):
     iterator = MaybeRandomIterator(bot.train_set, p.batch_sz, bot.translator, shuffle=shuffle_iter, repeat=repeat_iter)
     if args.debug and args.skip:
         iterator.reset(args.skip)
+
+    lr_scheduler_kwargs = getattr(p, 'lr_scheduler_kwargs', None)
+    if lr_scheduler_kwargs is not None:
+        from allennlp.training.learning_rate_schedulers import NoamLR
+        lr_scheduler = NoamLR(optimizer=optim, **lr_scheduler_kwargs)
+        bot.scheduler = lr_scheduler
+        logger.info(f'the scheduler enabled: {lr_scheduler}')
+        def _sched_step(bot: TrialBot):
+            bot.scheduler.step_batch()
+            if bot.state.iteration % 100 == 0:
+                logger.info(f"update lr to {bot.scheduler.get_values()}")
+        bot.add_event_handler(Events.ITERATION_COMPLETED, _sched_step, 100)
 
     from trialbot.training.updater import TrainingUpdater
     updater = TrainingUpdater(model, iterator, optim, device, dry_run)
@@ -162,6 +174,65 @@ def scholar_common():
     p.num_dec_layers = 1
     p.emb_sz = 384
     p.hidden_sz = 384
+    return p
+
+@Registry.hparamset()
+def atis_hp_1():
+    p = common_sql_tranx()
+    p.TRAINING_LIMIT = 30
+    p.tied_decoder_embedding = False
+    p.num_enc_layers = 1
+    p.num_dec_layers = 1
+    p.emb_sz = 64
+    p.hidden_sz = 384
+    return p
+
+@Registry.hparamset()
+def atis_hp_2():
+    p = common_sql_tranx()
+    p.TRAINING_LIMIT = 30
+    p.tied_decoder_embedding = True
+    p.num_enc_layers = 4
+    p.num_dec_layers = 4
+    p.emb_sz = 384
+    p.hidden_sz = 384
+    return p
+
+@Registry.hparamset()
+def atis_hp_3():
+    p = common_sql_tranx()
+    p.TRAINING_LIMIT = 30
+    p.tied_decoder_embedding = False
+    p.num_enc_layers = 4
+    p.num_dec_layers = 4
+    p.emb_sz = 64
+    p.hidden_sz = 384
+    return p
+
+@Registry.hparamset()
+def atis_hp_4():
+    # the same as seq2seq in Oren et al. except the glove embeddings
+    p = common_sql_tranx()
+    p.TRAINING_LIMIT = 50
+    p.tied_decoder_embedding = False
+    p.num_enc_layers = 1
+    p.num_dec_layers = 1
+    p.emb_sz = 100
+    p.hidden_sz = 300
+    p.lr_scheduler_kwargs = {"model_size": 600, "warmup_steps": 50} # noam lr_scheduler
+    return p
+
+@Registry.hparamset()
+def atis_hp_5():
+    # the same as seq2seq in Oren et al. except the lr scheduler
+    p = common_sql_tranx()
+    p.TRAINING_LIMIT = 50
+    p.tied_decoder_embedding = False
+    p.num_enc_layers = 1
+    p.num_dec_layers = 1
+    p.emb_sz = 100
+    p.hidden_sz = 300
+    p.src_emb_pretrained_file = expanduser('~/.glove/glove.6B.100d.txt.gz')
     return p
 
 if __name__ == '__main__':
