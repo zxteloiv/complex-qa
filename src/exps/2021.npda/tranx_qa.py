@@ -73,7 +73,7 @@ def main():
         bot.add_event_handler(Events.EPOCH_STARTED, collect_garbage, 95)
         bot.add_event_handler(Events.ITERATION_COMPLETED, end_with_nan_loss, 100)
         bot.add_event_handler(Events.ITERATION_COMPLETED, collect_garbage, 95)
-        bot.add_event_handler(Events.EPOCH_COMPLETED, evaluation_on_dev_every_epoch, 90)
+        bot.add_event_handler(Events.EPOCH_COMPLETED, evaluation_on_dev_every_epoch, 90, rewrite_eval_hparams={"batch_sz": 32})
         bot.add_event_handler(Events.EPOCH_COMPLETED, collect_garbage, 95)
         bot.add_event_handler(Events.EPOCH_COMPLETED, every_epoch_model_saver, 100)
 
@@ -213,41 +213,47 @@ def atis_hp_3():
 def atis_hp_4():
     # the same as seq2seq in Oren et al. except the glove embeddings
     p = common_sql_tranx()
-    p.TRAINING_LIMIT = 50
+    p.TRAINING_LIMIT = 60
     p.tied_decoder_embedding = False
     p.num_enc_layers = 1
     p.num_dec_layers = 1
     p.emb_sz = 100
     p.hidden_sz = 300
     p.lr_scheduler_kwargs = {"model_size": 600, "warmup_steps": 50} # noam lr_scheduler
+    p.WEIGHT_DECAY = 0.
     return p
 
 @Registry.hparamset()
 def atis_hp_5():
     # the same as seq2seq in Oren et al. except the lr scheduler
     p = common_sql_tranx()
-    p.TRAINING_LIMIT = 50
+    p.TRAINING_LIMIT = 60
     p.tied_decoder_embedding = False
     p.num_enc_layers = 1
     p.num_dec_layers = 1
     p.emb_sz = 100
     p.hidden_sz = 300
     p.src_emb_pretrained_file = expanduser('~/.glove/glove.6B.100d.txt.gz')
+    p.WEIGHT_DECAY = 0.
     return p
 
 @Registry.hparamset()
 def atis_hp_6():
     # the same as seq2seq in Oren et al. except the lr scheduler
     p = common_sql_tranx()
-    p.TRAINING_LIMIT = 150
+    p.TRAINING_LIMIT = 60
     p.tied_decoder_embedding = False
     p.num_enc_layers = 1
     p.num_dec_layers = 1
     p.emb_sz = 100
     p.hidden_sz = 300
     p.src_emb_pretrained_file = expanduser('~/.glove/glove.6B.100d.txt.gz')
-    p.lr_scheduler_kwargs = {"model_size": 600, "warmup_steps": 800} # noam lr_scheduler
+    p.lr_scheduler_kwargs = {"model_size": 400, "warmup_steps": 800} # noam lr_scheduler
     p.batch_sz = 1
+    p.OPTIM = 'adam'
+    p.WEIGHT_DECAY = 0.
+    p.ADAM_LR = 1e-3
+
     return p
 
 if __name__ == '__main__':

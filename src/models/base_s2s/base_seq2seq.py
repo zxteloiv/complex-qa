@@ -322,7 +322,7 @@ class BaseSeq2Seq(torch.nn.Module):
         from ..modules.attention_wrapper import get_wrapped_attention
 
         emb_sz = p.emb_sz
-        src_pretrain_file = getattr(p, 'src_emb_pretrained_file')
+        src_pretrain_file = getattr(p, 'src_emb_pretrained_file', None)
         if src_pretrain_file is None:
             source_embedding = nn.Embedding(num_embeddings=vocab.get_vocab_size(p.src_namespace), embedding_dim=emb_sz)
         else:
