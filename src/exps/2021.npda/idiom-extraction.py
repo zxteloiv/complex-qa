@@ -283,8 +283,8 @@ class GreedyIdiomMiner:
             "trees_stat": tree_stats,
         }
 
-    def export_kth_rules(self, k, lex_in, start: cfg.NonTerminal):
-        g = self._restore_grammar(self.stat_by_iter[k][0]['rule_dist'])
+    def export_kth_rules(self, k, lex_in, start: cfg.NonTerminal, export_terminals: bool = False, excluded_terminals = None):
+        g, terminal_vals = self._restore_grammar(self.stat_by_iter[k][0]['rule_dist'])
         # we do not remove the unit rules since the extraction algorithm will remove them during itertaions
         g = cfg.remove_eps_rules(g)
         g = cfg.remove_useless_rules(g, start)
@@ -296,10 +296,20 @@ class GreedyIdiomMiner:
                   ('\n' + (' ' * len(lhs.name)  )+ '| ').join(' '.join(t.name for t in rhs) for rhs in rhs_list),
                   file=grammar_text)
 
+        if export_terminals:
+            for tok, vals in terminal_vals.items():
+                if tok not in excluded_terminals and tok != self.EPS_RHS[0].type:
+                    print(f"{tok}: " + ('\n' + (' ' * len(tok)) + '| ').join(
+                        f'"{val}"i' if any(letter in val.lower() for letter in 'abcdefghijklmnopqrstuvwxyz')
+                        else f'"{val}"'
+                        for val in vals
+                    ), file=grammar_text)
+
         with open(self.prefix + f"{self.name}.{k}.lark", 'w') as fout:
             fout.write(grammar_text.getvalue())
 
-    def _restore_grammar(self, counter: Counter) -> cfg.T_CFG:
+    def _restore_grammar(self, counter: Counter) -> Tuple[cfg.T_CFG, dict]:
+        terminal_vals = defaultdict(set)
         rule_lookup_table: Dict[int, TREE] = dict((r['id'], r['tree']) for hash, r in self.rule_to_id.items())
         g: cfg.T_CFG = defaultdict(list)
         def _transform(children: List[Union[TREE, TOKEN]]) -> list:
@@ -309,13 +319,14 @@ class GreedyIdiomMiner:
                     rhs.append(cfg.NonTerminal(c.data))
                 else:
                     rhs.append(cfg.Terminal(c.type))
+                    terminal_vals[c.type].add(c.value)
             return rhs
         for (nt, rid), count in counter.items():
             if count == 0:
                 continue
             tree = rule_lookup_table[rid]
             g[cfg.NonTerminal(tree.data)].append(_transform(tree.children))
-        return g
+        return g, terminal_vals
 
     def evaluation(self):
         stats: List[Dict[str, Dict[str, float]]] = []
@@ -475,14 +486,21 @@ def sql_data_mining(prefix=""):
 
 def cfq_dataset_mining():
     import datasets.cfq as cfq_data
-    train, dev, test = cfq_data.cfq_preparsed_treebase(join(cfq_data.CFQ_PATH, 'splits', 'mcd1.json'))
-    train_tree = [obj['sparqlPatternModEntities_tree'] for obj in train]
-    dev_tree = [obj['sparqlPatternModEntities_tree'] for obj in dev]
-    miner = GreedyIdiomMiner(train_tree, dev_tree, 'cfq_mcd1', freq_lower_bound=3, data_prefix='run/', sample_percentage=.2)
-    # logging.debug(f"loading pickled cfq miner state .. {dt.now().strftime('%H%M%S')}")
-    # miner = pickle.load(open('run/cfq_mcd1.544.miner_state', 'rb'))
-    miner.mine()
-    miner.evaluation()
+    # train, dev, test = cfq_data.cfq_preparsed_treebase(join(cfq_data.CFQ_PATH, 'splits', 'mcd1.json'))
+    # train_tree = [obj['sparqlPatternModEntities_tree'] for obj in train]
+    # dev_tree = [obj['sparqlPatternModEntities_tree'] for obj in dev]
+    # miner = GreedyIdiomMiner(train_tree, dev_tree, 'cfq_mcd1', freq_lower_bound=3, data_prefix='run/', sample_percentage=.2)
+    logging.debug(f"loading pickled cfq miner state .. {dt.now().strftime('%H%M%S')}")
+    miner = pickle.load(open('run/cfq_mcd1.999.miner_state', 'rb'))
+    # miner.mine()
+    # miner.evaluation()
+    lex_terminals = "IRIREF PNAME_NS PNAME_LN BLANK_NODE_LABEL VAR1 VAR2 LANGTAG INTEGER DECIMAL DOUBLE " + \
+                    "INTEGER_POSITIVE DECIMAL_POSITIVE DOUBLE_POSITIVE INTEGER_NEGATIVE DECIMAL_NEGATIVE " + \
+                    "DOUBLE_NEGATIVE EXPONENT STRING_LITERAL1 STRING_LITERAL2 STRING_LITERAL_LONG1 " + \
+                    "STRING_LITERAL_LONG2 ECHAR NIL WS ANON PN_CHARS_BASE PN_CHARS_U VARNAME PN_CHARS " + \
+                    "PN_PREFIX PN_LOCAL PLX PERCENT HEX PN_LOCAL_ESC"
+    miner.export_kth_rules(70, 'sparql.lark.lex-in', cfg.NonTerminal('queryunit'),
+                           export_terminals=True, excluded_terminals=set(lex_terminals.split()))
 
 def main():
     if len(sys.argv) > 1 and sys.argv[1].lower() == 'cfq':
