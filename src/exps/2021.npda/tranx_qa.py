@@ -177,43 +177,9 @@ def scholar_common():
     return p
 
 @Registry.hparamset()
-def atis_hp_1():
+def atis_common():
     p = common_sql_tranx()
-    p.TRAINING_LIMIT = 30
-    p.tied_decoder_embedding = False
-    p.num_enc_layers = 1
-    p.num_dec_layers = 1
-    p.emb_sz = 64
-    p.hidden_sz = 384
-    return p
-
-@Registry.hparamset()
-def atis_hp_2():
-    p = common_sql_tranx()
-    p.TRAINING_LIMIT = 30
-    p.tied_decoder_embedding = True
-    p.num_enc_layers = 4
-    p.num_dec_layers = 4
-    p.emb_sz = 384
-    p.hidden_sz = 384
-    return p
-
-@Registry.hparamset()
-def atis_hp_3():
-    p = common_sql_tranx()
-    p.TRAINING_LIMIT = 30
-    p.tied_decoder_embedding = False
-    p.num_enc_layers = 4
-    p.num_dec_layers = 4
-    p.emb_sz = 64
-    p.hidden_sz = 384
-    return p
-
-@Registry.hparamset()
-def atis_hp_4():
-    # the same as seq2seq in Oren et al. except the glove embeddings
-    p = common_sql_tranx()
-    p.TRAINING_LIMIT = 60
+    p.TRAINING_LIMIT = 150
     p.tied_decoder_embedding = False
     p.num_enc_layers = 1
     p.num_dec_layers = 1
@@ -224,36 +190,8 @@ def atis_hp_4():
     return p
 
 @Registry.hparamset()
-def atis_hp_5():
-    # the same as seq2seq in Oren et al. except the lr scheduler
-    p = common_sql_tranx()
-    p.TRAINING_LIMIT = 60
-    p.tied_decoder_embedding = False
-    p.num_enc_layers = 1
-    p.num_dec_layers = 1
-    p.emb_sz = 100
-    p.hidden_sz = 300
-    p.src_emb_pretrained_file = expanduser('~/.glove/glove.6B.100d.txt.gz')
-    p.WEIGHT_DECAY = 0.
-    return p
-
-@Registry.hparamset()
-def atis_hp_6():
-    # the same as seq2seq in Oren et al. except the lr scheduler
-    p = common_sql_tranx()
-    p.TRAINING_LIMIT = 60
-    p.tied_decoder_embedding = False
-    p.num_enc_layers = 1
-    p.num_dec_layers = 1
-    p.emb_sz = 100
-    p.hidden_sz = 300
-    p.src_emb_pretrained_file = expanduser('~/.glove/glove.6B.100d.txt.gz')
-    p.lr_scheduler_kwargs = {"model_size": 400, "warmup_steps": 800} # noam lr_scheduler
-    p.batch_sz = 1
-    p.OPTIM = 'adam'
-    p.WEIGHT_DECAY = 0.
-    p.ADAM_LR = 1e-3
-
+def advising_common():
+    p = atis_common()
     return p
 
 if __name__ == '__main__':
