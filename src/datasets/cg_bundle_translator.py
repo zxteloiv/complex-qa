@@ -2,7 +2,7 @@ from typing import List, Mapping, Generator, Tuple, Optional, Any, Literal, Iter
 from trialbot.training import Registry
 from .field import FieldAwareTranslator
 from .seq_field import SeqField
-from .cg_bundle_fields import TerminalRuleSeqField
+from .cg_bundle_fields import TerminalRuleSeqField, ProcessedSentField
 
 @Registry.translator('sql_s2s')
 class SQLSeq(FieldAwareTranslator):
@@ -16,7 +16,7 @@ class SQLSeq(FieldAwareTranslator):
 class CGSQLTranXTranslator(FieldAwareTranslator):
     def __init__(self):
         super().__init__(field_list=[
-            SeqField(source_key='sent', renamed_key='source_tokens', add_start_end_toks=False,),
+            ProcessedSentField(source_key='sent', renamed_key='source_tokens', add_start_end_toks=False,),
             TerminalRuleSeqField(source_key='sql_tree', renamed_key="target_tokens", namespace="rule_seq",),
         ])
 

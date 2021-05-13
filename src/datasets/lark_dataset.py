@@ -66,6 +66,8 @@ class LarkParserDatasetWrapper(Dataset):
         for key in self.keys:
             try:
                 t = self.parser.parse(example[key])
+            except KeyboardInterrupt:
+                raise SystemExit("Received Keyboard Interupt and Exit now.")
             except:
                 self.logger.warning(f'Failed to parse the key {key} for the example {str(example)}, set as None')
                 t = None

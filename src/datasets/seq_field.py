@@ -7,16 +7,19 @@ from itertools import product
 from torch.nn.utils.rnn import pad_sequence
 
 class SeqField(Field):
+    def get_sent(self, example):
+        return example.get(self.source_key)
+
     def generate_namespace_tokens(self, example) -> Generator[Tuple[str, str], None, None]:
         if self.add_start_end_toks:
             yield from product([self.ns], [START_SYMBOL, END_SYMBOL])
 
-        seq_raw = example.get(self.source_key)
+        seq_raw = self.get_sent(example)
         if seq_raw is not None:
             yield from product([self.ns], (x.lower() if self.lower_case else x for x in self.split(seq_raw)))
 
     def to_tensor(self, example) -> Mapping[str, torch.Tensor]:
-        seq_raw = example.get(self.source_key)
+        seq_raw = self.get_sent(example)
         if seq_raw is None:
             return {self.renamed_key: torch.tensor([self.padding])}
 
