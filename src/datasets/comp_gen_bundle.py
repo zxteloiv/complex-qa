@@ -94,18 +94,20 @@ def install_sql_datasets(reg: dict = None):
 def _get_qa_ds(data_name: str, *, use_iid: bool, grammar_file: str, sql_only: bool):
     ds_dir = join(ROOT, 'data', 'CompGen', 'sql data', data_name,
                   'new_question_split' if use_iid else 'schema_full_split')
-    grammar_tag = grammar_file[grammar_file.rfind('/') + 1:grammar_file.index('.lark')]
+    grammar_tag = grammar_file[grammar_file.rfind('_') + 1:grammar_file.index('.lark')]
+    iid_tag = 'iid' if use_iid else 'cg'
+
     def _build_ds(filename: str, split_tag: str):
         nonlocal ds_dir, grammar_tag
         ds = RedisDataset(
             dataset=LarkParserDatasetWrapper(
                 grammar_filename=grammar_file,
-                startpoint='parse' if 'sqlite' in grammar_file else 'query',
+                startpoint='parse' if 'sqlite' in grammar_file.lower() else 'query',
                 parse_keys=['sql'],
                 dataset=FlattenSeqDS(JsonDataset(join(ds_dir, filename)), sql_only=sql_only)
             ),
             conn=('localhost', 6379, 2),
-            prefix=split_tag + ('_iid_' if use_iid else '_cg_' ) + grammar_tag,
+            prefix=f"{split_tag}.{iid_tag}.{data_name}.{grammar_tag}_",
         )
         return ds
 
@@ -137,15 +139,18 @@ def install_qa_datasets(reg: dict = None):
     domains = ["atis", "geo", "advising", "scholar"]
     path_names = ["atis", "geography", "advising", "scholar"]
     grammar_path = join('..', '..', 'statics', 'grammar')
-    grammars = [join(grammar_path, 'MySQL.lark'), join(grammar_path, 'SQLite.lark')]
 
     if reg is None:
         reg = CG_DATA_REG
 
-    for domain, pathname, g in zip(domains, path_names, grammars):
-        tag = g[g.rfind('/') + 1:g.index('.lark')].lower()
-        reg[f"{domain}_iid.{tag}"] = partial(_get_qa_ds, pathname, use_iid=True, sql_only=False, grammar_file=g)
-        reg[f"{domain}_cg.{tag}"] = partial(_get_qa_ds, pathname, use_iid=False, sql_only=False, grammar_file=g)
+    for domain, pathname in zip(domains, path_names):
+        grammars = [join(grammar_path, 'MySQL.lark'), join(grammar_path, 'SQLite.lark')]
+        for g in grammars:
+            tag = g[g.rfind('/') + 1:g.index('.lark')].lower()
+            reg[f"{domain}_iid.{tag}"] = partial(_get_qa_ds, pathname, use_iid=True, sql_only=False, grammar_file=g)
+            print(f"registered {domain}_iid.{tag} lazily")
+            reg[f"{domain}_cg.{tag}"] = partial(_get_qa_ds, pathname, use_iid=False, sql_only=False, grammar_file=g)
+            print(f"registered {domain}_cg.{tag} lazily")
 
 def install_sql_qa_datasets(reg: dict = None):
     if reg is None:
@@ -155,18 +160,9 @@ def install_sql_qa_datasets(reg: dict = None):
     for domain, path_name in zip(domains, path_names):
         grammars = list(join('run', f) for f in os.listdir('./run') if f.endswith('.lark') and f.startswith(domain))
         for g in grammars:
-            tag = g[g.rfind('/') + 1:g.index('.lark')]
+            tag = g[g.rfind('/') + 1:g.index('.lark')].lower()
             reg[domain + '_iid.' + tag] = partial(_get_qa_ds, path_name, use_iid=True, grammar_file=g, sql_only=False)
+            print(f"registered {domain}_iid.{tag} lazily")
             reg[domain + '_cg.' + tag] = partial(_get_qa_ds, path_name, use_iid=False, grammar_file=g, sql_only=False)
-
-def install_geo_qa_datasets(reg: dict = None):
-    if reg is None:
-        reg = CG_DATA_REG
-    domain = "geo"
-    path_name = "geography"
-    grammars = list(join('run', f) for f in os.listdir('./run') if f.endswith('.lark') and f.startswith('geo'))
-    for g in grammars:
-        tag = g[g.rfind('/') + 1:g.index('.lark')]
-        reg[domain + '_iid.' + tag] = partial(_get_qa_ds, path_name, use_iid=True, grammar_file=g, sql_only=False)
-        reg[domain + '_cg.' + tag] = partial(_get_qa_ds, path_name, use_iid=False, grammar_file=g, sql_only=False)
+            print(f"registered {domain}_cg.{tag} lazily")
 

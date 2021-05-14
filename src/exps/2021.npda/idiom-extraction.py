@@ -299,6 +299,8 @@ class GreedyIdiomMiner:
         if export_terminals:
             for tok, vals in terminal_vals.items():
                 if tok not in excluded_terminals and tok != self.EPS_RHS[0].type:
+                    if tok.startswith('_'):
+                        tok = 'P' + tok
                     print(f"{tok}: " + ('\n' + (' ' * len(tok)) + '| ').join(
                         f'"{val}"i' if any(letter in val.lower() for letter in 'abcdefghijklmnopqrstuvwxyz')
                         else f'"{val}"'

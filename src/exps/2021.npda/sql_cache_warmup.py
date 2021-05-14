@@ -2,6 +2,7 @@ import sys
 sys.path.insert(0, '../..')
 import datasets.comp_gen_bundle as cg_bundle
 cg_bundle.install_sql_qa_datasets()
+cg_bundle.install_qa_datasets()
 
 def get_dataset():
     tags = [
@@ -17,6 +18,22 @@ def get_dataset():
         "scholar_cg.scholar_cg.sqlite-parse.20",
         "scholar_iid.scholar_cg.mysql-parse.40",
         "scholar_cg.scholar_cg.mysql-parse.40",
+        "atis_iid.sqlite",
+        "atis_cg.sqlite",
+        "geo_iid.sqlite",
+        "geo_cg.sqlite",
+        "advising_iid.sqlite",
+        "advising_cg.sqlite",
+        "scholar_iid.sqlite",
+        "scholar_cg.sqlite",
+        "atis_iid.mysql",
+        "atis_cg.mysql",
+        "geo_iid.mysql",
+        "geo_cg.mysql",
+        "advising_iid.mysql",
+        "advising_cg.mysql",
+        "scholar_iid.mysql",
+        "scholar_cg.mysql",
     ]
     for ds_tag in tags:
         print(ds_tag)

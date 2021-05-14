@@ -1,8 +1,8 @@
 from typing import Optional
-from trialbot.training import Registry
 from trialbot.data.datasets.jsonl_dataset import JsonLDataset
 from .lark_dataset import LarkGrammarDataset, LarkParserDatasetWrapper
 from .pickle_dataset import PickleDataset
+from .redis_dataset import RedisDataset
 from trialbot.data.datasets.index_dataset import IndexDataset
 from utils.root_finder import find_root
 import json
@@ -11,80 +11,111 @@ from os.path import join
 ROOT = find_root()
 CFQ_PATH = join(ROOT, 'data', 'cfq')
 GRAMMAR_PATH = join(ROOT, 'src', 'statics', 'grammar')
+NEW_GRAMMAR = join('run', 'cfq_mcd1.70.lark')
 
-def cfq_filebase(split_filename):
-    store = JsonLDataset(join(CFQ_PATH, 'dataset_slim.jsonl.gz'))
-    all_idx = json.load(open(split_filename))
-    split_idx = list(map(all_idx.get, ['trainIdxs', 'devIdxs', 'testIdxs']))
-    return tuple(IndexDataset(store, ds) for ds in split_idx)
+REDIS_CONN_C = ('localhost', 6379, 0)
+REDIS_CONN_S = ('localhost', 6379, 1)
 
-def cfq_treebase(split_filename, grammar_file: str, keys):
-    store = JsonLDataset(join(CFQ_PATH, 'dataset_slim.jsonl.gz'))
-    all_idx = json.load(open(split_filename))
-    split_idx = list(map(all_idx.get, ['trainIdxs', 'devIdxs', 'testIdxs']))
-    get_parse_tree_dataset = lambda d: LarkParserDatasetWrapper(grammar_file, 'queryunit', keys, d)
-    return tuple(get_parse_tree_dataset(IndexDataset(store, ds)) for ds in split_idx)
 
-def cfq_preparsed_treebase(split_filename, conn=('localhost', 6379, 0)):
+def _get_split(filename: str) -> dict:
+    all_idx = json.load(open(join(CFQ_PATH, 'splits', filename)))
+    split_idx = {
+        'train': all_idx['trainIdxs'],
+        'dev': all_idx['devIdxs'],
+        'test': all_idx['testIdxs'],
+    }
+    return split_idx
+
+def cfq_preparsed_treebase(split_filename, conn=REDIS_CONN_C):
     import lark
     store = PickleDataset(join(CFQ_PATH, 'parsed_cfq.pkl'), conn, 'cfq_parse_')
-    all_idx = json.load(open(split_filename))
-    split_idx = map(all_idx.get, ['trainIdxs', 'devIdxs', 'testIdxs'])
-    return tuple(IndexDataset(store, ds) for ds in split_idx)
+    split_idx = _get_split(split_filename)
+    return tuple(IndexDataset(store, split_idx[tag]) for tag in ['train', 'dev', 'test'])
 
-@Registry.dataset()
+def cfq_simplified_treebase(split_filename: str, parse_keys):
+    grammar_file = NEW_GRAMMAR
+    store = JsonLDataset(join(CFQ_PATH, 'dataset_slim.jsonl.gz'))
+    split_idx = _get_split(split_filename)
+    grammar_tag = grammar_file[grammar_file.rfind('/') + 1:grammar_file.index('.lark')].lower()
+    ds_tag = split_filename[:split_filename.index('.json')].lower()
+
+    def _get_ds(split_tag):
+        return RedisDataset(
+            dataset=LarkParserDatasetWrapper(
+                grammar_filename=grammar_file,
+                startpoint='queryunit',
+                parse_keys=parse_keys,
+                dataset=IndexDataset(store, split_idx[split_tag]),
+            ),
+            conn=REDIS_CONN_S,
+            prefix=f'{split_tag}_{ds_tag}_{grammar_tag}_',
+        )
+
+    def _get_ds_shared(split_tag):
+        return IndexDataset(
+            RedisDataset(
+                LarkParserDatasetWrapper(
+                    grammar_filename=grammar_file,
+                    startpoint='queryunit',
+                    parse_keys=parse_keys,
+                    # read trees from the original dataset to parse, no split here, the db is for full parse cache
+                    dataset=PickleDataset(join(CFQ_PATH, 'parsed_cfq.pkl'), REDIS_CONN_C, 'cfq_parse_')
+                ),
+                conn=REDIS_CONN_S,  # another conn to parse with other grammars
+                prefix=f'{grammar_tag}'
+            ),
+            split_idx[split_tag],
+        )
+
+    return tuple(map(_get_ds_shared, ['train', 'dev', 'test']))
+
 def cfq_iid():
-    splitfile = join(CFQ_PATH, 'splits', 'random_split.json')
-    return cfq_preparsed_treebase(splitfile)
+    return cfq_preparsed_treebase('random_split.json')
 
-@Registry.dataset()
 def cfq_debug():
     import lark
-    split_filename = join(CFQ_PATH, 'splits', 'mcd1.json')
     store = PickleDataset(join(CFQ_PATH, 'parsed_cfq.pkl'), ('localhost', 6379, 0), 'cfq_parse_')
-    all_idx = json.load(open(split_filename))
-    split_idx = list(map(all_idx.get, ['trainIdxs', 'devIdxs', 'testIdxs']))
-    split_idx[-1] = [7901, 178847, 46501, 77066]
-    return tuple(IndexDataset(store, ds) for ds in split_idx)
+    split_idx = _get_split('mcd1.json')
+    split_idx['test'] = [7901, 178847, 46501, 77066]
+    return tuple(IndexDataset(store, split_idx[tag]) for tag in ['train', 'dev', 'test'])
 
-@Registry.dataset()
-def cfq_mcd1():
-    splitfile = join(CFQ_PATH, 'splits', 'mcd1.json')
-    return cfq_preparsed_treebase(splitfile)
+def cfq_mcd1_classic():
+    return cfq_preparsed_treebase('mcd1.json')
 
-@Registry.dataset()
-def cfq_mcd2():
-    splitfile = join(CFQ_PATH, 'splits', 'mcd2.json')
-    return cfq_preparsed_treebase(splitfile)
+def cfq_mcd2_classic():
+    return cfq_preparsed_treebase('mcd2.json')
 
-@Registry.dataset()
-def cfq_mcd3():
-    splitfile = join(CFQ_PATH, 'splits', 'mcd3.json')
-    return cfq_preparsed_treebase(splitfile)
+def cfq_mcd3_classic():
+    return cfq_preparsed_treebase('mcd3.json')
 
-@Registry.dataset()
-def cfq_mcd1_test_on_training_set():
-    import lark
-    store = PickleDataset(join(CFQ_PATH, 'parsed_cfq.pkl'), ('localhost', 6379, 0), 'cfq_parse_')
-    splitfile = join(CFQ_PATH, 'splits', 'mcd1.json')
-    all_idx = json.load(open(splitfile))
-    split_idx = map(all_idx.get, ['trainIdxs', 'devIdxs', 'trainIdxs'])
-    return tuple(IndexDataset(store, ds) for ds in split_idx)
+def cfq_mcd1_simplified():
+    return cfq_simplified_treebase('mcd1.json', ['sparqlPatternModEntities'])
 
-@Registry.dataset()
-def cfq_mcd1_runtime_tree():
-    splitfile = join(CFQ_PATH, 'splits', 'mcd1.json')
-    grammar = join(GRAMMAR_PATH, 'sparql_pattern.bnf.lark')
-    return cfq_treebase(splitfile, grammar, ['sparql', 'sparqlPattern', 'sparqlPatternModEntities'])
+def cfq_mcd2_simplified():
+    return cfq_simplified_treebase('mcd2.json', ['sparqlPatternModEntities'])
 
-@Registry.dataset('sparql')
+def cfq_mcd3_simplified():
+    return cfq_simplified_treebase('mcd3.json', ['sparqlPatternModEntities'])
+
 def sparql_grammar(filename='sparql.bnf.lark'):
     file = join(GRAMMAR_PATH, filename)
     print("Dataset Filename:", file)
     d = LarkGrammarDataset(file, 'queryunit')
     return d, d, d
 
-@Registry.dataset('sparql_pattern')
 def sparql_pattern_grammar():
     return sparql_grammar('sparql_pattern.bnf.lark')
 
+def install_cfq_to_trialbot():
+    from trialbot.training import Registry
+    funcs = [
+        (cfq_iid,  'cfq_iid_classic'),
+        (cfq_mcd1_classic, 'cfq_mcd1_classic'),
+        (cfq_mcd2_classic, 'cfq_mcd2_classic'),
+        (cfq_mcd3_classic, 'cfq_mcd3_classic'),
+        (cfq_mcd1_simplified, 'cfq_mcd1_simplified'),
+        (cfq_mcd2_simplified, 'cfq_mcd2_simplified'),
+        (cfq_mcd3_simplified, 'cfq_mcd3_simplified'),
+    ]
+    for pair in funcs:
+        Registry._datasets[pair[1]] = pair[0]
