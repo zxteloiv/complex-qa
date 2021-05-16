@@ -57,3 +57,22 @@ class GeneralizedInnerProductScorer(RuleScorer):
             inp = inp / (tree_state.norm(dim=-1) + 1e-15)
 
         return inp
+
+class ConcatInnerProductScorer(RuleScorer):
+    def __init__(self, module: MultiInputsSequential):
+        super().__init__()
+        self._module = module
+
+    def forward(self, rule_option: FT, query_context: FT, tree_state: FT) -> FT:
+        """
+        Use dot product for all
+        :param rule_option: (batch, opt_num, hid)
+        :param query_context: (batch, opt_num, hid)
+        :param tree_state: (batch, opt_num, hid)
+        :return: the logits over the rule options. (batch, opt_num)
+        """
+
+        # state: (batch, opt_num, hid)
+        state = self._module(torch.cat([query_context, tree_state], dim=-1))
+        inp = (rule_option * state).sum(dim=-1)
+        return inp

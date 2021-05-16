@@ -35,7 +35,7 @@ class TranXModEntTranslator(FieldAwareTranslator):
                                   namespace="modent_rule_seq", split_fn=split_sparql, ),
         ])
 
-@Registry.translator('cfq_flat_pda_mod_ent_qa')
+@Registry.translator('cfq_flat_pda')
 class CFQFlatDerivations(FieldAwareTranslator):
     def __init__(self, max_derivation_symbols: int = 11):
         super().__init__(field_list=[
@@ -43,6 +43,7 @@ class CFQFlatDerivations(FieldAwareTranslator):
             MidOrderTraversalField(tree_key='sparqlPatternModEntities_tree',
                                    namespaces=UNIFIED_TREE_NS,
                                    max_derivation_symbols=max_derivation_symbols,
+                                   grammar_token_generation=True,
                                    )
         ])
 

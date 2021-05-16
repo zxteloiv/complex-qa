@@ -35,6 +35,7 @@ class Seq2PDA(nn.Module):
 
         self.token_loss = Average()
         self.topo_loss = Average()
+        self.count_metric = 0
         self.err = Average()
         self.tok_pad = 0
         self.src_ns = src_ns
@@ -50,8 +51,11 @@ class Seq2PDA(nn.Module):
     def get_metric(self, reset=False, diagnosis=False):
         token_loss = self.token_loss.get_metric(reset)
         topo_loss = self.topo_loss.get_metric(reset)
+        count = self.count_metric
+        if reset:
+            self.count_metric = 0
         err = self.err.get_metric(reset)
-        output = {"TokenLoss": token_loss, "TopoLoss": topo_loss, "ERR": err}
+        output = {"TokenLoss": token_loss, "TopoLoss": topo_loss, "ERR": err, "COUNT": count}
 
         if diagnosis:
             tree_hid_norm = [m.get_metric(reset) for m in self.tree_hid_norm]
@@ -94,11 +98,12 @@ class Seq2PDA(nn.Module):
         # --------------- 1. training the topological choice --------------
         # valid_symbols, symbol_mask: (batch, n_d, opt_num, max_seq)
         # choice: (batch, n_d)
+        # choice_validity: (batch,)
         valid_symbols, _, _, symbol_mask = self.npda.decouple_grammar_guide(tree_grammar)
-        choice = self.npda.find_choice_by_symbols(derivations, valid_symbols, symbol_mask)
+        choice, choice_validity = self.npda.find_choice_by_symbols(derivations, valid_symbols, symbol_mask)
 
         # tree_mask, nll: (batch, n_d)
-        tree_mask = (tree_nodes != self.tok_pad).long()
+        tree_mask = (tree_nodes != self.tok_pad).long() * choice_validity.unsqueeze(-1).float()
         nll = -(opt_prob + 1e-15).log().gather(dim=-1, index=choice.unsqueeze(-1)).squeeze(-1)
         # use a sensitive loss such that the grad won't get discounted by the factor of 0-loss items
         # topo_loss = (nll * tree_mask).sum() / (tree_mask.sum() + 1e-15)
@@ -112,10 +117,11 @@ class Seq2PDA(nn.Module):
 
         # ------------- 3. error metric computation -------------
         # *_err: (batch,)
-        topo_err = ((opt_prob.argmax(dim=-1) != choice) * tree_mask).sum(dim=-1)
+        topo_err = ((opt_prob.argmax(dim=-1) != choice) * tree_mask).sum(dim=-1) + (1 - choice_validity.int())
         token_err = ((exact_logit.argmax(dim=-1) != exact_tokens) * et_mask).sum([1, 2])
         for e1, e2 in zip(topo_err, token_err):
             self.err(1. if e1 + e2 > 0 else 0.)
+        self.count_metric += (choice_validity > 0).sum().item()
 
         # ================
         self._diagnose_tree_state(tree_mask)

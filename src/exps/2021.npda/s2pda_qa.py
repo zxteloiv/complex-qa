@@ -11,7 +11,11 @@ from trialbot.data import NSVocabulary
 from trialbot.training.updater import Updater
 
 import datasets.cfq
-import datasets.cfq_translator
+import datasets.cfq_translator as cfq_translator
+datasets.cfq.install_cfq_to_trialbot()
+import datasets.comp_gen_bundle as cg_bundle
+cg_bundle.install_sql_qa_datasets(Registry._datasets)
+import datasets.cg_bundle_translator as sql_translator
 
 @Registry.hparamset()
 def cfq_pda():
@@ -20,14 +24,12 @@ def cfq_pda():
     ROOT = find_root()
     p = HyperParamSet.common_settings(ROOT)
     p.TRAINING_LIMIT = 10
-    p.OPTIM = "radam"
+    p.OPTIM = "adabelief"
     p.batch_sz = 32
     p.WEIGHT_DECAY = .1
-    p.ADAM_BETAS = (0.9, 0.999)
-    p.optim_kwargs = {"eps": 1e-8}
+    p.ADAM_BETAS = (0.9, 0.98)
+    p.optim_kwargs = {"rectify": False}
     p.GRAD_CLIPPING = .2    # grad norm required to be <= 2
-
-    p.tutor_usage = "from_dataset" # from_grammar, from_dataset
 
     p.src_ns = 'questionPatternModEntities'
     p.tgt_ns = datasets.cfq_translator.UNIFIED_TREE_NS
@@ -35,6 +37,7 @@ def cfq_pda():
     # transformer requires input embedding equal to hidden size
     p.encoder = "bilstm"
     p.num_enc_layers = 2
+    p.enc_sz = 128
     p.emb_sz = 128
     p.hidden_sz = 128
     p.num_heads = 4
@@ -46,8 +49,8 @@ def cfq_pda():
 
     p.dropout = .2
     p.num_expander_layer = 1
+    p.expander_rnn = 'typed_rnn'    # typed_rnn, lstm
     p.max_derivation_step = 200
-    p.max_expansion_len = 11
     p.grammar_entry = "queryunit"
 
     # ----------- tree encoder settings -------------
@@ -56,7 +59,7 @@ def cfq_pda():
     p.tree_encoder_weight_norm = False
 
     p.tree_parent_detach = False
-    p.detach_tree_embedding = True
+    p.detach_tree_embedding = False
 
     p.bilinear_rank = 1
     p.bilinear_pool = p.hidden_sz // p.num_heads
@@ -76,57 +79,101 @@ def cfq_pda():
     p.num_exact_token_mixture = 1
     p.exact_token_quant_criterion = "dot_product"
 
-    p.rule_scorer = "triple_inner_product" # heuristic, mlp, triple_inner_product
+    p.rule_scorer = "triple_inner_product" # heuristic, mlp, triple_inner_product, concat_inner_product
     return p
 
-def get_grammar_tutor(p, vocab):
-    ns_symbol, ns_exact_token = p.tgt_ns
-    import torch
-    from models.neural_pda.grammar_tutor import GrammarTutor
-    from datasets.lark_translator import UnifiedLarkTranslator
-    grammar_dataset, _, _ = datasets.cfq.sparql_pattern_grammar()
-    grammar_translator = UnifiedLarkTranslator(datasets.cfq_translator.UNIFIED_TREE_NS)
-    grammar_translator.index_with_vocab(vocab)
-    rule_list = [grammar_translator.to_tensor(r) for r in grammar_dataset]
-    rule_batch = grammar_translator.batch_tensor(rule_list)
-    ordered_lhs, ordered_rhs = list(zip(*rule_batch.items()))
-    ordered_rhs = torch.stack(ordered_rhs)
-    gt = GrammarTutor(vocab.get_vocab_size(ns_symbol), ordered_lhs, ordered_rhs)
+@Registry.hparamset()
+def cfq_simp():
+    p = cfq_pda()
+    p.enc_sz = 128
+    p.num_enc_layers = 2
 
-    from datasets.lark_translator import LarkExactTokenReader
-    from models.neural_pda.token_tutor import ExactTokenTutor
-    reader = LarkExactTokenReader(vocab=vocab, ns=(ns_symbol, ns_exact_token))
-    grammar_dataset, _, _ = datasets.cfq.sparql_pattern_grammar()
-    pair_set = set()
-    for r in grammar_dataset:
-        for p in reader.generate_symbol_token_pair(r):
-            pair_set.add(p)
-    valid_token_lookup = reader.merge_the_pairs(pair_set)
-    ett = ExactTokenTutor(vocab.get_vocab_size(ns_symbol), vocab.get_vocab_size(ns_exact_token), valid_token_lookup)
+    p.emb_sz = 128
+    p.hidden_sz = 128
+    p.num_re0_layer = 6
+    p.num_expander_layer = 1
+    # p.expander_rnn = 'lstm'   # not implemented yet for inputs requiring broadcasting
+    p.GRAD_CLIPPING = 1    # grad norm required to be <= 2
+    p.ADAM_BETAS = (0.9, 0.999)
+    p.WEIGHT_DECAY = .1
+    p.bilinear_rank = 1
+    p.bilinear_pool = 1
+    p.rule_scorer = "concat_inner_product"
 
-    return ett, gt
+    return p
 
-def get_cfq_tailored_tutor(p, vocab):
-    from datasets.cfq_translator import CFQTutorBuilder
+@Registry.hparamset()
+def cfq_simp_v2():
+    p = cfq_pda()
+    p.enc_sz = 128
+    p.num_enc_layers = 2
+
+    p.emb_sz = 128
+    p.hidden_sz = 128
+    p.num_expander_layer = 1
+    # p.expander_rnn = 'lstm'   # not implemented yet for inputs requiring broadcasting
+    p.GRAD_CLIPPING = 1    # grad norm required to be <= 2
+    p.ADAM_BETAS = (0.9, 0.999)
+    p.WEIGHT_DECAY = .1
+    p.bilinear_rank = 1
+    p.bilinear_pool = 1
+    p.tree_encoder = 'lstm'
+
+    return p
+
+@Registry.hparamset()
+def cfq_simp_v3():
+    p = cfq_pda()
+    p.enc_sz = 128
+    p.num_enc_layers = 2
+
+    p.emb_sz = 128
+    p.hidden_sz = 128
+    p.num_expander_layer = 1
+    # p.expander_rnn = 'lstm'   # not implemented yet for inputs requiring broadcasting
+    p.GRAD_CLIPPING = 1    # grad norm required to be <= 2
+    p.ADAM_BETAS = (0.9, 0.999)
+    p.WEIGHT_DECAY = .1
+    p.bilinear_rank = 1
+    p.bilinear_pool = 1
+    p.rule_scorer = "concat_inner_product"
+    p.tree_encoder = 'lstm'
+
+    return p
+
+@Registry.hparamset()
+def sql_pda():
+    p = cfq_pda()
+    p.batch_sz = 4
+    p.src_ns = 'sent'
+    p.tgt_ns = datasets.cfq_translator.UNIFIED_TREE_NS
+    p.TRAINING_LIMIT = 100
+    return p
+
+def get_tailored_tutor(p, vocab, *, dataset_name: str):
     from tqdm import tqdm
     import pickle
     from models.neural_pda.token_tutor import ExactTokenTutor
     from models.neural_pda.grammar_tutor import GrammarTutor
     from utils.preprocessing import nested_list_numbers_to_tensors
 
-    tutor_dump_name = os.path.join(datasets.cfq.CFQ_PATH, 'tutors.pkl')
+    os.makedirs(os.path.join(p.DATA_PATH, 'npda-tutors-dump'), exist_ok=True)
+    tutor_dump_name = os.path.join(p.DATA_PATH, 'npda-tutors-dump', f"tt_{dataset_name}.pkl")
+
+    train_set = Registry.get_dataset(dataset_name)[0]
     if os.path.exists(tutor_dump_name):
         logging.getLogger(__name__).info(f"Use the existing tutor dump... {tutor_dump_name}")
         tutor_repr = pickle.load(open(tutor_dump_name, 'rb'))
     else:
         logging.getLogger(__name__).info(f"Build the tutor dump for the first time...")
 
-        builder = CFQTutorBuilder()
+        builder = cfq_translator.CFQTutorBuilder() if 'cfq_' in dataset_name else sql_translator.SQLTutorBuilder()
         builder.index_with_vocab(vocab)
-        train_set, _, _ = datasets.cfq.cfq_mcd1()
         tutor_repr = builder.batch_tensor([builder.to_tensor(example) for example in tqdm(train_set)])
-        logging.getLogger(__name__).info(f"Dump the tutor information... {tutor_dump_name}")
-        pickle.dump(tutor_repr, open(tutor_dump_name, 'wb'))
+
+        if tutor_dump_name is not None:
+            logging.getLogger(__name__).info(f"Dump the tutor information... {tutor_dump_name}")
+            pickle.dump(tutor_repr, open(tutor_dump_name, 'wb'))
 
     token_map: defaultdict
     grammar_map: defaultdict
@@ -182,23 +229,47 @@ def get_tree_encoder(p, vocab):
 
     return tree_encoder
 
-def get_model(p, vocab: NSVocabulary):
+def get_model(p, vocab: NSVocabulary, *, dataset_name: str):
     from torch import nn
     from models.neural_pda.seq2pda import Seq2PDA
     from models.neural_pda.npda import NeuralPDA
-    from models.neural_pda.rule_scorer import MLPScorerWrapper, HeuristicMLPScorerWrapper, GeneralizedInnerProductScorer
+    from models.neural_pda.rule_scorer import MLPScorerWrapper, HeuristicMLPScorerWrapper
+    from models.neural_pda.rule_scorer import GeneralizedInnerProductScorer, ConcatInnerProductScorer
     from models.modules.stacked_encoder import StackedEncoder
     from models.modules.attention_wrapper import get_wrapped_attention
     from models.modules.quantized_token_predictor import QuantTokenPredictor
-    from models.modules.stacked_rnn_cell import StackedRNNCell
+    from models.modules.stacked_rnn_cell import StackedRNNCell, StackedLSTMCell
     from models.modules.sym_typed_rnn_cell import SymTypedRNNCell
     from models.modules.container import MultiInputsSequential, UnpackedInputsSequential, SelectArgsById
     from models.modules.mixture_softmax import MoSProjection
     from models.modules.variational_dropout import VariationalDropout
     from allennlp.nn.activations import Activation
 
-    encoder = StackedEncoder.get_encoder(p)
-    emb_src = nn.Embedding(vocab.get_vocab_size(p.src_ns), embedding_dim=p.emb_sz)
+    from models.transformer.encoder import TransformerEncoder
+    from allennlp.modules.seq2seq_encoders import LstmSeq2SeqEncoder
+
+    if p.encoder == "lstm":
+        enc_cls = lambda floor: LstmSeq2SeqEncoder(p.enc_sz, p.enc_sz, bidirectional=False)
+    elif p.encoder == "transformer":
+        enc_cls = lambda floor: TransformerEncoder(
+            input_dim=p.enc_sz,
+            hidden_dim=p.enc_sz,
+            num_layers=1,
+            num_heads=p.num_heads,
+            feedforward_hidden_dim=p.enc_sz,
+            feedforward_dropout=p.dropout,
+            residual_dropout=p.dropout,
+            attention_dropout=0.,
+            use_positional_embedding=(floor == 0),
+        )
+    elif p.encoder == "bilstm":
+        enc_cls = lambda floor: LstmSeq2SeqEncoder(p.enc_sz if floor == 0 else p.enc_sz * 2, # bidirectional
+                                                   p.enc_sz, bidirectional=True)
+    else:
+        raise NotImplementedError
+
+    encoder = StackedEncoder([enc_cls(floor) for floor in range(p.num_enc_layers)], input_dropout=p.dropout)
+    emb_src = nn.Embedding(vocab.get_vocab_size(p.src_ns), embedding_dim=p.enc_sz)
 
     ns_s, ns_et = p.tgt_ns
     emb_s = nn.Embedding(vocab.get_vocab_size(ns_s), p.emb_sz)
@@ -217,10 +288,7 @@ def get_model(p, vocab: NSVocabulary):
             p.num_exact_token_mixture, p.hidden_sz + p.hidden_sz + p.emb_sz, vocab.get_vocab_size(ns_et),
         )
 
-    if p.tutor_usage == "from_grammar":
-        ett, gt = get_grammar_tutor(p, vocab)
-    else:
-        ett, gt = get_cfq_tailored_tutor(p, vocab)
+    ett, gt = get_tailored_tutor(p, vocab, dataset_name=dataset_name)
 
     if p.rule_scorer == "heuristic":
         rule_scorer = HeuristicMLPScorerWrapper(MultiInputsSequential(
@@ -236,6 +304,11 @@ def get_model(p, vocab: NSVocabulary):
         ))
     elif p.rule_scorer == "triple_inner_product":
         rule_scorer = GeneralizedInnerProductScorer()
+    elif p.rule_scorer == "concat_inner_product":
+        rule_scorer = ConcatInnerProductScorer(MultiInputsSequential(
+            nn.Linear(p.hidden_sz * 2, p.hidden_sz),
+            nn.Tanh(),
+        ))
     else:
         rule_scorer = MLPScorerWrapper(MultiInputsSequential(
             nn.Linear(p.hidden_sz + p.hidden_sz * 2, p.hidden_sz // p.num_heads),
@@ -249,6 +322,19 @@ def get_model(p, vocab: NSVocabulary):
             nn.Linear(p.hidden_sz, 1)
         ))
 
+    if p.expander_rnn == 'lstm':
+        rhs_expander=StackedLSTMCell(p.emb_sz + 3, p.hidden_sz, p.num_expander_layer, intermediate_dropout=p.dropout)
+    else:
+        rhs_expander=StackedRNNCell(
+            [
+                SymTypedRNNCell(input_dim=p.emb_sz + 3 if floor == 0 else p.hidden_sz,
+                                output_dim=p.hidden_sz,
+                                nonlinearity="tanh")
+                for floor in range(p.num_expander_layer)
+            ],
+            p.emb_sz + 3, p.hidden_sz, p.num_expander_layer, intermediate_dropout=p.dropout
+        )
+
     npda = NeuralPDA(
         symbol_embedding=emb_s,
         lhs_symbol_mapper=MultiInputsSequential(
@@ -261,15 +347,7 @@ def get_model(p, vocab: NSVocabulary):
             nn.Tanh(),
         ) if p.emb_sz != p.hidden_sz else Activation.by_name('linear')(),   # `linear` returns the identity function
         grammar_tutor=gt,
-        rhs_expander=StackedRNNCell(
-            [
-                SymTypedRNNCell(input_dim=p.emb_sz + 3 if floor == 0 else p.hidden_sz,
-                                output_dim=p.hidden_sz,
-                                nonlinearity="tanh")
-                for floor in range(p.num_expander_layer)
-            ],
-            p.emb_sz + 3, p.hidden_sz, p.num_expander_layer, intermediate_dropout=p.dropout
-        ),
+        rhs_expander=rhs_expander,
         rule_scorer=rule_scorer,
         exact_token_predictor=exact_token_predictor,
         token_tutor=ett,
@@ -383,7 +461,10 @@ def main():
     from utils.trialbot_setup import setup
     args = setup(seed=2021)
 
-    bot = TrialBot(trial_name="s2pda_qa", get_model_func=get_model, args=args)
+    from functools import partial
+    get_model_fn = partial(get_model, dataset_name=args.dataset)
+
+    bot = TrialBot(trial_name="s2pda_qa", get_model_func=get_model_fn, args=args)
 
     from trialbot.training import Events
     @bot.attach_extension(Events.EPOCH_COMPLETED)

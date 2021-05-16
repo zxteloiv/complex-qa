@@ -31,6 +31,7 @@ def select_optim(p, params):
         from adabelief_pytorch import AdaBelief
         optim = AdaBelief(params, p.ADAM_LR, p.ADAM_BETAS,
                           weight_decay=p.WEIGHT_DECAY,
+                          print_change_log=False,
                           **getattr(p, 'optim_kwargs', dict()))
     elif name == 'mod_adabelief':
         from optim.ModAdaBelief import AdaBelief

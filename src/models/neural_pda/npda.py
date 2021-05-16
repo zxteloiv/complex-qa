@@ -343,7 +343,8 @@ class NeuralPDA(nn.Module):
         # exact_logit: (batch, *, V)
         exact_logit = self._exact_token_predictor(proj_inp)
         # exact_logit = exact_logit + (compliant_weights + tiny_value_of_dtype(exact_logit.dtype)).log()
-        exact_logit = exact_logit.masked_fill(~compliant_weights, min_value_of_dtype(exact_logit.dtype))
+        if not self.training:
+            exact_logit = exact_logit.masked_fill(~compliant_weights, min_value_of_dtype(exact_logit.dtype))
         return exact_logit
 
     def update_pda_with_predictions(self, parent_idx: LT, symbol: LT, p_growth: LT, symbol_mask: LT, lhs_mask: NullOrLT):
@@ -409,7 +410,7 @@ class NeuralPDA(nn.Module):
         return valid_symbols, parental_growth, fraternal_growth, symbol_mask
 
     @staticmethod
-    def find_choice_by_symbols(gold_symbols: LT, valid_symbols: LT, symbol_mask: LT) -> LT:
+    def find_choice_by_symbols(gold_symbols: LT, valid_symbols: LT, symbol_mask: LT) -> Tuple[LT, Tensor]:
         """
         :param gold_symbols: (batch, *, max_derivation_len)
         :param valid_symbols: (batch, *, opt_num, max_possible_len)
@@ -434,9 +435,17 @@ class NeuralPDA(nn.Module):
         # only the non-empty sequences require comparison, other choices default to 0
         # _choice: (batch, *, opt_num)
         _choice = seq_comp.all(dim=-1) * (symbol_mask.sum(-1) > 0)
-        # there must be one and only one choice found for all batch, otherwise the data is inconsistent
-        assert (_choice.sum(dim=-1) == (gold_mask.sum(-1) > 0)).all()
+
+        # choice_validity: (batch, *)
+        choice_validity = (_choice.sum(-1) == (gold_mask.sum(-1) > 0))
+        while choice_validity.ndim > 1:
+            choice_validity = choice_validity.all(dim=-1)
+
+        # # there must be one and only one choice found for all batch, otherwise the data is inconsistent
+        # assert choice_validity.all()
+        if not choice_validity.all():
+            pass
 
         # argmax is forbidden on bool storage, but max is ok
-        return _choice.max(dim=-1)[1]
+        return _choice.max(dim=-1)[1], choice_validity.int()
 

@@ -178,7 +178,7 @@ def scholar_common():
 @Registry.hparamset()
 def atis_common():
     p = common_sql_tranx()
-    p.TRAINING_LIMIT = 150
+    p.TRAINING_LIMIT = 100
     p.tied_decoder_embedding = False
     p.num_enc_layers = 1
     p.num_dec_layers = 1

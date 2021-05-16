@@ -14,6 +14,7 @@ from trialbot.utils.root_finder import find_root
 import os
 from os.path import join
 from functools import partial
+import logging
 
 ROOT = find_root()
 CG_DATA_REG = dict()
@@ -148,9 +149,9 @@ def install_qa_datasets(reg: dict = None):
         for g in grammars:
             tag = g[g.rfind('/') + 1:g.index('.lark')].lower()
             reg[f"{domain}_iid.{tag}"] = partial(_get_qa_ds, pathname, use_iid=True, sql_only=False, grammar_file=g)
-            print(f"registered {domain}_iid.{tag} lazily")
+            logging.debug(f"registered {domain}_iid.{tag} lazily")
             reg[f"{domain}_cg.{tag}"] = partial(_get_qa_ds, pathname, use_iid=False, sql_only=False, grammar_file=g)
-            print(f"registered {domain}_cg.{tag} lazily")
+            logging.debug(f"registered {domain}_cg.{tag} lazily")
 
 def install_sql_qa_datasets(reg: dict = None):
     if reg is None:
@@ -162,7 +163,7 @@ def install_sql_qa_datasets(reg: dict = None):
         for g in grammars:
             tag = g[g.rfind('/') + 1:g.index('.lark')].lower()
             reg[domain + '_iid.' + tag] = partial(_get_qa_ds, path_name, use_iid=True, grammar_file=g, sql_only=False)
-            print(f"registered {domain}_iid.{tag} lazily")
+            logging.debug(f"registered {domain}_iid.{tag} lazily")
             reg[domain + '_cg.' + tag] = partial(_get_qa_ds, path_name, use_iid=False, grammar_file=g, sql_only=False)
-            print(f"registered {domain}_cg.{tag} lazily")
+            logging.debug(f"registered {domain}_cg.{tag} lazily")
 
