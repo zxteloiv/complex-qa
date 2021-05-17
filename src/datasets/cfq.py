@@ -106,8 +106,8 @@ def sparql_grammar(filename='sparql.bnf.lark'):
 def sparql_pattern_grammar():
     return sparql_grammar('sparql_pattern.bnf.lark')
 
-def install_cfq_to_trialbot():
-    from trialbot.training import Registry
+def get_cfq_data() -> dict:
+    ds = dict()
     funcs = [
         (cfq_iid,  'cfq_iid_classic'),
         (cfq_mcd1_classic, 'cfq_mcd1_classic'),
@@ -118,4 +118,10 @@ def install_cfq_to_trialbot():
         (cfq_mcd3_simplified, 'cfq_mcd3_simplified'),
     ]
     for pair in funcs:
-        Registry._datasets[pair[1]] = pair[0]
+        ds[pair[1]] = pair[0]
+    return ds
+
+def install_cfq_to_trialbot():
+    from trialbot.training import Registry
+    for k, v in get_cfq_data().items():
+        Registry._datasets[k] = v

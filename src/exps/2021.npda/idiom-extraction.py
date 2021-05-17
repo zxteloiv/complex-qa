@@ -17,11 +17,8 @@ import io
 import utils.cfg as cfg
 from datetime import datetime as dt
 from random import sample
-
 import datasets.comp_gen_bundle as cg_bundle
-cg_bundle.install_sql_datasets()
-from utils.trialbot_setup import install_dataset_into_registry
-install_dataset_into_registry(cg_bundle.CG_DATA_REG)
+import copy
 
 def print_dataset_statistics(reg: dict):
     print(f"all_names: {' '.join(reg.keys())}")
@@ -197,6 +194,7 @@ class GreedyIdiomMiner:
                  freq_lower_bound: int = 0,
                  data_prefix: str = "",
                  sample_percentage: float = 1,
+                 retain_recursion: bool = True,
                  ):
         self.stat_by_iter = []
         self.idioms = dict()
@@ -208,6 +206,7 @@ class GreedyIdiomMiner:
         self.freq_lower_bound = freq_lower_bound
         self.prefix = data_prefix
         self.approx = sample_percentage
+        self.retain_recursion = retain_recursion
 
     def assign_rule_id(self, subtree: TREE, iteration_num: int):
         hash = compact_hash(subtree)
@@ -283,7 +282,6 @@ class GreedyIdiomMiner:
             "trees_stat": tree_stats,
         }
 
-    def export_kth_rules(self, k, lex_in, start: cfg.NonTerminal,
     def export_kth_rules(self, k, lex_in, start: cfg.NonTerminal,
                          export_terminals: bool = False, excluded_terminals = None,
                          remove_eps: bool = True,
@@ -380,11 +378,10 @@ class GreedyIdiomMiner:
         # the root is defined as zero-height, and thus the height of terminal leaves are starting from 0
         return 1 + max(0 if isinstance(c, TOKEN) else cls.get_tree_height(c) for c in tree.children)
 
-    @classmethod
-    def get_d2tree_freq_table(cls, trees: List[TREE]) -> Dict[str, Dict[str, Any]]:
+    def get_d2tree_freq_table(self, trees: List[TREE]) -> Dict[str, Dict[str, Any]]:
         freq_table = dict()
         for t in trees:
-            for d2t in cls.generate_dep2_tree(t):
+            for d2t in self.generate_dep2_tree(t):
                 h = compact_hash(d2t)
                 if h in freq_table:
                     freq_table[h]["freq"] += 1
@@ -459,8 +456,7 @@ class GreedyIdiomMiner:
             ] if len(st.children) > 0 else cls.EPS_RHS) # empty rule (A -> epsilon) must also be included
             yield st.data, dep1tree
 
-    @classmethod
-    def generate_dep2_tree(cls, t: TREE) -> Generator[TREE, None, None]:
+    def generate_dep2_tree(self, t: TREE) -> Generator[TREE, None, None]:
         for st in t.iter_subtrees_topdown():
             # ignore the root when no grandchildren are available
             if len(st.children) == 0 or all(isinstance(c, TOKEN) for c in st.children):
@@ -468,6 +464,9 @@ class GreedyIdiomMiner:
 
             for i, child in enumerate(st.children):
                 if isinstance(child, TOKEN):
+                    continue
+
+                if self.retain_recursion and child.data == st.data:
                     continue
 
                 dep2tree = lark.Tree(data=st.data, children=[
@@ -481,20 +480,44 @@ class GreedyIdiomMiner:
                     lark.Token(grandchild.type, "") if isinstance(grandchild, TOKEN)
                     else lark.Tree(grandchild.data, children=[])    # the grand-grand-children is always empty
                     for grandchild in child.children
-                ] if len(child.children) > 0 else cls.EPS_RHS
+                ] if len(child.children) > 0 else self.EPS_RHS
 
                 yield dep2tree
 
 def sql_data_mining(prefix=""):
-    names = [n for n in os.listdir(prefix) if n.endswith('parse.pkl')]
-    for name in names:
-        logging.info(f"================== {name} ====================")
-        trees = pickle.load(open(prefix + name, 'rb'))
-        miner = GreedyIdiomMiner(trees[0], trees[1], name[:name.index('.pkl')], data_prefix=prefix, freq_lower_bound=1)
+    # the dataset tags are as below, [
+    #     "pure_sql.atis_iid.sqlite",
+    #     "pure_sql.atis_cg.sqlite",
+    #     "pure_sql.geo_iid.sqlite",
+    #     "pure_sql.geo_cg.sqlite",
+    #     "pure_sql.advising_iid.sqlite",
+    #     "pure_sql.advising_cg.sqlite",
+    #     "pure_sql.scholar_iid.sqlite",
+    #     "pure_sql.scholar_cg.sqlite",
+    #     "pure_sql.atis_iid.mysql",
+    #     "pure_sql.atis_cg.mysql",
+    #     "pure_sql.geo_iid.mysql",
+    #     "pure_sql.geo_cg.mysql",
+    #     "pure_sql.advising_iid.mysql",
+    #     "pure_sql.advising_cg.mysql",
+    #     "pure_sql.scholar_iid.mysql",
+    #     "pure_sql.scholar_cg.mysql",
+    # ]
+    for ds_name, get_ds_fn in cg_bundle.CG_DATA_REG.items():
+        logging.info(f"================== {ds_name} ====================")
+        train, dev, _ = get_ds_fn()
+        train_trees = [x['sql_tree'] for x in train]
+        dev_trees = [x['sql_tree'] for x in dev]
+        miner = GreedyIdiomMiner(train_trees, dev_trees, ds_name[ds_name.index('pure_sql.') + 9:],
+                                 max_mining_steps=200,
+                                 data_prefix=prefix,
+                                 freq_lower_bound=1,
+                                 retain_recursion=True,
+                                 )
         miner.mine()
         miner.evaluation()
-        lex_file = 'SQLite.lark.lex-in' if 'sqlite' in name.lower() else 'MySQL.lark.lex-in'
-        start = cfg.NonTerminal('parse') if 'sqlite' in name.lower() else cfg.NonTerminal('query')
+        lex_file = 'SQLite.lark.lex-in' if 'sqlite' in ds_name.lower() else 'MySQL.lark.lex-in'
+        start = cfg.NonTerminal('parse') if 'sqlite' in ds_name.lower() else cfg.NonTerminal('query')
         for i in range(0, len(miner.stat_by_iter), 10):
             miner.export_kth_rules(i, lex_file, start)
 
@@ -508,24 +531,30 @@ def sql_load_miner_state(prefix=""):
         for i in range(0, min(100, len(miner.stat_by_iter)), 10):
             miner.export_kth_rules(i, lex_file, start, remove_eps=True, remove_useless=True)
 
-
 def cfq_dataset_mining():
     import datasets.cfq as cfq_data
-    # train, dev, test = cfq_data.cfq_preparsed_treebase(join(cfq_data.CFQ_PATH, 'splits', 'mcd1.json'))
-    # train_tree = [obj['sparqlPatternModEntities_tree'] for obj in train]
-    # dev_tree = [obj['sparqlPatternModEntities_tree'] for obj in dev]
-    # miner = GreedyIdiomMiner(train_tree, dev_tree, 'cfq_mcd1', freq_lower_bound=3, data_prefix='run/', sample_percentage=.2)
-    logging.debug(f"loading pickled cfq miner state .. {dt.now().strftime('%H%M%S')}")
-    miner = pickle.load(open('run/cfq_mcd1.999.miner_state', 'rb'))
-    # miner.mine()
-    # miner.evaluation()
+    train, dev, test = cfq_data.cfq_preparsed_treebase(join(cfq_data.CFQ_PATH, 'splits', 'mcd1.json'))
+    train_tree = [obj['sparqlPatternModEntities_tree'] for obj in train]
+    dev_tree = [obj['sparqlPatternModEntities_tree'] for obj in dev]
+    miner = GreedyIdiomMiner(train_tree, dev_tree, 'cfq_mcd1',
+                             freq_lower_bound=3,
+                             data_prefix='run/',
+                             sample_percentage=.2,
+                             max_mining_steps=200,
+                             retain_recursion=True,
+                             )
+    # logging.debug(f"loading pickled cfq miner state .. {dt.now().strftime('%H%M%S')}")
+    # miner = pickle.load(open('run/cfq_mcd1.999.miner_state', 'rb'))
+    miner.mine()
+    miner.evaluation()
     lex_terminals = "IRIREF PNAME_NS PNAME_LN BLANK_NODE_LABEL VAR1 VAR2 LANGTAG INTEGER DECIMAL DOUBLE " + \
                     "INTEGER_POSITIVE DECIMAL_POSITIVE DOUBLE_POSITIVE INTEGER_NEGATIVE DECIMAL_NEGATIVE " + \
                     "DOUBLE_NEGATIVE EXPONENT STRING_LITERAL1 STRING_LITERAL2 STRING_LITERAL_LONG1 " + \
                     "STRING_LITERAL_LONG2 ECHAR NIL WS ANON PN_CHARS_BASE PN_CHARS_U VARNAME PN_CHARS " + \
                     "PN_PREFIX PN_LOCAL PLX PERCENT HEX PN_LOCAL_ESC"
-    miner.export_kth_rules(70, 'sparql.lark.lex-in', cfg.NonTerminal('queryunit'),
-                           export_terminals=True, excluded_terminals=set(lex_terminals.split()))
+    for i in range(0, len(miner.stat_by_iter), 10):
+        miner.export_kth_rules(i, 'sparql.lark.lex-in', cfg.NonTerminal('queryunit'),
+                               export_terminals=True, excluded_terminals=set(lex_terminals.split()))
 
 def main():
     if len(sys.argv) > 1 and sys.argv[1].lower() == 'cfq':
@@ -535,6 +564,8 @@ def main():
     else:
         logging.info('run mining for sql...')
         # sql part
+        cg_bundle.install_parsed_sql_datasets()
+
         print_dataset_statistics(cg_bundle.CG_DATA_REG)
         sql_data_mining(prefix='./run/')
         # sql_load_miner_state(prefix='./run/')
