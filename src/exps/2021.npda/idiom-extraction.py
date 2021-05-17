@@ -18,13 +18,6 @@ import utils.cfg as cfg
 from datetime import datetime as dt
 from random import sample
 import datasets.comp_gen_bundle as cg_bundle
-import copy
-
-def print_dataset_statistics(reg: dict):
-    print(f"all_names: {' '.join(reg.keys())}")
-    for name in filter(lambda s: 'cg' in s, reg.keys()):
-        train, dev, test = reg[name]()
-        print(f"{name}: train: {len(train)}, dev: {len(dev)}, test: {len(test)}")
 
 def compact_hash(t: Union[TREE, TOKEN]):
     if isinstance(t, TOKEN):
@@ -505,7 +498,8 @@ def sql_data_mining(prefix=""):
     # ]
     for ds_name, get_ds_fn in cg_bundle.CG_DATA_REG.items():
         logging.info(f"================== {ds_name} ====================")
-        train, dev, _ = get_ds_fn()
+        train, dev, test = get_ds_fn()
+        print(f"{ds_name}: train: {len(train)}, dev: {len(dev)}, test: {len(test)}")
         train_trees = [x['sql_tree'] for x in train]
         dev_trees = [x['sql_tree'] for x in dev]
         miner = GreedyIdiomMiner(train_trees, dev_trees, ds_name[ds_name.index('pure_sql.') + 9:],
@@ -533,9 +527,12 @@ def sql_load_miner_state(prefix=""):
 
 def cfq_dataset_mining():
     import datasets.cfq as cfq_data
-    train, dev, test = cfq_data.cfq_preparsed_treebase(join(cfq_data.CFQ_PATH, 'splits', 'mcd1.json'))
-    train_tree = [obj['sparqlPatternModEntities_tree'] for obj in train]
-    dev_tree = [obj['sparqlPatternModEntities_tree'] for obj in dev]
+    from tqdm import tqdm
+    train, dev, test = cfq_data.cfq_mcd1_classic()
+    print("loading training trees...")
+    train_tree = [obj['sparqlPatternModEntities_tree'] for obj in tqdm(train)]
+    print("loading dev trees...")
+    dev_tree = [obj['sparqlPatternModEntities_tree'] for obj in tqdm(dev)]
     miner = GreedyIdiomMiner(train_tree, dev_tree, 'cfq_mcd1',
                              freq_lower_bound=3,
                              data_prefix='run/',
@@ -566,7 +563,6 @@ def main():
         # sql part
         cg_bundle.install_parsed_sql_datasets()
 
-        print_dataset_statistics(cg_bundle.CG_DATA_REG)
         sql_data_mining(prefix='./run/')
         # sql_load_miner_state(prefix='./run/')
 
