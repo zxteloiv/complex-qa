@@ -95,7 +95,8 @@ def install_sql_datasets(reg: dict = None):
 def _get_qa_ds(data_name: str, *, use_iid: bool, grammar_file: str, sql_only: bool):
     ds_dir = join(ROOT, 'data', 'CompGen', 'sql data', data_name,
                   'new_question_split' if use_iid else 'schema_full_split')
-    grammar_tag = grammar_file[grammar_file.rfind('_') + 1:grammar_file.index('.lark')]
+    grammar_tag = grammar_file[grammar_file.rfind('/') + 1:grammar_file.index('.lark')]
+    grammar_tag = grammar_tag[grammar_tag.rfind('_') + 1:]
     iid_tag = 'iid' if use_iid else 'cg'
 
     def _build_ds(filename: str, split_tag: str):

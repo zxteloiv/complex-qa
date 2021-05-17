@@ -15,6 +15,7 @@ import datasets.cfq_translator as cfq_translator
 datasets.cfq.install_cfq_to_trialbot()
 import datasets.comp_gen_bundle as cg_bundle
 cg_bundle.install_sql_qa_datasets(Registry._datasets)
+cg_bundle.install_qa_datasets(Registry._datasets)
 import datasets.cg_bundle_translator as sql_translator
 
 @Registry.hparamset()
@@ -58,9 +59,6 @@ def cfq_pda():
     p.tree_encoder = 're_zero_bilinear'
     p.tree_encoder_weight_norm = False
 
-    p.tree_parent_detach = False
-    p.detach_tree_embedding = False
-
     p.bilinear_rank = 1
     p.bilinear_pool = p.hidden_sz // p.num_heads
     p.bilinear_linear = True
@@ -69,7 +67,6 @@ def cfq_pda():
     p.num_re0_layer = 6
 
     p.use_attn_residual_norm = True
-    p.detach_tree_encoder = False   # whether to stop-gradient for the tree encoder parameters, applies to non-parametric encoders
 
     p.tree_self_attn = 'seq_mha'    # seq_mha, generalized_dot_product
 
@@ -86,11 +83,11 @@ def cfq_pda():
 def cfq_simp():
     p = cfq_pda()
     p.enc_sz = 128
-    p.num_enc_layers = 2
+    p.num_enc_layers = 1
 
-    p.emb_sz = 128
-    p.hidden_sz = 128
-    p.num_re0_layer = 6
+    p.emb_sz = 64
+    p.hidden_sz = 64
+    p.num_re0_layer = 4
     p.num_expander_layer = 1
     # p.expander_rnn = 'lstm'   # not implemented yet for inputs requiring broadcasting
     p.GRAD_CLIPPING = 1    # grad norm required to be <= 2
@@ -99,55 +96,28 @@ def cfq_simp():
     p.bilinear_rank = 1
     p.bilinear_pool = 1
     p.rule_scorer = "concat_inner_product"
-
-    return p
-
-@Registry.hparamset()
-def cfq_simp_v2():
-    p = cfq_pda()
-    p.enc_sz = 128
-    p.num_enc_layers = 2
-
-    p.emb_sz = 128
-    p.hidden_sz = 128
-    p.num_expander_layer = 1
-    # p.expander_rnn = 'lstm'   # not implemented yet for inputs requiring broadcasting
-    p.GRAD_CLIPPING = 1    # grad norm required to be <= 2
-    p.ADAM_BETAS = (0.9, 0.999)
-    p.WEIGHT_DECAY = .1
-    p.bilinear_rank = 1
-    p.bilinear_pool = 1
-    p.tree_encoder = 'lstm'
-
-    return p
-
-@Registry.hparamset()
-def cfq_simp_v3():
-    p = cfq_pda()
-    p.enc_sz = 128
-    p.num_enc_layers = 2
-
-    p.emb_sz = 128
-    p.hidden_sz = 128
-    p.num_expander_layer = 1
-    # p.expander_rnn = 'lstm'   # not implemented yet for inputs requiring broadcasting
-    p.GRAD_CLIPPING = 1    # grad norm required to be <= 2
-    p.ADAM_BETAS = (0.9, 0.999)
-    p.WEIGHT_DECAY = .1
-    p.bilinear_rank = 1
-    p.bilinear_pool = 1
-    p.rule_scorer = "concat_inner_product"
-    p.tree_encoder = 'lstm'
 
     return p
 
 @Registry.hparamset()
 def sql_pda():
     p = cfq_pda()
-    p.batch_sz = 4
+    p.batch_sz = 16
     p.src_ns = 'sent'
     p.tgt_ns = datasets.cfq_translator.UNIFIED_TREE_NS
     p.TRAINING_LIMIT = 100
+    p.enc_sz = 128
+    p.num_enc_layers = 1
+    p.emb_sz = 64
+    p.hidden_sz = 64
+    p.num_re0_layer = 4
+    p.num_expander_layer = 1
+    # p.expander_rnn = 'lstm'   # not implemented yet for inputs requiring broadcasting
+    p.GRAD_CLIPPING = 1    # grad norm required to be <= 2
+    p.ADAM_BETAS = (0.9, 0.999)
+    p.WEIGHT_DECAY = .1
+    p.bilinear_rank = 1
+    p.bilinear_pool = 1
     return p
 
 def get_tailored_tutor(p, vocab, *, dataset_name: str):
@@ -195,14 +165,14 @@ def get_tree_encoder(p, vocab):
     if p.tree_encoder == 'lstm':
         tree_encoder = partial_tree.TopDownLSTMEncoder(
             p.emb_sz, p.hidden_sz, p.hidden_sz // p.num_heads,
-            dropout=p.dropout, parent_detach=p.tree_parent_detach,
+            dropout=p.dropout,
         )
 
     elif p.tree_encoder == 'bilinear_tree_lstm':
         tree_encoder = partial_tree.TopDownBilinearLSTMEncoder(
             p.emb_sz, p.hidden_sz, p.bilinear_rank, p.bilinear_pool,
             use_linear=p.bilinear_linear, use_bias=p.bilinear_bias,
-            dropout=p.dropout, parent_detach=p.tree_parent_detach,
+            dropout=p.dropout,
         )
 
     elif p.tree_encoder.startswith('re_zero'):
@@ -367,8 +337,7 @@ def get_model(p, vocab: NSVocabulary, *, dataset_name: str):
         grammar_entry=vocab.get_token_index(p.grammar_entry, ns_s),
         max_derivation_step=p.max_derivation_step,
         dropout=p.dropout,
-        detach_tree_encoder=p.detach_tree_encoder,
-        detach_tree_embedding=p.detach_tree_embedding,
+        masked_exact_token_training=False,
     )
 
     enc_attn_net = MultiInputsSequential(

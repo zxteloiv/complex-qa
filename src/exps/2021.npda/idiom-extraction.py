@@ -283,11 +283,17 @@ class GreedyIdiomMiner:
             "trees_stat": tree_stats,
         }
 
-    def export_kth_rules(self, k, lex_in, start: cfg.NonTerminal, export_terminals: bool = False, excluded_terminals = None):
+    def export_kth_rules(self, k, lex_in, start: cfg.NonTerminal,
+    def export_kth_rules(self, k, lex_in, start: cfg.NonTerminal,
+                         export_terminals: bool = False, excluded_terminals = None,
+                         remove_eps: bool = True,
+                         remove_useless: bool = True,):
         g, terminal_vals = self._restore_grammar(self.stat_by_iter[k][0]['rule_dist'])
         # we do not remove the unit rules since the extraction algorithm will remove them during itertaions
-        g = cfg.remove_eps_rules(g)
-        g = cfg.remove_useless_rules(g, start)
+        if remove_eps:
+            g = cfg.remove_eps_rules(g)
+        if remove_useless:
+            g = cfg.remove_useless_rules(g, start)
 
         grammar_text = io.StringIO()
         print(open(join(find_root(), 'src', 'statics', 'grammar', lex_in)).read(), file=grammar_text)
@@ -307,7 +313,13 @@ class GreedyIdiomMiner:
                         for val in vals
                     ), file=grammar_text)
 
-        with open(self.prefix + f"{self.name}.{k}.lark", 'w') as fout:
+        name_pref = self.name
+        if not remove_eps:
+            name_pref += '.retain_eps'
+        if not remove_useless:
+            name_pref += '.retain_useless'
+
+        with open(self.prefix + f"{name_pref}.{k}.lark", 'w') as fout:
             fout.write(grammar_text.getvalue())
 
     def _restore_grammar(self, counter: Counter) -> Tuple[cfg.T_CFG, dict]:
@@ -486,6 +498,17 @@ def sql_data_mining(prefix=""):
         for i in range(0, len(miner.stat_by_iter), 10):
             miner.export_kth_rules(i, lex_file, start)
 
+def sql_load_miner_state(prefix=""):
+    names = [n for n in os.listdir(prefix) if n.endswith('.miner_state')]
+    for name in names:
+        logging.info(f"================== {name} ====================")
+        miner = pickle.load(open(prefix + name, 'rb'))
+        lex_file = 'SQLite.lark.lex-in' if 'sqlite' in name.lower() else 'MySQL.lark.lex-in'
+        start = cfg.NonTerminal('parse') if 'sqlite' in name.lower() else cfg.NonTerminal('query')
+        for i in range(0, min(100, len(miner.stat_by_iter)), 10):
+            miner.export_kth_rules(i, lex_file, start, remove_eps=True, remove_useless=True)
+
+
 def cfq_dataset_mining():
     import datasets.cfq as cfq_data
     # train, dev, test = cfq_data.cfq_preparsed_treebase(join(cfq_data.CFQ_PATH, 'splits', 'mcd1.json'))
@@ -514,6 +537,7 @@ def main():
         # sql part
         print_dataset_statistics(cg_bundle.CG_DATA_REG)
         sql_data_mining(prefix='./run/')
+        # sql_load_miner_state(prefix='./run/')
 
 if __name__ == '__main__':
     main()

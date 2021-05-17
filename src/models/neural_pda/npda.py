@@ -39,9 +39,9 @@ class NeuralPDA(nn.Module):
                  # configuration
                  grammar_entry: int,
                  max_derivation_step: int = 1000,
-                 detach_tree_encoder: bool = False,
                  dropout: float = 0.2,
-                 detach_tree_embedding: bool = False,
+
+                 masked_exact_token_training: bool = False,
                  ):
         super().__init__()
         self._expander = rhs_expander
@@ -62,8 +62,7 @@ class NeuralPDA(nn.Module):
         # configurations
         self.grammar_entry = grammar_entry
         self.max_derivation_step = max_derivation_step  # a very large upper limit for the runtime storage
-        self.detach_tree_encoder = detach_tree_encoder
-        self.detach_tree_embedding = detach_tree_embedding
+        self.masked_exact_token_training = masked_exact_token_training
 
         # -------------------
         # the helpful storage for runtime forwarding
@@ -133,11 +132,7 @@ class NeuralPDA(nn.Module):
         # nodes_emb: (batch, n_d, emb)
         # tree_hid: (batch, n_d, hid)
         nodes_emb = self._embedder(tree_nodes)
-        if self.detach_tree_embedding:
-            nodes_emb = nodes_emb.detach()
         tree_hid, _ = self._pre_tree_encoder(nodes_emb, node_parents, tree_mask)
-        if self.detach_tree_encoder:
-            tree_hid = tree_hid.detach()
 
         batch, n_d = tree_nodes.size()
         attn_mask = tree_mask.new_zeros((batch, n_d, n_d))
@@ -343,7 +338,7 @@ class NeuralPDA(nn.Module):
         # exact_logit: (batch, *, V)
         exact_logit = self._exact_token_predictor(proj_inp)
         # exact_logit = exact_logit + (compliant_weights + tiny_value_of_dtype(exact_logit.dtype)).log()
-        if not self.training:
+        if not self.masked_exact_token_training or not self.training:
             exact_logit = exact_logit.masked_fill(~compliant_weights, min_value_of_dtype(exact_logit.dtype))
         return exact_logit
 
