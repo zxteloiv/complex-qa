@@ -48,6 +48,8 @@ def cfq_pda():
     p.attn_use_bias = False
     p.attn_use_tanh_activation = False
 
+    p.return_attn_weights = False
+
     p.dropout = .2
     p.num_expander_layer = 1
     p.expander_rnn = 'typed_rnn'    # typed_rnn, lstm
@@ -76,7 +78,7 @@ def cfq_pda():
     p.num_exact_token_mixture = 1
     p.exact_token_quant_criterion = "dot_product"
 
-    p.rule_scorer = "triple_inner_product" # heuristic, mlp, triple_inner_product, concat_inner_product
+    p.rule_scorer = "triple_inner_product" # heuristic, mlp, (triple|concat|add_inner_product)
     return p
 
 @Registry.hparamset()
@@ -84,6 +86,8 @@ def cfq_simp():
     p = cfq_pda()
     p.enc_sz = 128
     p.num_enc_layers = 1
+
+    p.return_attn_weights = True
 
     p.emb_sz = 64
     p.hidden_sz = 64
@@ -95,13 +99,14 @@ def cfq_simp():
     p.WEIGHT_DECAY = .1
     p.bilinear_rank = 1
     p.bilinear_pool = 1
-    p.rule_scorer = "concat_inner_product"
+    p.rule_scorer = "add_inner_product"
 
     return p
 
 @Registry.hparamset()
 def sql_pda():
     p = cfq_pda()
+    p.return_attn_weights = True
     p.batch_sz = 16
     p.src_ns = 'sent'
     p.tgt_ns = datasets.cfq_translator.UNIFIED_TREE_NS
@@ -118,6 +123,7 @@ def sql_pda():
     p.WEIGHT_DECAY = .1
     p.bilinear_rank = 1
     p.bilinear_pool = 1
+    p.rule_scorer = "add_inner_product"
     return p
 
 def get_tailored_tutor(p, vocab, *, dataset_name: str):
@@ -205,6 +211,7 @@ def get_model(p, vocab: NSVocabulary, *, dataset_name: str):
     from models.neural_pda.npda import NeuralPDA
     from models.neural_pda.rule_scorer import MLPScorerWrapper, HeuristicMLPScorerWrapper
     from models.neural_pda.rule_scorer import GeneralizedInnerProductScorer, ConcatInnerProductScorer
+    from models.neural_pda.rule_scorer import AddInnerProductScorer
     from models.modules.stacked_encoder import StackedEncoder
     from models.modules.attention_wrapper import get_wrapped_attention
     from models.modules.quantized_token_predictor import QuantTokenPredictor
@@ -279,6 +286,8 @@ def get_model(p, vocab: NSVocabulary, *, dataset_name: str):
             nn.Linear(p.hidden_sz * 2, p.hidden_sz),
             nn.Tanh(),
         ))
+    elif p.rule_scorer == "add_inner_product":
+        rule_scorer = AddInnerProductScorer(p.hidden_sz)
     else:
         rule_scorer = MLPScorerWrapper(MultiInputsSequential(
             nn.Linear(p.hidden_sz + p.hidden_sz * 2, p.hidden_sz // p.num_heads),
@@ -340,28 +349,26 @@ def get_model(p, vocab: NSVocabulary, *, dataset_name: str):
         masked_exact_token_training=False,
     )
 
-    enc_attn_net = MultiInputsSequential(
-        get_wrapped_attention(p.enc_attn, p.hidden_sz, encoder.get_output_dim(),
+    enc_attn_net = get_wrapped_attention(p.enc_attn, p.hidden_sz, encoder.get_output_dim(),
                               num_heads=p.num_heads,
                               use_linear=p.attn_use_linear,
                               use_bias=p.attn_use_bias,
                               use_tanh_activation=p.attn_use_tanh_activation,
-                              ),
-        (
-            Activation.by_name('linear')()
-            if p.hidden_sz == encoder.get_output_dim() else
-            nn.Linear(encoder.get_output_dim(), p.hidden_sz)
-        ),
-    )
+                              return_attn_weights=p.return_attn_weights,
+                              )
+    enc_attn_mapping = (Activation.by_name('linear')() if p.hidden_sz == encoder.get_output_dim() else
+                        nn.Linear(encoder.get_output_dim(), p.hidden_sz))
 
     model = Seq2PDA(
         encoder=encoder,
         src_embedding=emb_src,
         enc_attn_net=enc_attn_net,
+        enc_attn_mapping=enc_attn_mapping,
         npda=npda,
         src_ns=p.src_ns,
         tgt_ns=p.tgt_ns,
         vocab=vocab,
+        return_attn_weights=p.return_attn_weights,
     )
 
     return model

@@ -76,3 +76,22 @@ class ConcatInnerProductScorer(RuleScorer):
         state = self._module(torch.cat([query_context, tree_state], dim=-1))
         inp = (rule_option * state).sum(dim=-1)
         return inp
+
+class AddInnerProductScorer(RuleScorer):
+    def __init__(self, hidden_sz: int):
+        super().__init__()
+        self.layer_norm = nn.LayerNorm(hidden_sz)
+
+    def forward(self, rule_option: FT, query_context: FT, tree_state: FT) -> FT:
+        """
+        Use dot product for all
+        :param rule_option: (batch, opt_num, hid)
+        :param query_context: (batch, opt_num, hid)
+        :param tree_state: (batch, opt_num, hid)
+        :return: the logits over the rule options. (batch, opt_num)
+        """
+
+        # state: (batch, opt_num, hid)
+        state = self.layer_norm(query_context + tree_state)
+        inp = (rule_option * state).sum(dim=-1)
+        return inp

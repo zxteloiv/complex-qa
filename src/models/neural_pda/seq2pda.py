@@ -20,21 +20,26 @@ class Seq2PDA(nn.Module):
                  encoder: StackedEncoder,
                  src_embedding: nn.Embedding,
                  enc_attn_net: nn.Module,
+                 enc_attn_mapping: nn.Module,
                  npda: NeuralPDA,
 
                  # configuration
                  src_ns: str,
                  tgt_ns: List[str],
                  vocab,
+                 return_attn_weights: bool = False,
                  ):
         super().__init__()
         self.encoder = encoder
         self.src_embedder = src_embedding
         self.enc_attn_net = enc_attn_net
+        self.enc_attn_mapping = enc_attn_mapping
+        self.return_attn_weights = return_attn_weights
         self.npda = npda
 
         self.token_loss = Average()
         self.topo_loss = Average()
+        self.attn_loss = Average()
         self.count_metric = 0
         self.err = Average()
         self.tok_pad = 0
@@ -51,11 +56,12 @@ class Seq2PDA(nn.Module):
     def get_metric(self, reset=False, diagnosis=False):
         token_loss = self.token_loss.get_metric(reset)
         topo_loss = self.topo_loss.get_metric(reset)
+        attn_loss = self.attn_loss.get_metric(reset)
         count = self.count_metric
         if reset:
             self.count_metric = 0
         err = self.err.get_metric(reset)
-        output = {"TokenLoss": token_loss, "TopoLoss": topo_loss, "ERR": err, "COUNT": count}
+        output = {"TokenLoss": token_loss, "TopoLoss": topo_loss, "AttnLoss": attn_loss, "ERR": err, "COUNT": count}
 
         if diagnosis:
             tree_hid_norm = [m.get_metric(reset) for m in self.tree_hid_norm]
@@ -115,6 +121,14 @@ class Seq2PDA(nn.Module):
         # token_loss = seq_cross_ent(exact_logit, exact_tokens, et_mask, average="token")
         token_loss = (tok_nll * et_mask).sum() / (10 * source_tokens.size()[0])
 
+        # ------------- 3. attention weight penalty ----------------
+        # attn_weights: (batch, n_d, src_seq_len)
+        if self.return_attn_weights:
+            attn_weights = self.enc_attn_net.get_latest_attn_weights()
+            attn_loss = F.relu(attn_weights.sum(dim=[1, 2]) - 1).mean()
+        else:
+            attn_loss = 0
+
         # ------------- 3. error metric computation -------------
         # *_err: (batch,)
         topo_err = ((opt_prob.argmax(dim=-1) != choice) * tree_mask).sum(dim=-1) + (1 - choice_validity.int())
@@ -126,9 +140,10 @@ class Seq2PDA(nn.Module):
         # ================
         self._diagnose_tree_state(tree_mask)
 
-        output = {"loss": topo_loss + token_loss}
+        output = {"loss": topo_loss + token_loss + attn_loss}
         self.token_loss(token_loss)
         self.topo_loss(topo_loss)
+        self.attn_loss(attn_loss)
         return output
 
     def _reset_variational_dropout(self):
@@ -140,8 +155,16 @@ class Seq2PDA(nn.Module):
         source_tokens, source_mask = prepare_input_mask(source_tokens, padding_val=self.tok_pad)
         source = self.src_embedder(source_tokens)
         source_hidden, _ = self.encoder(source, source_mask)
-        enc_attn_fn = lambda out: self.enc_attn_net(out, source_hidden, source_mask)
-        return enc_attn_fn
+
+        def _enc_attn_fn(out):
+            context = self.enc_attn_net(out, source_hidden, source_mask)
+            context = self.enc_attn_mapping(context)
+            if self.return_attn_weights:
+                return context, self.enc_attn_net.get_latest_attn_weights()
+            else:
+                return context
+
+        return _enc_attn_fn
 
     def _diagnose_tree_state(self, tree_mask):
         tree_hid, tree_att = map(self.npda.diagnosis.get, ('tree_hid', 'tree_hid_att'))

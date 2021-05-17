@@ -152,6 +152,8 @@ class NeuralPDA(nn.Module):
         # attention computation and compose the context vector with the symbol hidden states
         # query_context: (batch, *, attention_out)
         query_context = self._query_attn_fn(tree_hid_att)
+        if isinstance(query_context, tuple):
+            query_context = query_context[0]
 
         # opt_prob: (batch, n_d, opt_num)
         # opt_repr: (batch, n_d, opt_num, hid)
@@ -186,6 +188,8 @@ class NeuralPDA(nn.Module):
         # attention computation and compose the context vector with the symbol hidden states
         # query_context: (batch, *, attention_out)
         query_context = self._query_attn_fn(tree_state)
+        if isinstance(query_context, tuple):
+            query_context = query_context[0]
 
         # opt_prob: (batch, opt_num)
         # opt_repr: (batch, opt_num, hid)

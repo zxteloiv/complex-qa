@@ -18,6 +18,9 @@ class Attention(torch.nn.Module):
         """
         raise NotImplementedError
 
+    def get_latest_attn_weights(self) -> torch.Tensor:
+        raise NotImplementedError
+
 
 class AttentionWeight(torch.nn.Module):
     """Compute the attention similarities only,

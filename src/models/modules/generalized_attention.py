@@ -1,5 +1,5 @@
 import math
-from typing import Optional
+from typing import Optional, Union, Tuple
 import torch
 from torch import nn
 from torch.nn import init
@@ -60,7 +60,8 @@ class GeneralizedBilinearAttention(Attention):
     def __init__(self, attn_dim: int, vec_dim: int,
                  use_linear: bool = True,
                  use_bias: bool = True,
-                 activation: Optional[nn.Module] = None):
+                 activation: Optional[nn.Module] = None,
+                 ):
         super().__init__()
 
         self.bi_weight = nn.Parameter(torch.zeros(attn_dim, vec_dim))
@@ -74,6 +75,7 @@ class GeneralizedBilinearAttention(Attention):
         # without a nonlinear activation, the bias is useless because the softmax will erase the differences
         self.bias = nn.Parameter(torch.zeros(1,)) if use_bias and activation is not None else None
         self.activation = activation
+        self._attn_weights = None
 
         self.reset_parameters()
 
@@ -178,6 +180,14 @@ class GeneralizedBilinearAttention(Attention):
         rs_context = (attn_weights * rs_a).sum(-2)
         context = rs_context.view(*attn_prefix_dims, *input_suffix_dims, -1)
 
+        attn_weights = attn_weights.squeeze(-1).reshape(*attn_prefix_dims, *input_suffix_dims, -1)
+        self._attn_weights = attn_weights
+
         return context
+
+    def get_latest_attn_weights(self) -> torch.Tensor:
+        if self._attn_weights is None:
+            raise ValueError('Attention module has never been applied.')
+        return self._attn_weights
 
 
