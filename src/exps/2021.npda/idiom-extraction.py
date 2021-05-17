@@ -289,9 +289,10 @@ class GreedyIdiomMiner:
         grammar_text = io.StringIO()
         print(open(join(find_root(), 'src', 'statics', 'grammar', lex_in)).read(), file=grammar_text)
         for lhs, rhs_list in g.items():
-            print(f"{lhs.name}: " +
-                  ('\n' + (' ' * len(lhs.name)  )+ '| ').join(' '.join(t.name for t in rhs) for rhs in rhs_list),
-                  file=grammar_text)
+            print(f"{lhs.name}: " + ('\n' + (' ' * len(lhs.name)  )+ '| ').join(
+                ' '.join(f"P{t.name}" if t.name.startswith('_') else t.name for t in rhs)
+                for rhs in rhs_list
+            ), file=grammar_text)
 
         if export_terminals:
             for tok, vals in terminal_vals.items():

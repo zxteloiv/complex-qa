@@ -77,6 +77,8 @@ def cfq_pda():
     p.exact_token_predictor = "quant" # linear, mos, quant
     p.num_exact_token_mixture = 1
     p.exact_token_quant_criterion = "dot_product"
+    p.masked_exact_token_training = True
+    p.masked_exact_token_testing = True
 
     p.rule_scorer = "triple_inner_product" # heuristic, mlp, (triple|concat|add_inner_product)
     return p
@@ -85,45 +87,56 @@ def cfq_pda():
 def cfq_simp():
     p = cfq_pda()
     p.enc_sz = 128
-    p.num_enc_layers = 1
+    p.num_enc_layers = 2
 
-    p.return_attn_weights = True
+    p.return_attn_weights = False
 
-    p.emb_sz = 64
-    p.hidden_sz = 64
-    p.num_re0_layer = 4
+    p.emb_sz = 128
+    p.hidden_sz = 128
+    p.num_re0_layer = 6
     p.num_expander_layer = 1
     # p.expander_rnn = 'lstm'   # not implemented yet for inputs requiring broadcasting
-    p.GRAD_CLIPPING = 1    # grad norm required to be <= 2
+    p.GRAD_CLIPPING = .2    # grad norm required to be <= 2
     p.ADAM_BETAS = (0.9, 0.999)
     p.WEIGHT_DECAY = .1
     p.bilinear_rank = 1
-    p.bilinear_pool = 1
-    p.rule_scorer = "add_inner_product"
+    p.bilinear_pool = 32
+    p.dropout = 1e-4
+    p.rule_scorer = "triple_inner_product"
 
+    p.masked_exact_token_training = True
+    p.masked_exact_token_testing = True
     return p
 
 @Registry.hparamset()
 def sql_pda():
     p = cfq_pda()
-    p.return_attn_weights = True
+    # p.OPTIM = 'adabelief'
+    # p.optim_kwargs = {}
+    p.return_attn_weights = False
     p.batch_sz = 16
     p.src_ns = 'sent'
     p.tgt_ns = datasets.cfq_translator.UNIFIED_TREE_NS
     p.TRAINING_LIMIT = 100
     p.enc_sz = 128
-    p.num_enc_layers = 1
-    p.emb_sz = 64
-    p.hidden_sz = 64
-    p.num_re0_layer = 4
+    p.num_enc_layers = 2
+    p.emb_sz = 256
+    p.hidden_sz = 256
+    p.num_re0_layer = 6
     p.num_expander_layer = 1
     # p.expander_rnn = 'lstm'   # not implemented yet for inputs requiring broadcasting
-    p.GRAD_CLIPPING = 1    # grad norm required to be <= 2
+    p.GRAD_CLIPPING = .2    # grad norm
     p.ADAM_BETAS = (0.9, 0.999)
-    p.WEIGHT_DECAY = .1
+    p.WEIGHT_DECAY = 1e-3
     p.bilinear_rank = 1
-    p.bilinear_pool = 1
+    p.bilinear_pool = 8
+    p.num_heads = 4
+    p.dropout = .2
+    p.ADAM_LR = 1e-3
     p.rule_scorer = "add_inner_product"
+    p.masked_exact_token_training = True
+    p.masked_exact_token_testing = True
+    p.attn_use_tanh_activation = True
     return p
 
 def get_tailored_tutor(p, vocab, *, dataset_name: str):
@@ -318,10 +331,8 @@ def get_model(p, vocab: NSVocabulary, *, dataset_name: str):
         symbol_embedding=emb_s,
         lhs_symbol_mapper=MultiInputsSequential(
             nn.Linear(p.emb_sz, p.hidden_sz // p.num_heads),
-            VariationalDropout(p.dropout),
             nn.LayerNorm(p.hidden_sz // p.num_heads),
             nn.Linear(p.hidden_sz // p.num_heads, p.hidden_sz),
-            VariationalDropout(p.dropout),
             nn.LayerNorm(p.hidden_sz),  # rule embedding has the hidden_size
             nn.Tanh(),
         ) if p.emb_sz != p.hidden_sz else Activation.by_name('linear')(),   # `linear` returns the identity function
@@ -345,17 +356,16 @@ def get_model(p, vocab: NSVocabulary, *, dataset_name: str):
 
         grammar_entry=vocab.get_token_index(p.grammar_entry, ns_s),
         max_derivation_step=p.max_derivation_step,
-        dropout=p.dropout,
-        masked_exact_token_training=False,
+        masked_exact_token_training=p.masked_exact_token_training,
+        masked_exact_token_testing=p.masked_exact_token_testing,
     )
 
     enc_attn_net = get_wrapped_attention(p.enc_attn, p.hidden_sz, encoder.get_output_dim(),
-                              num_heads=p.num_heads,
-                              use_linear=p.attn_use_linear,
-                              use_bias=p.attn_use_bias,
-                              use_tanh_activation=p.attn_use_tanh_activation,
-                              return_attn_weights=p.return_attn_weights,
-                              )
+                                         num_heads=p.num_heads,
+                                         use_linear=p.attn_use_linear,
+                                         use_bias=p.attn_use_bias,
+                                         use_tanh_activation=p.attn_use_tanh_activation,
+                                         )
     enc_attn_mapping = (Activation.by_name('linear')() if p.hidden_sz == encoder.get_output_dim() else
                         nn.Linear(encoder.get_output_dim(), p.hidden_sz))
 
@@ -414,8 +424,7 @@ class PDATrainingUpdater(Updater):
 
     @classmethod
     def from_bot(cls, bot: TrialBot) -> 'PDATrainingUpdater':
-        import torch
-        from trialbot.data.iterators import RandomIterator
+        from utils.maybe_random_iterator import MaybeRandomIterator
         from models.neural_pda.seq2pda import Seq2PDA
         model: Seq2PDA
         args, p, model, logger = bot.args, bot.hparams, bot.model, bot.logger
@@ -426,7 +435,7 @@ class PDATrainingUpdater(Updater):
         logger.info(f"Using the optimizer {str(optim)}")
 
         repeat_iter = shuffle_iter = not args.debug
-        iterator = RandomIterator(bot.train_set, p.batch_sz, bot.translator, shuffle=shuffle_iter, repeat=repeat_iter)
+        iterator = MaybeRandomIterator(bot.train_set, p.batch_sz, bot.translator, shuffle=shuffle_iter, repeat=repeat_iter)
         if args.debug and args.skip:
             iterator.reset(args.skip)
 

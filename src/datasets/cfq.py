@@ -11,7 +11,7 @@ from os.path import join
 ROOT = find_root()
 CFQ_PATH = join(ROOT, 'data', 'cfq')
 GRAMMAR_PATH = join(ROOT, 'src', 'statics', 'grammar')
-NEW_GRAMMAR = join('run', 'cfq_mcd1.70.lark')
+NEW_GRAMMAR = join('run', 'cfq_mcd1.30.lark')
 
 REDIS_CONN_C = ('localhost', 6379, 0)
 REDIS_CONN_S = ('localhost', 6379, 1)

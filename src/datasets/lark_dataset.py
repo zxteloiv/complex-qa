@@ -45,9 +45,16 @@ class LarkGrammarDataset(Dataset):
         return len(self.data)
 
 class LarkParserDatasetWrapper(Dataset):
+    PARSER_REG = dict()
+
     def __init__(self, grammar_filename, startpoint, parse_keys: Union[str, List[str], None], dataset: Dataset):
         super().__init__()
-        self.parser = lark.Lark(open(grammar_filename), start=startpoint)
+        if grammar_filename in self.PARSER_REG:
+            self.parser = self.PARSER_REG[grammar_filename]
+        else:
+            self.parser = lark.Lark(open(grammar_filename), start=startpoint, keep_all_tokens=True)
+            self.PARSER_REG[grammar_filename] = self.parser
+
         self.dataset = dataset
         self.keys = parse_keys
         self.logger = logging.getLogger(self.__class__.__name__)

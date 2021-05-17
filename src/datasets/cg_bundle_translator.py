@@ -51,6 +51,19 @@ class SQLDerivations(FieldAwareTranslator):
                                    )
         ])
 
+    def batch_tensor(self, tensors):
+        tensors = list(filter(lambda x: x.get('tree_nodes') is not None, tensors))
+        batch_dict = self.list_of_dict_to_dict_of_list(tensors)
+        output = {}
+        for field in self.fields:
+            try:
+                output.update(field.batch_tensor_by_key(batch_dict))
+            except:
+                return None
+
+        return output
+
+
 class SQLTutorBuilder(FieldAwareTranslator):
     def __init__(self):
         super().__init__(field_list=[

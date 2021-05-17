@@ -78,9 +78,9 @@ class ConcatInnerProductScorer(RuleScorer):
         return inp
 
 class AddInnerProductScorer(RuleScorer):
-    def __init__(self, hidden_sz: int):
+    def __init__(self, hidden_sz: int, use_layer_norm: bool = True):
         super().__init__()
-        self.layer_norm = nn.LayerNorm(hidden_sz)
+        self.layer_norm = nn.LayerNorm(hidden_sz) if use_layer_norm else None
 
     def forward(self, rule_option: FT, query_context: FT, tree_state: FT) -> FT:
         """
@@ -92,6 +92,8 @@ class AddInnerProductScorer(RuleScorer):
         """
 
         # state: (batch, opt_num, hid)
-        state = self.layer_norm(query_context + tree_state)
+        state = query_context + tree_state
+        if self.layer_norm is not None:
+            state = self.layer_norm(state)
         inp = (rule_option * state).sum(dim=-1)
         return inp

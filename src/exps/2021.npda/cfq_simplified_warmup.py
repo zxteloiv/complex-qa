@@ -4,12 +4,8 @@ import datasets.cfq as cfq
 
 def get_dataset():
     ds_functions = [
-        # cfq.cfq_iid,
-        # cfq.cfq_mcd1_classic,
         cfq.cfq_mcd1_simplified,
-        # cfq.cfq_mcd2_classic,
         cfq.cfq_mcd2_simplified,
-        # cfq.cfq_mcd3_classic,
         cfq.cfq_mcd3_simplified,
     ]
     for ds_f in ds_functions:

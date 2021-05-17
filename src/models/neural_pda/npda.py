@@ -39,9 +39,9 @@ class NeuralPDA(nn.Module):
                  # configuration
                  grammar_entry: int,
                  max_derivation_step: int = 1000,
-                 dropout: float = 0.2,
 
-                 masked_exact_token_training: bool = False,
+                 masked_exact_token_training: bool = True,
+                 masked_exact_token_testing: bool = True,
                  ):
         super().__init__()
         self._expander = rhs_expander
@@ -50,8 +50,6 @@ class NeuralPDA(nn.Module):
         self._embedder = symbol_embedding
         self._lhs_symbol_mapper = lhs_symbol_mapper
         self._exact_token_predictor = exact_token_predictor
-
-        self._dropout = nn.Dropout(dropout)
 
         self._pre_tree_encoder = pre_tree_encoder
         self._pre_tree_self_attn = pre_tree_self_attn
@@ -63,6 +61,7 @@ class NeuralPDA(nn.Module):
         self.grammar_entry = grammar_entry
         self.max_derivation_step = max_derivation_step  # a very large upper limit for the runtime storage
         self.masked_exact_token_training = masked_exact_token_training
+        self.masked_exact_token_testing = masked_exact_token_testing
 
         # -------------------
         # the helpful storage for runtime forwarding
@@ -291,7 +290,7 @@ class NeuralPDA(nn.Module):
         lhs_symbol = torch.arange(num_symbols, device=valid_symbols.device)
 
         # init_state: (V, hid)
-        init_state = self._lhs_symbol_mapper(self._dropout(self._embedder(lhs_symbol)))
+        init_state = self._lhs_symbol_mapper(self._embedder(lhs_symbol))
         hx, _ = self._expander.init_hidden_states(
             init_state_for_stacked_rnn([init_state], self._expander.get_layer_num(), "all")
         )
@@ -305,7 +304,7 @@ class NeuralPDA(nn.Module):
             step_f_growth = fraternal_growth.index_select(dim=-1, index=step_index)
             same_as_lhs = (step_symbol == lhs_symbol.unsqueeze(-1)).unsqueeze(-1)
 
-            emb = self._dropout(self._embedder(step_symbol))  # (V, opt_num, emb_sz)
+            emb = self._embedder(step_symbol)  # (V, opt_num, emb_sz)
             # step_output: (V, opt_num, hid)
             hx, step_out = self._expander(emb, hx, input_aux=[step_p_growth, step_f_growth, same_as_lhs])
             mem(step_output=step_out)
@@ -333,7 +332,7 @@ class NeuralPDA(nn.Module):
         compliant_weights = self._tt(symbols).bool()
 
         # symbol_emb: (batch, *, max_seq, emb)
-        symbol_emb = self._dropout(self._embedder(symbols))
+        symbol_emb = self._embedder(symbols)
 
         seq_size = symbol_emb.size()[-2]
         exp_ts = expand_tensor_size_at_dim(tree_state, seq_size, dim=-2)
@@ -342,7 +341,7 @@ class NeuralPDA(nn.Module):
         # exact_logit: (batch, *, V)
         exact_logit = self._exact_token_predictor(proj_inp)
         # exact_logit = exact_logit + (compliant_weights + tiny_value_of_dtype(exact_logit.dtype)).log()
-        if not self.masked_exact_token_training or not self.training:
+        if (self.training and self.masked_exact_token_training) or (not self.training and self.masked_exact_token_testing):
             exact_logit = exact_logit.masked_fill(~compliant_weights, min_value_of_dtype(exact_logit.dtype))
         return exact_logit
 

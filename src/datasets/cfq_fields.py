@@ -88,14 +88,14 @@ class MidOrderTraversalField(Field):
         self.padding = padding
         self.max_derivation_symbols = max_derivation_symbols
         self.grammar_token_generation = grammar_token_generation
-        self.output_keys = output_keys or (
+        self.output_keys: List[str] = output_keys or [
             'tree_nodes',           # (batch, n_d), the tree nodes, i.e., all the expanded lhs
             'node_parents',         # (batch, n_d),
             'expansion_frontiers',  # (batch, n_d, max_runtime_stack_size),
             'derivations',          # (batch, n_d, max_seq), the gold derivations, actually num_derivations = num_lhs
             'exact_tokens',         # (batch, n_d, max_seq),
             'target_tokens',        # (batch, tgt_len),
-        )
+        ]
 
     def batch_tensor_by_key(self, tensors_by_keys: Mapping[str, List[torch.Tensor]]) -> Mapping[str, torch.Tensor]:
         output = dict()
@@ -107,20 +107,23 @@ class MidOrderTraversalField(Field):
     def generate_namespace_tokens(self, example) -> Generator[Tuple[str, str], None, None]:
         tree: lark.Tree = example.get(self.tree_key)
         ns_s, ns_et = self.namespaces
-        for subtree in tree.iter_subtrees_topdown():
-            if self.grammar_token_generation:
-                yield ns_s, subtree.data
-                yield ns_s, START_SYMBOL
-            yield ns_et, START_SYMBOL
-            for c in subtree.children:
-                if isinstance(c, lark.Token):
-                    if self.grammar_token_generation:
-                        yield ns_s, c.type
-                    yield ns_et, c.value.lower()
+        if tree is not None:
+            for subtree in tree.iter_subtrees_topdown():
+                if self.grammar_token_generation:
+                    yield ns_s, subtree.data
+                    yield ns_s, START_SYMBOL
+                yield ns_et, START_SYMBOL
+                for c in subtree.children:
+                    if isinstance(c, lark.Token):
+                        if self.grammar_token_generation:
+                            yield ns_s, c.type
+                        yield ns_et, c.value.lower()
 
     def to_tensor(self, example) -> Mapping[str, torch.Tensor]:
         tree: _Tree = example.get(self.tree_key)
-        assert tree is not None
+        if tree is None:
+            return dict((k, None) for k in self.output_keys)
+
         # to get the symbol_id and the exact_token id from a token string
         s_id = lambda t: self.vocab.get_token_index(t, self.namespaces[0])
         et_id = lambda t: self.vocab.get_token_index(t, self.namespaces[1])
@@ -193,11 +196,15 @@ class TutorBuilderField(Field):
     def batch_tensor_by_key(self, tensors_by_keys: Mapping[str, List[DefaultDict]]) -> Mapping[str, DefaultDict]:
         token_map = defaultdict(set)
         for m in tensors_by_keys['token_map']:
+            if m is None:
+                continue
             for symbol, tokens in m.items():
                 token_map[symbol].update(tokens)
 
         grammar_map = defaultdict(set)
         for m in tensors_by_keys['grammar_map']:
+            if m is None:
+                continue
             for lhs, rhs_list in m.items():
                 grammar_map[lhs].update(rhs_list)
 
@@ -205,6 +212,9 @@ class TutorBuilderField(Field):
 
     def to_tensor(self, example) -> Mapping[str, DefaultDict[int, list]]:
         tree: _Tree = example.get(self.tree_key)
+        if tree is None:
+            return {"token_map": None, "grammar_map": None}
+
         token_map = defaultdict(set)
         for k, v in self._generate_exact_token_mapping(tree):
             token_map[k].add(v)
