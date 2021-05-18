@@ -118,10 +118,12 @@ def sql_pda():
     p.src_ns = 'sent'
     p.tgt_ns = datasets.cfq_translator.UNIFIED_TREE_NS
     p.TRAINING_LIMIT = 100
+    p.encoder = "transformer"
+    p.enc_attn = "seq_mha"
     p.enc_sz = 128
     p.num_enc_layers = 2
-    p.emb_sz = 256
-    p.hidden_sz = 256
+    p.emb_sz = 128
+    p.hidden_sz = 128
     p.num_re0_layer = 6
     p.num_expander_layer = 1
     # p.expander_rnn = 'lstm'   # not implemented yet for inputs requiring broadcasting
@@ -360,12 +362,15 @@ def get_model(p, vocab: NSVocabulary, *, dataset_name: str):
         masked_exact_token_testing=p.masked_exact_token_testing,
     )
 
-    enc_attn_net = get_wrapped_attention(p.enc_attn, p.hidden_sz, encoder.get_output_dim(),
-                                         num_heads=p.num_heads,
-                                         use_linear=p.attn_use_linear,
-                                         use_bias=p.attn_use_bias,
-                                         use_tanh_activation=p.attn_use_tanh_activation,
-                                         )
+    enc_attn_net = UnpackedInputsSequential(
+        get_wrapped_attention(p.enc_attn, p.hidden_sz, encoder.get_output_dim(),
+                              num_heads=p.num_heads,
+                              use_linear=p.attn_use_linear,
+                              use_bias=p.attn_use_bias,
+                              use_tanh_activation=p.attn_use_tanh_activation,
+                              ),
+        SelectArgsById(0),
+    )
     enc_attn_mapping = (Activation.by_name('linear')() if p.hidden_sz == encoder.get_output_dim() else
                         nn.Linear(encoder.get_output_dim(), p.hidden_sz))
 
@@ -455,7 +460,7 @@ def main():
     @bot.attach_extension(Events.EPOCH_COMPLETED)
     def get_metric(bot: TrialBot):
         import json
-        print(json.dumps(bot.model.get_metric(reset=True, diagnosis=True)))
+        print(json.dumps(bot.model.get_metric(reset=True, diagnosis=True), sort_keys=True))
 
     @bot.attach_extension(Events.STARTED)
     def print_models(bot: TrialBot):

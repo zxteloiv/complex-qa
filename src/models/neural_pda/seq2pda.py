@@ -11,6 +11,7 @@ from utils.text_tool import make_human_readable_text
 from .batched_stack import TensorBatchStack
 import logging
 from ..modules.variational_dropout import VariationalDropout
+from trialbot.data import NSVocabulary
 
 from .tensor_typing_util import *
 
@@ -40,13 +41,15 @@ class Seq2PDA(nn.Module):
         self.token_loss = Average()
         self.topo_loss = Average()
         self.attn_loss = Average()
+        self.topo_err_stat = dict()
+        self.token_err_stat = dict()
         self.count_metric = 0
         self.err = Average()
         self.tok_pad = 0
         self.src_ns = src_ns
         self.tgt_ns = tgt_ns
         self.logger = logging.getLogger(self.__class__.__name__)
-        self.vocab = vocab
+        self.vocab: NSVocabulary = vocab
 
         # ------ diagnosis metrics ---------
         # split the
@@ -58,8 +61,6 @@ class Seq2PDA(nn.Module):
         topo_loss = self.topo_loss.get_metric(reset)
         attn_loss = self.attn_loss.get_metric(reset)
         count = self.count_metric
-        if reset:
-            self.count_metric = 0
         err = self.err.get_metric(reset)
         output = {"TokenLoss": token_loss, "TopoLoss": topo_loss, "AttnLoss": attn_loss, "ERR": err, "COUNT": count}
 
@@ -67,6 +68,12 @@ class Seq2PDA(nn.Module):
             tree_hid_norm = [m.get_metric(reset) for m in self.tree_hid_norm]
             tree_att_norm = [m.get_metric(reset) for m in self.tree_att_norm]
             output.update(TreeHidNorm=tree_hid_norm, TreeAttNorm=tree_att_norm)
+            output.update(SymbolErr=self.topo_err_stat, TokenErr=self.token_err_stat)
+
+        if reset:
+            self.count_metric = 0
+            self.topo_err_stat = dict()
+            self.token_err_stat = dict()
         return output
 
     def forward(self, *args, **kwargs):
@@ -131,14 +138,17 @@ class Seq2PDA(nn.Module):
 
         # ------------- 3. error metric computation -------------
         # *_err: (batch,)
-        topo_err = ((opt_prob.argmax(dim=-1) != choice) * tree_mask).sum(dim=-1) + (1 - choice_validity.int())
-        token_err = ((exact_logit.argmax(dim=-1) != exact_tokens) * et_mask).sum([1, 2])
+        topo_pos_err = ((opt_prob.argmax(dim=-1) != choice) * tree_mask)
+        topo_err = topo_pos_err.sum(dim=-1) + (1 - choice_validity.int())
+        token_pos_err = ((exact_logit.argmax(dim=-1) != exact_tokens) * et_mask)
+        token_err = token_pos_err.sum([1, 2])
         for e1, e2 in zip(topo_err, token_err):
             self.err(1. if e1 + e2 > 0 else 0.)
         self.count_metric += (choice_validity > 0).sum().item()
 
         # ================
         self._diagnose_tree_state(tree_mask)
+        self._diagnose_error(topo_pos_err, token_pos_err, tree_nodes, exact_tokens)
 
         output = {"loss": topo_loss + token_loss + attn_loss}
         self.token_loss(token_loss)
@@ -165,6 +175,31 @@ class Seq2PDA(nn.Module):
                 return context
 
         return _enc_attn_fn
+
+    def _diagnose_error(self, topo_pos_err, token_pos_err, tree_node, exact_tokens):
+        """
+        :param topo_pos_err: (batch, n_d)
+        :param token_pos_err: (batch, n_d, len)
+        :param tree_node: (batch, n_d)
+        :param exact_tokens: (batch, n_d, len)
+        :return:
+        """
+        flatten_zip = lambda x, y: zip(torch.flatten(x).tolist(), torch.flatten(y).tolist())
+        for err, node in flatten_zip(topo_pos_err, tree_node):
+            if err > 0:
+                err_symbol = self.vocab.get_token_from_index(node, self.tgt_ns[0])
+                if err_symbol in self.topo_err_stat:
+                    self.topo_err_stat[err_symbol] += 1
+                else:
+                    self.topo_err_stat[err_symbol] = 1
+
+        for err, node in flatten_zip(token_pos_err, exact_tokens):
+            if err > 0:
+                err_symbol = self.vocab.get_token_from_index(node, self.tgt_ns[1])
+                if err_symbol in self.token_err_stat:
+                    self.token_err_stat[err_symbol] += 1
+                else:
+                    self.token_err_stat[err_symbol] = 1
 
     def _diagnose_tree_state(self, tree_mask):
         tree_hid, tree_att = map(self.npda.diagnosis.get, ('tree_hid', 'tree_hid_att'))
