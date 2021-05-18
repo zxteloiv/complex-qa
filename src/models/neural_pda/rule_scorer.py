@@ -20,12 +20,16 @@ class RuleScorer(nn.Module, ABC):
         raise NotImplementedError
 
 class MLPScorerWrapper(RuleScorer):
-    def __init__(self, module: MultiInputsSequential):
+    def __init__(self, module: MultiInputsSequential, positive: bool = True):
         super().__init__()
+        self.positive = positive
         self._module = module
 
     def forward(self, rule_option: FT, query_context: FT, tree_state: FT) -> FT:
-        inp = torch.cat([rule_option, query_context, tree_state], dim=-1)
+        if self.positive:
+            inp = torch.cat([rule_option, query_context, tree_state], dim=-1)
+        else:
+            inp = torch.cat([rule_option, tree_state], dim=-1)
         return self._module(inp).squeeze(-1)
 
 class HeuristicMLPScorerWrapper(RuleScorer):
@@ -34,13 +38,16 @@ class HeuristicMLPScorerWrapper(RuleScorer):
         self._module = module
 
     def forward(self, rule_option: FT, query_context: FT, tree_state: FT) -> FT:
-        inp = torch.cat([rule_option, query_context, tree_state, query_context - tree_state, query_context * tree_state], dim=-1)
+        inp = torch.cat(
+            [rule_option, query_context, tree_state, query_context - tree_state, query_context * tree_state],
+            dim=-1)
         return self._module(inp).squeeze(-1)
 
 class GeneralizedInnerProductScorer(RuleScorer):
-    def __init__(self, normalized: bool = False):
+    def __init__(self, normalized: bool = False, positive: bool = True):
         super().__init__()
         self.normalized = normalized
+        self.positive = positive
 
     def forward(self, rule_option: FT, query_context: FT, tree_state: FT) -> FT:
         """
@@ -50,17 +57,23 @@ class GeneralizedInnerProductScorer(RuleScorer):
         :param tree_state: (batch, opt_num, hid)
         :return: the logits over the rule options. (batch, opt_num)
         """
-        inp = (rule_option * query_context * tree_state).sum(dim=-1)
+        if self.positive:
+            inp = (rule_option * query_context * tree_state).sum(dim=-1)
+        else:
+            inp = (rule_option * tree_state).sum(dim=-1)
+
         if self.normalized:
             inp = inp / (rule_option.norm(dim=-1) + 1e-15)
-            inp = inp / (query_context.norm(dim=-1) + 1e-15)
             inp = inp / (tree_state.norm(dim=-1) + 1e-15)
+            if self.positive:
+                inp = inp / (query_context.norm(dim=-1) + 1e-15)
 
         return inp
 
 class ConcatInnerProductScorer(RuleScorer):
-    def __init__(self, module: MultiInputsSequential):
+    def __init__(self, module: MultiInputsSequential, positive: bool = True):
         super().__init__()
+        self.positive = positive
         self._module = module
 
     def forward(self, rule_option: FT, query_context: FT, tree_state: FT) -> FT:
@@ -73,14 +86,18 @@ class ConcatInnerProductScorer(RuleScorer):
         """
 
         # state: (batch, opt_num, hid)
-        state = self._module(torch.cat([query_context, tree_state], dim=-1))
+        if self.positive:
+            state = self._module(torch.cat([query_context, tree_state], dim=-1))
+        else:
+            state = self._module(tree_state)
         inp = (rule_option * state).sum(dim=-1)
         return inp
 
 class AddInnerProductScorer(RuleScorer):
-    def __init__(self, hidden_sz: int, use_layer_norm: bool = True):
+    def __init__(self, hidden_sz: int, use_layer_norm: bool = True, positive: bool = True):
         super().__init__()
         self.layer_norm = nn.LayerNorm(hidden_sz) if use_layer_norm else None
+        self.positive = positive
 
     def forward(self, rule_option: FT, query_context: FT, tree_state: FT) -> FT:
         """
@@ -90,9 +107,12 @@ class AddInnerProductScorer(RuleScorer):
         :param tree_state: (batch, opt_num, hid)
         :return: the logits over the rule options. (batch, opt_num)
         """
+        if self.positive:
+            # state: (batch, opt_num, hid)
+            state = query_context + tree_state
+        else:
+            state = tree_state
 
-        # state: (batch, opt_num, hid)
-        state = query_context + tree_state
         if self.layer_norm is not None:
             state = self.layer_norm(state)
         inp = (rule_option * state).sum(dim=-1)

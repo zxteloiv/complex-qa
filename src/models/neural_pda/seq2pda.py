@@ -28,19 +28,17 @@ class Seq2PDA(nn.Module):
                  src_ns: str,
                  tgt_ns: List[str],
                  vocab,
-                 return_attn_weights: bool = False,
                  ):
         super().__init__()
         self.encoder = encoder
         self.src_embedder = src_embedding
         self.enc_attn_net = enc_attn_net
         self.enc_attn_mapping = enc_attn_mapping
-        self.return_attn_weights = return_attn_weights
         self.npda = npda
 
         self.token_loss = Average()
         self.topo_loss = Average()
-        self.attn_loss = Average()
+        self.distracting_loss = Average()
         self.topo_err_stat = dict()
         self.token_err_stat = dict()
         self.count_metric = 0
@@ -59,10 +57,11 @@ class Seq2PDA(nn.Module):
     def get_metric(self, reset=False, diagnosis=False):
         token_loss = self.token_loss.get_metric(reset)
         topo_loss = self.topo_loss.get_metric(reset)
-        attn_loss = self.attn_loss.get_metric(reset)
+        distract_loss = self.distracting_loss.get_metric(reset)
         count = self.count_metric
         err = self.err.get_metric(reset)
-        output = {"TokenLoss": token_loss, "TopoLoss": topo_loss, "AttnLoss": attn_loss, "ERR": err, "COUNT": count}
+        output = {"TokenLoss": token_loss, "TopoLoss": topo_loss, "TopoDistracting": distract_loss,
+                  "ERR": err, "COUNT": count}
 
         if diagnosis:
             tree_hid_norm = [m.get_metric(reset) for m in self.tree_hid_norm]
@@ -101,12 +100,13 @@ class Seq2PDA(nn.Module):
 
         # ================
         # opt_prob: (batch, n_d, opt_num)
+        # neg_prob: (batch, n_d, opt_num)
         # exact_logit: (batch, n_d, max_seq, V)
         # tree_grammar: (batch, n_d, opt_num, 4, max_seq)
-        opt_prob, exact_logit, tree_grammar = self.npda(tree_nodes=tree_nodes,
-                                                        node_parents=node_parents,
-                                                        expansion_frontiers=expansion_frontiers,
-                                                        derivations=derivations)
+        opt_prob, neg_prob, exact_logit, tree_grammar = self.npda(tree_nodes=tree_nodes,
+                                                                  node_parents=node_parents,
+                                                                  expansion_frontiers=expansion_frontiers,
+                                                                  derivations=derivations)
 
         # --------------- 1. training the topological choice --------------
         # valid_symbols, symbol_mask: (batch, n_d, opt_num, max_seq)
@@ -119,22 +119,23 @@ class Seq2PDA(nn.Module):
         tree_mask = (tree_nodes != self.tok_pad).long() * choice_validity.unsqueeze(-1).float()
         nll = -(opt_prob + 1e-15).log().gather(dim=-1, index=choice.unsqueeze(-1)).squeeze(-1)
         # use a sensitive loss such that the grad won't get discounted by the factor of 0-loss items
-        # topo_loss = (nll * tree_mask).sum() / (tree_mask.sum() + 1e-15)
-        topo_loss = (nll * tree_mask).sum() / (10 * source_tokens.size()[0])
+        topo_loss = (nll * tree_mask).sum() / (tree_mask.sum() + 1e-15)
+        # topo_loss = (nll * tree_mask).sum() / (10 * source_tokens.size()[0])
+
+        # *_loss: (batch, n_d)
+        distracting = 0
+        if neg_prob is not None:
+            # bounded_nkl: (batch, n_d)
+            bounded_nkl = (opt_prob * torch.relu(((neg_prob + 1e-15).log() - (opt_prob + 1e-15).log()) + 1)).sum(-1)
+            support_gt_1 = ((opt_prob > 0).sum(-1) > 1).long()
+            distracting = (bounded_nkl * support_gt_1).mean()
 
         # ------------- 2. training the exact token prediction ------------
         _, et_mask = prepare_input_mask(exact_tokens)
         tok_nll = -F.log_softmax(exact_logit, dim=-1).gather(dim=-1, index=exact_tokens.unsqueeze(-1)).squeeze(-1)
         # token_loss = seq_cross_ent(exact_logit, exact_tokens, et_mask, average="token")
-        token_loss = (tok_nll * et_mask).sum() / (10 * source_tokens.size()[0])
-
-        # ------------- 3. attention weight penalty ----------------
-        # attn_weights: (batch, n_d, src_seq_len)
-        if self.return_attn_weights:
-            attn_weights = self.enc_attn_net.get_latest_attn_weights()
-            attn_loss = F.relu(attn_weights.sum(dim=[1, 2]) - 1).mean()
-        else:
-            attn_loss = 0
+        # token_loss = (tok_nll * et_mask).sum() / (10 * source_tokens.size()[0])
+        token_loss = (tok_nll * et_mask).sum() / (et_mask.sum() + 1e-15)
 
         # ------------- 3. error metric computation -------------
         # *_err: (batch,)
@@ -150,10 +151,10 @@ class Seq2PDA(nn.Module):
         self._diagnose_tree_state(tree_mask)
         self._diagnose_error(topo_pos_err, token_pos_err, tree_nodes, exact_tokens)
 
-        output = {"loss": topo_loss + token_loss + attn_loss}
+        output = {"loss": topo_loss + token_loss + distracting}
         self.token_loss(token_loss)
         self.topo_loss(topo_loss)
-        self.attn_loss(attn_loss)
+        self.distracting_loss(distracting)
         return output
 
     def _reset_variational_dropout(self):
@@ -169,10 +170,7 @@ class Seq2PDA(nn.Module):
         def _enc_attn_fn(out):
             context = self.enc_attn_net(out, source_hidden, source_mask)
             context = self.enc_attn_mapping(context)
-            if self.return_attn_weights:
-                return context, self.enc_attn_net.get_latest_attn_weights()
-            else:
-                return context
+            return context
 
         return _enc_attn_fn
 

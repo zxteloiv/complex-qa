@@ -33,6 +33,7 @@ class NeuralPDA(nn.Module):
                  residual_norm_after_self_attn: nn.Module,
 
                  rule_scorer: RuleScorer,
+                 negative_rule_scorer: RuleScorer,
 
                  exact_token_predictor: nn.Module,
 
@@ -54,6 +55,7 @@ class NeuralPDA(nn.Module):
         self._pre_tree_encoder = pre_tree_encoder
         self._pre_tree_self_attn = pre_tree_self_attn
         self._rule_scorer = rule_scorer
+        self._neg_rule_scorer = negative_rule_scorer
         self._residual_norm = residual_norm_after_self_attn
 
         # -------------------
@@ -156,12 +158,13 @@ class NeuralPDA(nn.Module):
 
         # opt_prob: (batch, n_d, opt_num)
         # opt_repr: (batch, n_d, opt_num, hid)
-        opt_prob, opt_repr = self._get_topological_choice_distribution(tree_nodes, tree_hid_att, query_context)
+        # neg_prob: (batch, n_d, opt_num)
+        opt_prob, opt_repr, neg_prob = self._get_topological_choice_distribution(tree_nodes, tree_hid_att, query_context)
 
         exact_logit = self._predict_exact_token_after_derivation(derivations, tree_hid_att, query_context)
 
         self.diagnosis.update(tree_hid=tree_hid, tree_hid_att=tree_hid_att)
-        return opt_prob, exact_logit, tree_grammar
+        return opt_prob, neg_prob, exact_logit, tree_grammar
 
     def _forward_derivation_step(self):
         """
@@ -192,7 +195,7 @@ class NeuralPDA(nn.Module):
 
         # opt_prob: (batch, opt_num)
         # opt_repr: (batch, opt_num, hid)
-        opt_prob, opt_repr = self._get_topological_choice_distribution(lhs, tree_state, query_context)
+        opt_prob, opt_repr, _ = self._get_topological_choice_distribution(lhs, tree_state, query_context)
 
         # best_choice: (batch,)
         best_choice = opt_prob.argmax(dim=-1)
@@ -273,7 +276,13 @@ class NeuralPDA(nn.Module):
         opt_logit = self._rule_scorer(opt_repr, exp_qc, exp_ts)
         opt_prob = masked_softmax(opt_logit, opt_mask.bool())
 
-        return opt_prob, opt_repr
+        if self._neg_rule_scorer is not None:
+            neg_opt_logit = self._neg_rule_scorer(opt_repr, exp_qc, exp_ts)
+            neg_prob = masked_softmax(neg_opt_logit, opt_mask.bool())
+        else:
+            neg_prob = None
+
+        return opt_prob, opt_repr, neg_prob
 
     def _get_full_grammar_repr(self):
         (
