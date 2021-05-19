@@ -7,10 +7,7 @@ import logging
 import datasets.cfq
 import datasets.cfq_translator
 import datasets.comp_gen_bundle as cg_bundle
-cg_bundle.install_sql_qa_datasets()
-from utils.trialbot_setup import install_dataset_into_registry
-install_dataset_into_registry(cg_bundle.CG_DATA_REG)
-
+cg_bundle.install_sql_qa_datasets(Registry._datasets)
 import datasets.cg_bundle_translator
 
 def get_tranx_updater(bot: TrialBot):

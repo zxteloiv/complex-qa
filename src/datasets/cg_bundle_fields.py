@@ -141,27 +141,38 @@ class ProcessedSentField(SeqField):
         return " ".join(correct_tokens)
 
 class TerminalRuleSeqField(SeqField):
+    def __init__(self, keywords: dict, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.keywords = keywords
+
     def _get_rule_str(self, node: Union[_Tree, _Token]):
         if isinstance(node, _Tree):
             rule = [node.data]  # LHS
             children: List[Union[_Tree, _Token]] = node.children
             for tok in children:
-                rule.append(tok.data if isinstance(tok, _Tree) else tok.type)
+                if isinstance(tok, _Tree):
+                    rule.append(tok.data)
+                elif tok.type in self.keywords:
+                    rule.append(self.keywords[tok.type])
+                else:
+                    rule.append(tok.type)
+
             rule_str = ' '.join(rule)
         else:
-            # lower case only applies to the node value
+            # the keywords terminals will not be here because they are ignored from the traverse_tree method.
             rule_str = node.type + ' ' + (node.value.lower() if self.lower_case else node.value)
 
         return rule_str
 
-    @classmethod
-    def traverse_tree(cls, tree: _Tree) -> Generator[Union[_Tree, _Token], None, None]:
+    def traverse_tree(self, tree: _Tree) -> Generator[Union[_Tree, _Token], None, None]:
         stack = [tree]
         while len(stack) > 0:
             node = stack.pop()
             yield node
             if isinstance(node, _Tree):
                 for n in reversed(node.children):
+                    if isinstance(n, _Token) and n.type in self.keywords:
+                        continue
                     stack.append(n)
 
     def generate_namespace_tokens(self, example) -> Generator[Tuple[str, str], None, None]:

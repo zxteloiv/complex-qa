@@ -13,12 +13,14 @@ class SQLSeq(FieldAwareTranslator):
             SeqField(source_key='sent', renamed_key='source_tokens', add_start_end_toks=False,)
         ])
 
-@Registry.translator('cg_sql_tranx')
-class CGSQLTranXTranslator(FieldAwareTranslator):
+@Registry.translator('mysql_tranx')
+class MySQLTranXTranslator(FieldAwareTranslator):
     def __init__(self):
+        from utils.sql_keywords import MYSQL_KEYWORDS
         super().__init__(field_list=[
             ProcessedSentField(source_key='sent', renamed_key='source_tokens', add_start_end_toks=False,),
-            TerminalRuleSeqField(source_key='sql_tree', renamed_key="target_tokens", namespace="rule_seq",),
+            TerminalRuleSeqField(keywords=MYSQL_KEYWORDS,
+                                 source_key='sql_tree', renamed_key="target_tokens", namespace="rule_seq",),
         ])
 
     def batch_tensor(self, tensors):
@@ -32,6 +34,17 @@ class CGSQLTranXTranslator(FieldAwareTranslator):
                 return None
 
         return output
+
+@Registry.translator('sqlite_tranx')
+class SQLiteTranXTranslator(FieldAwareTranslator):
+    def __init__(self):
+        from utils.sql_keywords import SQLITE_KEYWORDS
+        super().__init__(field_list=[
+            ProcessedSentField(source_key='sent', renamed_key='source_tokens', add_start_end_toks=False,),
+            TerminalRuleSeqField(keywords=SQLITE_KEYWORDS,
+                                 source_key='sql_tree', renamed_key="target_tokens", namespace="rule_seq",),
+        ])
+    batch_tensor = MySQLTranXTranslator.batch_tensor
 
 
 # namespaces definition and the corresponding fidelity
