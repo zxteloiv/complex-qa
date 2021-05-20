@@ -1,15 +1,13 @@
-from typing import Any, Callable, Optional, Tuple, Literal
+from typing import Callable, Optional, Tuple
 import torch
 from torch import nn
 from torch.nn import functional as F
 
 from allennlp.nn.util import masked_softmax
-from ..interfaces.attention import VectorContextComposer
-from .batched_stack import BatchStack, TensorBatchStack
-from ..interfaces.unified_rnn import UnifiedRNN
-from ..modules.stacked_rnn_cell import StackedRNNCell
+from .batched_stack import TensorBatchStack
+from models.base_s2s.stacked_rnn_cell import StackedRNNCell
 from utils.seq_collector import SeqCollector
-from allennlp.nn.util import min_value_of_dtype, tiny_value_of_dtype
+from allennlp.nn.util import min_value_of_dtype
 from .partial_tree_encoder import TopDownTreeEncoder
 from .tree import Tree
 from .rule_scorer import RuleScorer

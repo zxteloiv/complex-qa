@@ -3,7 +3,7 @@ import torch
 from torch import nn
 
 def get_re2_variant(hparams, vocab: NSVocabulary):
-    from models.modules.stacked_encoder import StackedEncoder
+    from models.base_s2s.stacked_encoder import StackedEncoder
     from models.modules.embedding_dropout import SeqEmbeddingDropoutWrapper
     from models.matching.mha_encoder import MHAEncoder
     from models.matching.re2 import RE2
@@ -120,7 +120,7 @@ def get_giant_model(hparams, vocab: NSVocabulary):
     return model
 
 def get_re2_char_model(hparams, vocab: NSVocabulary):
-    from models.modules.stacked_encoder import StackedEncoder
+    from models.base_s2s.stacked_encoder import StackedEncoder
     from models.modules.embedding_dropout import SeqEmbeddingDropoutWrapper
     from models.modules.word_char_embedding import WordCharEmbedding
     from models.matching.mha_encoder import MHAEncoder

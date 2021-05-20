@@ -21,7 +21,6 @@ class Attention(torch.nn.Module):
     def get_latest_attn_weights(self) -> torch.Tensor:
         raise NotImplementedError
 
-
 class AttentionWeight(torch.nn.Module):
     """Compute the attention similarities only,
     NOTE the returned value is not context vector but the attention weights"""
@@ -44,4 +43,7 @@ class VectorContextComposer(torch.nn.Module):
     How to combine the context vector and the hidden states then?
     """
     def forward(self, context: torch.Tensor, hidden: torch.Tensor) -> torch.Tensor:
+        raise NotImplementedError
+
+    def get_output_dim(self) -> int:
         raise NotImplementedError

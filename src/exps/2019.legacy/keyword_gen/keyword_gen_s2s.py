@@ -6,7 +6,7 @@ from allennlp.modules import Embedding
 from allennlp.modules.attention import BilinearAttention
 from utils.nn import AllenNLPAttentionWrapper
 from models.keyword_conditioned_gen.keyword_seq2seq import Seq2KeywordSeq, StackedEncoder
-from models.modules.stacked_rnn_cell import StackedLSTMCell
+from models.base_s2s.stacked_rnn_cell import StackedLSTMCell
 from models.transformer.encoder import TransformerEncoder
 from models.modules.mixture_softmax import MoSProjection
 

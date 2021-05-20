@@ -27,11 +27,11 @@ from models.ada_s2s.unc_seq2seq import UncSeq2Seq
 from models.transformer.multi_head_attention import SingleTokenMHAttentionWrapper, GeneralMultiHeadAttention
 from utils.nn import AllenNLPAttentionWrapper
 from models.transformer.encoder import TransformerEncoder
-from models.modules.universal_hidden_state_wrapper import UniversalHiddenStateWrapper, RNNType
-from models.modules.stacked_rnn_cell import StackedLSTMCell, StackedGRUCell
+from models.modules.universal_hidden_state_wrapper import TorchRNNWrapper, RNNType
+from models.base_s2s.stacked_rnn_cell import StackedLSTMCell, StackedGRUCell
 from allennlp.common.util import START_SYMBOL, END_SYMBOL
 from allennlp.nn.util import move_to_device
-from models.modules.stacked_encoder import StackedEncoder
+from models.base_s2s.stacked_encoder import StackedEncoder
 
 def main():
     parser = training.exp_runner.opt_parser.get_trainer_opt_parser()
@@ -259,13 +259,13 @@ def get_encoder(st_ds_conf: dict):
 def get_rnn_cell(st_ds_conf: dict, input_dim: int, hidden_dim: int):
     cell_type = st_ds_conf['decoder']
     if cell_type == "lstm":
-        return UniversalHiddenStateWrapper(RNNType.LSTM(input_dim, hidden_dim))
+        return TorchRNNWrapper(RNNType.LSTM(input_dim, hidden_dim))
     elif cell_type == "gru":
-        return UniversalHiddenStateWrapper(RNNType.GRU(input_dim, hidden_dim))
+        return TorchRNNWrapper(RNNType.GRU(input_dim, hidden_dim))
     elif cell_type == "ind_rnn":
-        return UniversalHiddenStateWrapper(RNNType.IndRNN(input_dim, hidden_dim))
+        return TorchRNNWrapper(RNNType.IndRNN(input_dim, hidden_dim))
     elif cell_type == "rnn":
-        return UniversalHiddenStateWrapper(RNNType.VanillaRNN(input_dim, hidden_dim))
+        return TorchRNNWrapper(RNNType.VanillaRNN(input_dim, hidden_dim))
     elif cell_type == 'n_lstm':
         n_layer = st_ds_conf['dec_cell_height']
         return StackedLSTMCell(input_dim, hidden_dim, n_layer, st_ds_conf['intermediate_dropout'])

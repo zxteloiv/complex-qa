@@ -7,7 +7,7 @@ import math
 from ..interfaces.unified_rnn import UnifiedRNN
 
 class SymTypedRNNCell(UnifiedRNN):
-    def _forward_internal(self, inputs, hidden: Optional[torch.Tensor]) -> Tuple[Any, torch.Tensor]:
+    def forward(self, inputs, hidden: Optional[torch.Tensor]) -> Tuple[Any, torch.Tensor]:
         """
         :param inputs: (batch, *, in_dim)
         :param hidden: (batch, out_dim)
@@ -15,6 +15,9 @@ class SymTypedRNNCell(UnifiedRNN):
         """
         out = self._input_mapping(inputs)   # (batch, *, out_dim)
         if hidden is not None:
+            if self._hx_dropout_fn is not None:
+                hidden = self._hx_dropout_fn(hidden)
+
             # h_weight: (out_dim, out_dim)
             h_weight = torch.matmul(self._sym_h_weight.t(), self._sym_h_weight)
             # projected_h: (batch, out_dim)
@@ -32,6 +35,9 @@ class SymTypedRNNCell(UnifiedRNN):
     def get_output_state(self, hidden) -> torch.Tensor:
         return hidden
 
+    def set_hx_dropout_fn(self, hx_dropout_fn):
+        self._hx_dropout_fn = hx_dropout_fn
+
     def init_hidden_states(self, forward_out) -> Tuple[Any, torch.Tensor]:
         return forward_out, forward_out
 
@@ -43,6 +49,8 @@ class SymTypedRNNCell(UnifiedRNN):
         self._input_mapping = nn.Linear(input_dim, output_dim)
 
         self._sym_h_weight = nn.Parameter(torch.empty(output_dim, output_dim, dtype=torch.float))
+
+        self._hx_dropout_fn = None
 
         if nonlinearity.lower() not in ('tanh', 'sigmoid', 'linear'):
             nonlinearity = 'leaky_relu'

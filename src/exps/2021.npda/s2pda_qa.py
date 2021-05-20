@@ -224,7 +224,7 @@ def get_rule_scorer(p, vocab):
     from models.neural_pda.rule_scorer import MLPScorerWrapper, HeuristicMLPScorerWrapper
     from models.neural_pda.rule_scorer import GeneralizedInnerProductScorer, ConcatInnerProductScorer
     from models.neural_pda.rule_scorer import AddInnerProductScorer
-    from models.modules.container import MultiInputsSequential, UnpackedInputsSequential, SelectArgsById
+    from models.modules.container import MultiInputsSequential
     from models.modules.variational_dropout import VariationalDropout
     from allennlp.nn.activations import Activation
 
@@ -295,10 +295,10 @@ def get_model(p, vocab: NSVocabulary, *, dataset_name: str):
     from torch import nn
     from models.neural_pda.seq2pda import Seq2PDA
     from models.neural_pda.npda import NeuralPDA
-    from models.modules.stacked_encoder import StackedEncoder
+    from models.base_s2s.stacked_encoder import StackedEncoder
     from models.modules.attention_wrapper import get_wrapped_attention
     from models.modules.quantized_token_predictor import QuantTokenPredictor
-    from models.modules.stacked_rnn_cell import StackedRNNCell, StackedLSTMCell
+    from models.base_s2s.stacked_rnn_cell import StackedRNNCell, StackedLSTMCell
     from models.modules.sym_typed_rnn_cell import SymTypedRNNCell
     from models.modules.container import MultiInputsSequential, UnpackedInputsSequential, SelectArgsById
     from models.modules.mixture_softmax import MoSProjection
@@ -511,7 +511,6 @@ def main():
         from trialbot.training.extensions import every_epoch_model_saver
         from utils.trial_bot_extensions import end_with_nan_loss
         from utils.trial_bot_extensions import evaluation_on_dev_every_epoch
-        from utils.trial_bot_extensions import save_model_every_num_iters
         bot.add_event_handler(Events.EPOCH_COMPLETED, evaluation_on_dev_every_epoch, 90, skip_first_epochs=1)
         bot.add_event_handler(Events.ITERATION_COMPLETED, end_with_nan_loss, 100)
         bot.add_event_handler(Events.EPOCH_COMPLETED, every_epoch_model_saver, 100)

@@ -101,7 +101,7 @@ def cfq_mod_ent_tranx():
     from trialbot.utils.root_finder import find_root
     p = HyperParamSet.common_settings(find_root())
     p.TRAINING_LIMIT = 10  # in num of epochs
-    p.OPTIM = "RAdam"
+    p.OPTIM = "adabelief"
     p.batch_sz = 32
 
     p.emb_sz = 256
@@ -110,16 +110,20 @@ def cfq_mod_ent_tranx():
     p.hidden_sz = 256
     p.enc_attn = "bilinear"
     p.dec_hist_attn = "dot_product"
-    p.concat_attn_to_dec_input = False
+    p.dec_inp_composer = 'cat_mapping'
+    p.dec_inp_comp_activation = 'mish'
+    p.proj_inp_composer = 'mapping_add'
+    p.proj_inp_comp_activation = 'tanh'
     p.encoder = "bilstm"
     p.num_enc_layers = 2
-    p.dropout = .2
     p.decoder = "lstm"
     p.num_dec_layers = 2
+    p.dropout = .2
     p.max_decoding_step = 100
     p.scheduled_sampling = .1
     p.decoder_init_strategy = "forward_last_parallel"
-    p.tied_decoder_embedding = True
+    p.tied_decoder_embedding = False
+    p.src_emb_trained_file = "~/.glove/glove.6B.100d.txt.gz"
     return p
 
 @Registry.hparamset()
@@ -137,6 +141,7 @@ def common_sql_tranx():
     from trialbot.training.hparamset import HyperParamSet
     from trialbot.utils.root_finder import find_root
     p = HyperParamSet.common_settings(find_root())
+
     p.TRAINING_LIMIT = 100  # in num of epochs
     p.OPTIM = "adabelief"
     p.WEIGHT_DECAY = .1
@@ -149,7 +154,10 @@ def common_sql_tranx():
     p.tgt_namespace = 'rule_seq'
     p.enc_attn = "bilinear"
     p.dec_hist_attn = "none"
-    p.concat_attn_to_dec_input = False
+    p.dec_inp_composer = 'cat_mapping'
+    p.dec_inp_comp_activation = 'mish'
+    p.proj_inp_composer = 'cat_mapping'
+    p.proj_inp_comp_activation = 'mish'
     p.encoder = "bilstm"
     p.num_enc_layers = 2
     p.dropout = .5
@@ -159,6 +167,7 @@ def common_sql_tranx():
     p.scheduled_sampling = .1
     p.decoder_init_strategy = "forward_last_parallel"
     p.tied_decoder_embedding = True
+    p.src_emb_trained_file = "~/.glove/glove.6B.100d.txt.gz"
     return p
 
 @Registry.hparamset()

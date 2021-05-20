@@ -258,14 +258,15 @@ def get_final_encoder_states(encoder_outputs: torch.Tensor,
         final_encoder_output = torch.cat([final_forward_output, final_backward_output], dim=-1)
     return final_encoder_output
 
-def get_decoder_initial_states(layer_state: List[torch.Tensor],
-                               source_mask: torch.LongTensor,
-                               strategy: str = "forward_last_all",
-                               is_bidirectional: bool = False,
-                               num_decoder_layers: int = 1,
-                               ) -> List[torch.Tensor]:
+def init_stacked_dec_state_from_enc(layer_state: List[torch.Tensor],
+                                    source_mask: torch.LongTensor,
+                                    strategy: str = "forward_last_all",
+                                    is_bidirectional: bool = False,
+                                    num_decoder_layers: int = 1,
+                                    ) -> List[torch.Tensor]:
     """
-    Initialize the hidden states for decoder given encoders
+    Initialize the states for stacked decoder given stacked encoders.
+    The output is usually passed further to the stacked decoder to initialize the blackbox hidden states.
     :param layer_state: [(batch, src_len, hidden_dim)]
     :param source_mask: (batch, src_len)
     :param strategy: a string to indicate how to aggregate and assign initial states to the decoder

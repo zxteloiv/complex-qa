@@ -1,6 +1,6 @@
 from typing import Optional, List
 import torch.nn
-from ..modules.stacked_rnn_cell import StackedRNNCell
+from models.base_s2s.stacked_rnn_cell import StackedRNNCell
 from allennlp.nn.util import masked_softmax
 from allennlp.training.metrics.perplexity import Perplexity, Average
 from utils.nn import seq_cross_ent, seq_likelihood

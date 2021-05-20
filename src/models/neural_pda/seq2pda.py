@@ -1,12 +1,11 @@
-from typing import Optional, Tuple, Generic, List
+from typing import List
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from models.modules.stacked_encoder import StackedEncoder
-from allennlp.training.metrics.perplexity import Perplexity, Average
-from utils.nn import prepare_input_mask, seq_cross_ent, init_state_for_stacked_rnn
+from models.base_s2s.stacked_encoder import StackedEncoder
+from allennlp.training.metrics.perplexity import Average
+from utils.nn import prepare_input_mask
 from .npda import NeuralPDA
-from utils.seq_collector import SeqCollector
 from utils.text_tool import make_human_readable_text
 from .batched_stack import TensorBatchStack
 import logging

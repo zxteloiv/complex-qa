@@ -1,11 +1,20 @@
 from typing import Optional
 import torch.nn
+from models.modules.variational_dropout import VariationalDropout
+from models.modules.container import SelectArgsById, UnpackedInputsSequential
+
 
 class StackedEncoder(torch.nn.Module):
     """
     Stacked Encoder over a token sequence. The encoder could be either based on RNN or Transformer.
-    The Encoder is usually not used with any initial hidden states.
-    If it is a must, then the RNN_LM from models.base_s2s.rnn_lm may be used instead.
+    The Encoder must not be used with any initial hidden states
+    because
+    1) the user must know the internals of the hidden states in that case,
+    2) only RNN models accept the initial hidden states, transformers do not have that.
+
+    If it is a must, then refer to the models.base_s2s.rnn_lm.RNN_LM which is defined via the StackedRNNCells,
+    But the stacked rnn cells do not support bidirectional forward by default.
+    The allennlp.modules.seq2seq_encoders.PytorchSeq2SeqWrapper is also useful.
     """
     def __init__(self, encs,
                  input_size: Optional = None,
@@ -18,7 +27,7 @@ class StackedEncoder(torch.nn.Module):
         self.layer_encs = torch.nn.ModuleList(encs)
         self.input_size = input_size or encs[0].get_input_dim()
         self.output_size = output_size
-        self.input_dropout = torch.nn.Dropout(input_dropout)
+        self.input_dropout = VariationalDropout(input_dropout, on_the_fly=True)
         self.output_every_layer = output_every_layer
 
     def forward(self,
@@ -59,13 +68,15 @@ class StackedEncoder(torch.nn.Module):
 
     @classmethod
     def get_encoder(cls, p):
-        from models.transformer.encoder import TransformerEncoder
-        from allennlp.modules.seq2seq_encoders import LstmSeq2SeqEncoder
+        from allennlp.modules.seq2seq_encoders import PytorchSeq2SeqWrapper, AugmentedLstmSeq2SeqEncoder
+        from allennlp.modules.seq2seq_encoders import StackedBidirectionalLstmSeq2SeqEncoder
 
         if p.encoder == "lstm":
-            enc_cls = lambda floor: LstmSeq2SeqEncoder(p.emb_sz if floor == 0 else p.hidden_sz,
-                                                       p.hidden_sz, bidirectional=False)
+            enc_cls = lambda floor: PytorchSeq2SeqWrapper(
+                torch.nn.LSTM(p.emb_sz if floor == 0 else p.hidden_sz, p.hidden_sz, batch_first=True)
+            )
         elif p.encoder == "transformer":
+            from models.transformer.encoder import TransformerEncoder
             enc_cls = lambda floor: TransformerEncoder(
                 input_dim=p.emb_sz if floor == 0 else p.hidden_sz,
                 hidden_dim=p.hidden_sz,
@@ -78,11 +89,25 @@ class StackedEncoder(torch.nn.Module):
                 use_positional_embedding=(floor == 0),
             )
         elif p.encoder == "bilstm":
-            enc_cls = lambda floor: LstmSeq2SeqEncoder(p.emb_sz if floor == 0 else p.hidden_sz * 2, # bidirectional
-                                                       p.hidden_sz, bidirectional=True)
+            enc_cls = lambda floor: PytorchSeq2SeqWrapper(torch.nn.LSTM(
+                p.emb_sz if floor == 0 else p.hidden_sz * 2, p.hidden_sz, bidirectional=True, batch_first=True,
+            ))
+        elif p.encoder == "aug_lstm":
+            enc_cls = lambda floor: AugmentedLstmSeq2SeqEncoder(p.emb_sz if floor == 0 else p.hidden_sz, p.hidden_sz,
+                                                                recurrent_dropout_probability=p.dropout,
+                                                                use_highway=True,)
+        elif p.encoder == "aug_bilstm":
+            enc_cls = lambda floor: StackedBidirectionalLstmSeq2SeqEncoder(
+                p.emb_sz if floor == 0 else p.hidden_sz, p.hidden_sz, num_layers=1,
+                recurrent_dropout_probability=p.dropout,
+                use_highway=True,
+            )
         else:
             raise NotImplementedError
 
-        encoder = StackedEncoder([enc_cls(floor) for floor in range(p.num_enc_layers)], input_dropout=p.dropout)
+        encoder = StackedEncoder([enc_cls(floor) for floor in range(p.num_enc_layers)],
+                                 input_size=p.emb_sz,
+                                 output_size=p.hidden_sz,
+                                 input_dropout=p.dropout)
         return encoder
 

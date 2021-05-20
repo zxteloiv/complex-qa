@@ -1,15 +1,14 @@
 from typing import Union, Optional, Tuple, Dict, Any
 import numpy as np
-import re
 import torch
 import torch.nn
 from trialbot.data import NSVocabulary, PADDING_TOKEN, DEFAULT_OOV_TOKEN
 from allennlp.modules import TokenEmbedder
 from models.interfaces.attention import Attention as IAttn
-from models.modules.stacked_rnn_cell import StackedRNNCell
+from models.base_s2s.stacked_rnn_cell import StackedRNNCell
 from utils.nn import filter_cat, prepare_input_mask, get_decoder_initial_states
 from allennlp.training.metrics import BLEU
-from models.modules.stacked_encoder import StackedEncoder
+from models.base_s2s.stacked_encoder import StackedEncoder
 
 class Seq2KeywordSeq(torch.nn.Module):
     def __init__(self,
