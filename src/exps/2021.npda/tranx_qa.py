@@ -70,6 +70,7 @@ def main():
         bot.add_event_handler(Events.ITERATION_COMPLETED, end_with_nan_loss, 100)
         bot.add_event_handler(Events.ITERATION_COMPLETED, collect_garbage, 95)
         bot.add_event_handler(Events.EPOCH_COMPLETED, evaluation_on_dev_every_epoch, 90, rewrite_eval_hparams={"batch_sz": 32})
+        bot.add_event_handler(Events.EPOCH_COMPLETED, evaluation_on_dev_every_epoch, 80, rewrite_eval_hparams={"batch_sz": 32}, on_test_data=True)
         bot.add_event_handler(Events.EPOCH_COMPLETED, collect_garbage, 95)
         bot.add_event_handler(Events.EPOCH_COMPLETED, every_epoch_model_saver, 100)
 

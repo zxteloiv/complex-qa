@@ -76,18 +76,23 @@ def evaluation_on_dev_every_epoch(bot: TrialBot, interval: int = 1,
                                   clear_cache_each_batch: bool = True,
                                   rewrite_eval_hparams: dict = None,
                                   skip_first_epochs: int = 0,
+                                  on_test_data: bool = False,
                                   ):
     from trialbot.utils.move_to_device import move_to_device
     import json
     if bot.state.epoch % interval == 0 and bot.state.epoch > skip_first_epochs:
-        bot.logger.info("Running for evaluation metrics ...")
+        if on_test_data:
+            bot.logger.info("Running for evaluation metrics on testing ...")
+        else:
+            bot.logger.info("Running for evaluation metrics ...")
 
         dataset, hparams = bot.dev_set, bot.hparams
         rewrite_eval_hparams = rewrite_eval_hparams or dict()
         for k, v in rewrite_eval_hparams.items():
             setattr(hparams, k, v)
         from trialbot.data.iterators import RandomIterator
-        iterator = RandomIterator(bot.dev_set, hparams.batch_sz, bot.translator, shuffle=False, repeat=False)
+        dataset = bot.test_set if on_test_data else bot.dev_set
+        iterator = RandomIterator(dataset, hparams.batch_sz, bot.translator, shuffle=False, repeat=False)
         model = bot.model
         device = bot.args.device
         model.eval()
