@@ -167,18 +167,34 @@ def common_sql_tranx():
     p.scheduled_sampling = .1
     p.decoder_init_strategy = "forward_last_parallel"
     p.tied_decoder_embedding = True
-    p.src_emb_trained_file = "~/.glove/glove.6B.100d.txt.gz"
     return p
 
 @Registry.hparamset()
 def scholar_common():
     p = common_sql_tranx()
     p.TRAINING_LIMIT = 150
+    p.lr_scheduler_kwargs = {"model_size": 400, "warmup_steps": 50} # noam lr_scheduler
     p.tied_decoder_embedding = False
     p.num_enc_layers = 1
     p.num_dec_layers = 1
-    p.emb_sz = 384
-    p.hidden_sz = 384
+    p.emb_sz = 100
+
+    p.encoder = 'lstm'
+    p.enc_out_dim = 300
+    p.enc_attn = "dot_product"
+    p.dec_in_dim = p.enc_out_dim
+    p.dec_out_dim = p.enc_out_dim
+
+    p.proj_in_dim = p.emb_sz
+
+    p.enc_dropout = 0
+    p.dec_dropout = 0.5
+    p.dec_hist_attn = "none"
+    p.dec_inp_composer = 'cat_mapping'
+    p.dec_inp_comp_activation = 'relu'
+    p.proj_inp_composer = 'cat_mapping'
+    p.proj_inp_comp_activation = 'relu'
+    p.src_emb_pretrained_file = "~/.glove/glove.6B.100d.txt.gz"
     return p
 
 @Registry.hparamset()

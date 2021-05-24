@@ -141,9 +141,10 @@ class ProcessedSentField(SeqField):
         return " ".join(correct_tokens)
 
 class TerminalRuleSeqField(SeqField):
-    def __init__(self, keywords: dict, *args, **kwargs):
+    def __init__(self, keywords: dict = None, no_terminal_rule: bool = False, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.keywords = keywords
+        self.no_terminal_rules = no_terminal_rule or {}
 
     def _get_rule_str(self, node: Union[_Tree, _Token]):
         if isinstance(node, _Tree):
@@ -152,6 +153,8 @@ class TerminalRuleSeqField(SeqField):
             for tok in children:
                 if isinstance(tok, _Tree):
                     rule.append(tok.data)
+                elif self.no_terminal_rules:
+                    rule.append(tok.value)
                 elif tok.type in self.keywords:
                     rule.append(self.keywords[tok.type])
                 else:
@@ -171,7 +174,7 @@ class TerminalRuleSeqField(SeqField):
             yield node
             if isinstance(node, _Tree):
                 for n in reversed(node.children):
-                    if isinstance(n, _Token) and n.type in self.keywords:
+                    if isinstance(n, _Token) and (self.no_terminal_rules or n.type in self.keywords):
                         continue
                     stack.append(n)
 

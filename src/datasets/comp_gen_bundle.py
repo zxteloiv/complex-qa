@@ -15,6 +15,7 @@ import os
 from os.path import join
 from functools import partial
 import logging
+import re
 
 ROOT = find_root()
 CG_DATA_PATH = join(ROOT, 'data', 'CompGen', 'sql data')
@@ -71,12 +72,33 @@ class FlattenSeqDS(CompositionalDataset):
                 "sql": group['sql'][idx[1]],
                 'variables': group['variables'],
             }
+
+        sql = instance['sql']
+        # remove the table name with a fixed placeholder as in Oren et al. 2020,
+        # the table alias actually starts with a table name, so its not required to generate.
+        # the trick will significantly remove about 20 rules for terminals
+        sql = re.sub(r" [A-Z_]+ AS ([A-Z_]+alias[0-9]) ", " TABLE_PLACEHOLDER AS \g<1> ", sql)
+
+        # adopt some of the preprocessing codes from Oren et al.
+        # only the mysql grammar accepts double quotes.
+        sql = sql.replace("%", "").replace('"', "'")
+
+        instance['sql'] = sql
         return instance
 
 def _get_grammar_tag_by_filename(grammar_file: str):
     grammar_tag = grammar_file[grammar_file.rfind('/') + 1:grammar_file.index('.lark')]
     grammar_tag = grammar_tag[grammar_tag.rfind('_') + 1:].lower()
     return grammar_tag
+
+def _get_grammar_start(grammar_file: str):
+    if 'sqlite' in grammar_file.lower():
+        startpoint = 'parse'
+    elif 'mysql' in grammar_file.lower():
+        startpoint = 'query'
+    else:
+        startpoint = 'statement'
+    return startpoint
 
 def _get_parsed_sql_ds(data_name: str, *, use_iid: bool, grammar_file: str, conn: tuple = ('localhost', 6379, 2)):
     ds_dir = join(CG_DATA_PATH, data_name, 'new_question_split' if use_iid else 'schema_full_split')
@@ -88,7 +110,7 @@ def _get_parsed_sql_ds(data_name: str, *, use_iid: bool, grammar_file: str, conn
         ds = RedisDataset(
             dataset=LarkParserDatasetWrapper(
                 grammar_filename=grammar_file,
-                startpoint='parse' if 'sqlite' in grammar_file.lower() else 'query',
+                startpoint=_get_grammar_start(grammar_file),
                 parse_keys=['sql'],
                 dataset=FlattenSeqDS(JsonDataset(join(ds_dir, filename)), sql_only=True)
             ),
@@ -134,7 +156,7 @@ def _get_qa_ds(data_name: str, *,
         ds = RedisDataset(
             dataset=LarkParserDatasetWrapper(
                 grammar_filename=grammar_file,
-                startpoint='parse' if 'sqlite' in grammar_file.lower() else 'query',
+                startpoint=_get_grammar_start(grammar_file),
                 parse_keys=['sql'],
                 dataset=FlattenSeqDS(JsonDataset(join(ds_dir, filename)), sql_only=sql_only)
             ),
@@ -190,9 +212,10 @@ def install_sql_qa_datasets(reg: dict = None):
     domains = ["atis", "geo", "advising", "scholar"]
     path_names = ["atis", "geography", "advising", "scholar"]
     for domain, path_name in zip(domains, path_names):
-        grammars = list(join('run', f) for f in os.listdir('./run') if f.endswith('.lark') and f.startswith(domain))
+        grammars = list(join('run', f) for f in os.listdir('./run')
+                        if f.endswith('.lark') and (f.startswith(domain) or f.startswith('sql_handcrafted')))
         for g in grammars:
-            tag = g[g.rfind('/') + 1:g.index('.lark')].lower()
+            tag = _get_grammar_tag_by_filename(g)
             reg[domain + '_iid.' + tag] = partial(_get_qa_ds, path_name, use_iid=True, grammar_file=g, sql_only=False)
             logging.debug(f"registered {domain}_iid.{tag} lazily")
             reg[domain + '_cg.' + tag] = partial(_get_qa_ds, path_name, use_iid=False, grammar_file=g, sql_only=False)

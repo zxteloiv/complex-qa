@@ -46,6 +46,25 @@ class SQLiteTranXTranslator(FieldAwareTranslator):
         ])
     batch_tensor = MySQLTranXTranslator.batch_tensor
 
+@Registry.translator('sqlite_tranx_no_terminal')
+class SQLiteTranXTranslator(FieldAwareTranslator):
+    def __init__(self):
+        super().__init__(field_list=[
+            ProcessedSentField(source_key='sent', renamed_key='source_tokens', add_start_end_toks=False,),
+            TerminalRuleSeqField(no_terminal_rule=True,
+                                 source_key='sql_tree', renamed_key="target_tokens", namespace="rule_seq",),
+        ])
+    batch_tensor = MySQLTranXTranslator.batch_tensor
+
+@Registry.translator('handcrafted')
+class HandTranXTranslator(FieldAwareTranslator):
+    def __init__(self):
+        super().__init__(field_list=[
+            ProcessedSentField(source_key='sent', renamed_key='source_tokens', add_start_end_toks=False,),
+            TerminalRuleSeqField(no_terminal_rule=True,
+                                 source_key='sql_tree', renamed_key="target_tokens", namespace="rule_seq",),
+        ])
+    batch_tensor = MySQLTranXTranslator.batch_tensor
 
 # namespaces definition and the corresponding fidelity
 PARSE_TREE_NS = (NS_NT, NS_T, NS_ET) = ('nonterminal', 'terminal_category', 'terminal')

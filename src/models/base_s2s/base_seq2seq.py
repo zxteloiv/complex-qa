@@ -36,7 +36,8 @@ class BaseSeq2Seq(torch.nn.Module):
 
                  # training_configuration
                  scheduled_sampling_ratio: float = 0.,
-                 dropout: float = .1,
+                 enc_dropout: float = 0,
+                 dec_dropout: float = .1,
                  training_average: str = "batch",
                  ):
         super().__init__()
@@ -62,9 +63,9 @@ class BaseSeq2Seq(torch.nn.Module):
 
         self._output_projection = word_projection
 
-        self._src_emb_dropout = VariationalDropout(dropout, on_the_fly=True)
-        self._tgt_emb_dropout = VariationalDropout(dropout, on_the_fly=False)
-        self._proj_inp_dropout = VariationalDropout(dropout, on_the_fly=False)
+        self._src_emb_dropout = VariationalDropout(enc_dropout, on_the_fly=True)
+        self._tgt_emb_dropout = VariationalDropout(dec_dropout, on_the_fly=False)
+        self._proj_inp_dropout = VariationalDropout(dec_dropout, on_the_fly=False)
 
         self._padding_index = padding_index
         self._strategy = decoder_init_strategy
@@ -298,9 +299,9 @@ class BaseSeq2Seq(torch.nn.Module):
         for instance_err in total_err:
             self.err_rate(instance_err)
         self.item_count += predictions.size()[0]
-        for l in source_mask.sum(0):
+        for l in source_mask.sum(1):
             self.src_len(l)
-        for l in gold_mask.sum(0):
+        for l in gold_mask.sum(1):
             self.tgt_len(l)
 
     @classmethod
@@ -332,7 +333,7 @@ class BaseSeq2Seq(torch.nn.Module):
         p.scheduled_sampling = .1
         p.decoder_init_strategy = "forward_last_parallel"
         p.tied_decoder_embedding = True
-        p.src_emb_trained_file = "~/.glove/glove.6B.100d.txt.gz"
+        p.src_emb_pretrained_file = "~/.glove/glove.6B.100d.txt.gz"
         """
         from trialbot.data import START_SYMBOL, END_SYMBOL
         from torch import nn
@@ -373,16 +374,18 @@ class BaseSeq2Seq(torch.nn.Module):
         # Compute the dimension requirements for all attention modules
         attn_sz = sum(d for a, d in zip([enc_attn, dec_hist_attn], [enc_out_dim, dec_out_dim]) if a is not None)
 
-        dec_inp_composer = get_attn_composer(p.dec_inp_composer, attn_sz, dec_out_dim, dec_in_dim, p.dec_inp_comp_activation)
+        dec_inp_composer = get_attn_composer(p.dec_inp_composer, attn_sz, emb_sz, dec_in_dim, p.dec_inp_comp_activation)
         proj_inp_composer = get_attn_composer(p.proj_inp_composer, attn_sz, dec_out_dim, proj_in_dim, p.proj_inp_comp_activation)
         if enc_attn is not None or dec_hist_attn is not None:
             assert dec_inp_composer is not None and proj_inp_composer is not None, "Attention must be composed"
 
+        enc_dropout = getattr(p, 'enc_dropout', getattr(p, 'dropout', 0.))
+        dec_dropout = getattr(p, 'dec_dropout', getattr(p, 'dropout', 0.))
         rnn_cls = cls._get_decoder_type(p.decoder)
         decoder = StackedRNNCell([
             rnn_cls(dec_in_dim if floor == 0 else dec_out_dim, dec_out_dim)
             for floor in range(p.num_dec_layers)
-        ], p.dropout)
+        ], dec_dropout)
 
         word_proj = nn.Linear(proj_in_dim, vocab.get_vocab_size(p.tgt_namespace))
         if p.tied_decoder_embedding:
@@ -408,7 +411,8 @@ class BaseSeq2Seq(torch.nn.Module):
             max_decoding_step=p.max_decoding_step,
             decoder_init_strategy=p.decoder_init_strategy,
             scheduled_sampling_ratio=p.scheduled_sampling,
-            dropout=p.dropout,
+            enc_dropout=enc_dropout,
+            dec_dropout=dec_dropout,
             training_average=getattr(p, "training_average", "batch"),
         )
         return model
