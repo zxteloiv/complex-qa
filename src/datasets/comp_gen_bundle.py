@@ -74,14 +74,15 @@ class FlattenSeqDS(CompositionalDataset):
             }
 
         sql = instance['sql']
+
+        # adopt some of the preprocessing codes from Oren et al. 2020
+        # only the mysql grammar accepts double quotes.
+        sql = sql.replace("%", "").replace('"', "'").replace(",", " , ")
+
         # remove the table name with a fixed placeholder as in Oren et al. 2020,
         # the table alias actually starts with a table name, so its not required to generate.
         # the trick will significantly remove about 20 rules for terminals
-        sql = re.sub(r" [A-Z_]+ AS ([A-Z_]+alias[0-9]) ", " TABLE_PLACEHOLDER AS \g<1> ", sql)
-
-        # adopt some of the preprocessing codes from Oren et al.
-        # only the mysql grammar accepts double quotes.
-        sql = sql.replace("%", "").replace('"', "'")
+        sql = re.sub(r" [A-Z_]+ (AS|as) ([A-Z_]+alias[0-9]) ", " TABLE_PLACEHOLDER AS \g<2> ", sql)
 
         instance['sql'] = sql
         return instance
