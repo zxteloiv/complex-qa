@@ -111,7 +111,10 @@ def evaluation_on_dev_every_epoch(bot: TrialBot, interval: int = 1,
         val_metrics = bot.model.get_metric(reset=True)
         if hasattr(bot, 'tbx_writer'):
             bot.tbx_writer.log_metrics(dict(), val_metrics=val_metrics)
-        bot.logger.info("Evaluation Metrics: " + json.dumps(val_metrics))
+        if on_test_data:
+            bot.logger.info("Testing Metrics: " + json.dumps(val_metrics))
+        else:
+            bot.logger.info("Evaluation Metrics: " + json.dumps(val_metrics))
 
 def init_tensorboard_writer(bot: TrialBot, interval: int = 32, histogram_interval: int = 100):
     from utils.tensorboard_writer import TensorboardWriter

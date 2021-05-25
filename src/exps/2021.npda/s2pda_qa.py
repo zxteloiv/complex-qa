@@ -15,7 +15,6 @@ import datasets.cfq_translator as cfq_translator
 datasets.cfq.install_cfq_to_trialbot()
 import datasets.comp_gen_bundle as cg_bundle
 cg_bundle.install_sql_qa_datasets(Registry._datasets)
-cg_bundle.install_qa_datasets(Registry._datasets)
 import datasets.cg_bundle_translator as sql_translator
 
 @Registry.hparamset()

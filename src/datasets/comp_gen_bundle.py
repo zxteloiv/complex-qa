@@ -172,7 +172,7 @@ def _get_qa_ds(data_name: str, *,
     print(f"load dataset: {ds_dir}")
     return train, dev, test
 
-def install_qa_datasets(reg: dict = None):
+def install_sql_qa_datasets(reg: dict = None):
     """
     The obtained instances are
     {
@@ -191,30 +191,16 @@ def install_qa_datasets(reg: dict = None):
     }
     :return: None
     """
-    domains = ["atis", "geo", "advising", "scholar"]
-    path_names = ["atis", "geography", "advising", "scholar"]
-    grammar_path = join('..', '..', 'statics', 'grammar')
-
-    if reg is None:
-        reg = CG_DATA_REG
-
-    for domain, pathname in zip(domains, path_names):
-        grammars = [join(grammar_path, 'MySQL.lark'), join(grammar_path, 'SQLite.lark')]
-        for g in grammars:
-            tag = g[g.rfind('/') + 1:g.index('.lark')].lower()
-            reg[f"{domain}_iid.{tag}"] = partial(_get_qa_ds, pathname, use_iid=True, sql_only=False, grammar_file=g)
-            logging.debug(f"registered {domain}_iid.{tag} lazily")
-            reg[f"{domain}_cg.{tag}"] = partial(_get_qa_ds, pathname, use_iid=False, sql_only=False, grammar_file=g)
-            logging.debug(f"registered {domain}_cg.{tag} lazily")
-
-def install_sql_qa_datasets(reg: dict = None):
     if reg is None:
         reg = CG_DATA_REG
     domains = ["atis", "geo", "advising", "scholar"]
     path_names = ["atis", "geography", "advising", "scholar"]
     for domain, path_name in zip(domains, path_names):
-        grammars = list(join('run', f) for f in os.listdir('./run')
-                        if f.endswith('.lark') and (f.startswith(domain) or f.startswith('sql_handcrafted')))
+        grammar_path = join('..', '..', 'statics', 'grammar')
+        grammars = [join(grammar_path, 'MySQL.lark'), join(grammar_path, 'SQLite.lark')]
+        grammars += list(join('run', f) for f in os.listdir('./run')
+                         if f.endswith('.lark') and
+                         (f.startswith(domain) or f.startswith('sql_handcrafted')))
         for g in grammars:
             tag = _get_grammar_tag_by_filename(g)
             reg[domain + '_iid.' + tag] = partial(_get_qa_ds, path_name, use_iid=True, grammar_file=g, sql_only=False)

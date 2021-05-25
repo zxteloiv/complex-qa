@@ -2,7 +2,6 @@ import sys
 sys.path.insert(0, '../..')
 import datasets.comp_gen_bundle as cg_bundle
 cg_bundle.install_sql_qa_datasets()
-cg_bundle.install_qa_datasets()
 cg_bundle.install_parsed_sql_datasets()
 
 def get_dataset():
