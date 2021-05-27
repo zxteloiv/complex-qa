@@ -97,8 +97,10 @@ def _get_grammar_start(grammar_file: str):
         startpoint = 'parse'
     elif 'mysql' in grammar_file.lower():
         startpoint = 'query'
-    else:
+    elif 'handcrafted' in grammar_file.lower():
         startpoint = 'statement'
+    else:
+        raise ValueError(f"Unknown grammar file {grammar_file}")
     return startpoint
 
 def _get_parsed_sql_ds(data_name: str, *, use_iid: bool, grammar_file: str, conn: tuple = ('localhost', 6379, 2)):
@@ -134,7 +136,7 @@ def install_parsed_sql_datasets(reg: dict = None):
     path_names = ["atis", "geography", "advising", "scholar"]
     grammar_path = join('..', '..', 'statics', 'grammar')
     for domain, path in zip(domains, path_names):
-        grammars = [join(grammar_path, 'MySQL.lark'), join(grammar_path, 'SQLite.lark')]
+        grammars = [join(grammar_path, x) for x in ('MySQL.lark', 'SQLite.lark', 'sql_handcrafted.lark')]
         for g in grammars:
             tag = _get_grammar_tag_by_filename(g)
             reg[f"pure_sql.{domain}_iid.{tag}"] = partial(_get_parsed_sql_ds, path, use_iid=True, grammar_file=g)
