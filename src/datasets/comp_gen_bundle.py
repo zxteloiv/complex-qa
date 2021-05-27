@@ -224,10 +224,8 @@ def install_sql_qa_datasets(reg: dict = None):
     path_names = ["atis", "geography", "advising", "scholar"]
     for domain, path_name in zip(domains, path_names):
         grammar_path = join('..', '..', 'statics', 'grammar')
-        grammars = [join(grammar_path, 'MySQL.lark'), join(grammar_path, 'SQLite.lark')]
-        grammars += list(join('run', f) for f in os.listdir('./run')
-                         if f.endswith('.lark') and
-                         (f.startswith(domain) or f.startswith('sql_handcrafted')))
+        grammars = [join(grammar_path, x) for x in ('MySQL.lark', 'SQLite.lark', 'sql_handcrafted.lark')]
+        grammars += list(join('run', f) for f in os.listdir('./run') if f.endswith('.lark') and f.startswith(domain))
         for g in grammars:
             tag = _get_grammar_tag_by_filename(g)
             reg[domain + '_iid.' + tag] = partial(_get_qa_ds, path_name, use_iid=True, grammar_file=g, sql_only=False)
