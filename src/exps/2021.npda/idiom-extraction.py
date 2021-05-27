@@ -27,20 +27,27 @@ def sql_data_mining(prefix=""):
                                  )
         miner.mine()
         miner.evaluation()
+        from utils.sql_keywords import SQLITE_KEYWORDS, MYSQL_KEYWORDS, HANDCRAFTED_SQL_KEYWORDS
         if 'sqlite' in ds_name.lower():
             lex_file = 'SQLite.lark.lex-in'
             start = cfg.NonTerminal('parse')
+            export_terminals = False
+            excluded = list(SQLITE_KEYWORDS.keys())
         elif 'mysql' in ds_name.lower():
             lex_file = 'MySQL.lark.lex-in'
             start = cfg.NonTerminal('query')
+            export_terminals = False
+            excluded = list(MYSQL_KEYWORDS.keys())
         elif 'handcrafted' in ds_name.lower():
             lex_file = 'sql_handcrafted.lark.lex-in'
             start = cfg.NonTerminal('statement')
+            export_terminals = True
+            excluded = list(HANDCRAFTED_SQL_KEYWORDS.keys())
         else:
             raise ValueError(f"dataset invalid: {ds_name}, failed to recognize the lexer and the start nonterminal")
 
         for i in range(0, len(miner.stat_by_iter), 5):
-            miner.export_kth_rules(i, lex_file, start)
+            miner.export_kth_rules(i, lex_file, start, export_terminals=export_terminals, excluded_terminals=excluded)
 
 def cfq_dataset_mining():
     import datasets.cfq as cfq_data

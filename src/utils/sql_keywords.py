@@ -1021,4 +1021,6 @@ HANDCRAFTED_SQL_KEYWORDS = {
     "LTE": "<=",
     "GT": ">",
     "LT": "<",
+    "UPPER": "UPPER",
+    "LOWER": "LOWER",
 }
