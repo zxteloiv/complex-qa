@@ -14,8 +14,11 @@ def sql_data_mining(prefix=""):
         logging.info(f"================== {ds_name} ====================")
         train, dev, test = get_ds_fn()
         print(f"{ds_name}: train: {len(train)}, dev: {len(dev)}, test: {len(test)}")
-        train_trees = [x['sql_tree'] for x in train]
-        dev_trees = [x['sql_tree'] for x in dev]
+        train_trees = list(filter(None, (x['sql_tree'] for x in train)))
+        dev_trees = list(filter(None, (x['sql_tree'] for x in dev)))
+        print(f"{ds_name}: initial grammar success ratio: "
+              f"{len(train_trees)} / {len(train)} for training, "
+              f"{len(dev_trees)} / {len(dev)} for testing.")
         miner = GreedyIdiomMiner(train_trees, dev_trees, ds_name[ds_name.index('pure_sql.') + 9:],
                                  max_mining_steps=200,
                                  data_prefix=prefix,
@@ -24,9 +27,19 @@ def sql_data_mining(prefix=""):
                                  )
         miner.mine()
         miner.evaluation()
-        lex_file = 'SQLite.lark.lex-in' if 'sqlite' in ds_name.lower() else 'MySQL.lark.lex-in'
-        start = cfg.NonTerminal('parse') if 'sqlite' in ds_name.lower() else cfg.NonTerminal('query')
-        for i in range(0, len(miner.stat_by_iter), 10):
+        if 'sqlite' in ds_name.lower():
+            lex_file = 'SQLite.lark.lex-in'
+            start = cfg.NonTerminal('parse')
+        elif 'mysql' in ds_name.lower():
+            lex_file = 'MySQL.lark.lex-in'
+            start = cfg.NonTerminal('query')
+        elif 'handcrafted' in ds_name.lower():
+            lex_file = 'sql_handcrafted.lark.lex-in'
+            start = cfg.NonTerminal('statement')
+        else:
+            raise ValueError(f"dataset invalid: {ds_name}, failed to recognize the lexer and the start nonterminal")
+
+        for i in range(0, len(miner.stat_by_iter), 5):
             miner.export_kth_rules(i, lex_file, start)
 
 def cfq_dataset_mining():

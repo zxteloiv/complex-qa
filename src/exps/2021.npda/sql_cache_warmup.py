@@ -24,6 +24,15 @@ def get_dataset():
         "pure_sql.geo_iid.mysql",
         "pure_sql.advising_iid.mysql",
         "pure_sql.scholar_iid.mysql",
+
+        "pure_sql.atis_iid.handcrafted",
+        "pure_sql.geo_iid.handcrafted",
+        "pure_sql.advising_iid.handcrafted",
+        "pure_sql.scholar_iid.handcrafted",
+        "pure_sql.scholar_cg.handcrafted",
+        "pure_sql.atis_cg.handcrafted",
+        "pure_sql.geo_cg.handcrafted",
+        "pure_sql.advising_cg.handcrafted",
     ]
     for ds_tag in tags:
         print(ds_tag)
