@@ -123,7 +123,7 @@ def _get_parsed_sql_ds(data_name: str, *, use_iid: bool, grammar_file: str, conn
     train = _build_ds('aligned_train.json', 'train')
     dev = _build_ds('aligned_final_dev.json', 'dev')
     test = _build_ds('final_test.json', 'test')
-    print(f"load dataset: {ds_dir}")
+    logging.info(f"load dataset: {ds_dir}")
     return train, dev, test
 
 def install_parsed_sql_datasets(reg: dict = None):
@@ -141,6 +141,31 @@ def install_parsed_sql_datasets(reg: dict = None):
             logging.debug(f"registered pure_sql.{domain}_iid.{tag} lazily")
             reg[f"pure_sql.{domain}_cg.{tag}"] = partial(_get_parsed_sql_ds, path, use_iid=False, grammar_file=g)
             logging.debug(f"registered pure_sql.{domain}_cg.{tag} lazily")
+
+def _get_raw_sql_ds(data_name: str, *, use_iid: bool):
+    ds_dir = join(CG_DATA_PATH, data_name, 'new_question_split' if use_iid else 'schema_full_split')
+
+    def _build_ds(filename: str):
+        nonlocal ds_dir
+        ds = FlattenSeqDS(JsonDataset(join(ds_dir, filename)), sql_only=True)
+        return ds
+
+    train = _build_ds('aligned_train.json')
+    dev = _build_ds('aligned_final_dev.json')
+    test = _build_ds('final_test.json')
+    logging.info(f"load dataset: {ds_dir}")
+    return train, dev, test
+
+def install_raw_sql_datasets(reg: dict = None):
+    if reg is None:
+        reg = CG_DATA_REG
+    domains = ["atis", "geo", "advising", "scholar"]
+    path_names = ["atis", "geography", "advising", "scholar"]
+    for domain, path in zip(domains, path_names):
+        reg[f"raw_sql.{domain}_iid"] = partial(_get_raw_sql_ds, path, use_iid=True)
+        logging.debug(f"registered raw_sql.{domain}_iid lazily")
+        reg[f"raw_sql.{domain}_cg"] = partial(_get_raw_sql_ds, path, use_iid=False)
+        logging.debug(f"registered raw_sql.{domain}_cg lazily")
 
 def _get_qa_ds(data_name: str, *,
                use_iid: bool,
@@ -169,7 +194,7 @@ def _get_qa_ds(data_name: str, *,
     train = _build_ds('aligned_train.json', 'train')
     dev = _build_ds('aligned_final_dev.json', 'dev')
     test = _build_ds('final_test.json', 'test')
-    print(f"load dataset: {ds_dir}")
+    logging.info(f"load dataset: {ds_dir}")
     return train, dev, test
 
 def install_sql_qa_datasets(reg: dict = None):

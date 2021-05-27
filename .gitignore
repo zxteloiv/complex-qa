@@ -23,5 +23,7 @@ relaysync.sh
 /analysis/
 
 src/exps/*/run/
+src/exps/*/run-bak/
 exps/*/run/
+exps/*/run-bak/
 
