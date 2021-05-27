@@ -39,6 +39,7 @@ GT: ">"
 LT: "<"
 UPPER: "UPPER"
 LOWER: "LOWER"
+FROM: "FROM"
 
 statement: query SCOL | query
 query: select_core groupby_clause orderby_clause limit
@@ -61,7 +62,7 @@ select_result: STAR
              | function AS COL_ALIAS
              | function
              | col_ref AS COL_ALIAS
-from_clause: "FROM" source
+from_clause: FROM source
 source: single_source COMMA source
       | single_source
 single_source: source_table
@@ -97,8 +98,6 @@ col_ref: SUBQ_ALIAS DOT COLUMN_NAME
        | TABLE_NAME DOT COLUMN_NAME
        | SUBQ_ALIAS DOT COL_ALIAS
        | TABLE_NAME DOT COL_ALIAS
-COL_ALIAS: "DERIVED_FIELD" /alias[0-6]/
-SUBQ_ALIAS: "DERIVED_TABLE" /alias[0-6]/
 expr: in_expr
     | value LIKE value
     | value NOT LIKE value
@@ -415,6 +414,8 @@ value: parenval
      | string_function
 
 // handcrafted table, column names and references
+COL_ALIAS: "DERIVED_FIELD" /alias[0-6]/
+SUBQ_ALIAS: "DERIVED_TABLE" /alias[0-6]/
 TABLE_NAME: SCHEMA_TABLE_NAME "alias" /[0-7]/
 SCHEMA_TABLE_NAME: "AIRCRAFT"
                 | "AIRLINE"

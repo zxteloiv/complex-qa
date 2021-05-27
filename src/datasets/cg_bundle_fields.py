@@ -143,8 +143,8 @@ class ProcessedSentField(SeqField):
 class TerminalRuleSeqField(SeqField):
     def __init__(self, keywords: dict = None, no_terminal_rule: bool = False, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.keywords = keywords
-        self.no_terminal_rules = no_terminal_rule or {}
+        self.keywords = keywords or {}
+        self.no_terminal_rules = no_terminal_rule
 
     def _get_rule_str(self, node: Union[_Tree, _Token]):
         if isinstance(node, _Tree):

@@ -13,14 +13,13 @@ class SQLSeq(FieldAwareTranslator):
             SeqField(source_key='sent', renamed_key='source_tokens', add_start_end_toks=False,)
         ])
 
-@Registry.translator('mysql_tranx')
-class MySQLTranXTranslator(FieldAwareTranslator):
+@Registry.translator('tranx')
+class TranXTranslator(FieldAwareTranslator):
     def __init__(self):
-        from utils.sql_keywords import MYSQL_KEYWORDS
         super().__init__(field_list=[
-            ProcessedSentField(source_key='sent', renamed_key='source_tokens', add_start_end_toks=False,),
-            TerminalRuleSeqField(keywords=MYSQL_KEYWORDS,
-                                 source_key='sql_tree', renamed_key="target_tokens", namespace="rule_seq",),
+            ProcessedSentField(source_key='sent', renamed_key='source_tokens', add_start_end_toks=False, ),
+            TerminalRuleSeqField(no_terminal_rule=False,
+                                 source_key='sql_tree', renamed_key="target_tokens", namespace="rule_seq", ),
         ])
 
     def batch_tensor(self, tensors):
@@ -35,17 +34,6 @@ class MySQLTranXTranslator(FieldAwareTranslator):
 
         return output
 
-@Registry.translator('sqlite_tranx')
-class SQLiteTranXTranslator(FieldAwareTranslator):
-    def __init__(self):
-        from utils.sql_keywords import SQLITE_KEYWORDS
-        super().__init__(field_list=[
-            ProcessedSentField(source_key='sent', renamed_key='source_tokens', add_start_end_toks=False,),
-            TerminalRuleSeqField(keywords=SQLITE_KEYWORDS,
-                                 source_key='sql_tree', renamed_key="target_tokens", namespace="rule_seq",),
-        ])
-    batch_tensor = MySQLTranXTranslator.batch_tensor
-
 @Registry.translator('tranx_no_terminal')
 class NoTermTranXTranslator(FieldAwareTranslator):
     def __init__(self):
@@ -54,7 +42,8 @@ class NoTermTranXTranslator(FieldAwareTranslator):
             TerminalRuleSeqField(no_terminal_rule=True,
                                  source_key='sql_tree', renamed_key="target_tokens", namespace="rule_seq",),
         ])
-    batch_tensor = MySQLTranXTranslator.batch_tensor
+
+    batch_tensor = TranXTranslator.batch_tensor
 
 # namespaces definition and the corresponding fidelity
 PARSE_TREE_NS = (NS_NT, NS_T, NS_ET) = ('nonterminal', 'terminal_category', 'terminal')

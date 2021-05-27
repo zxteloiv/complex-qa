@@ -1023,4 +1023,9 @@ HANDCRAFTED_SQL_KEYWORDS = {
     "LT": "<",
     "UPPER": "UPPER",
     "LOWER": "LOWER",
+    "FROM": "FROM",
+    "COL_ALIAS": "COL_ALIAS",
+    "SUBQ_ALIAS": "COL_ALIAS",
+    "TABLE_NAME": "COL_ALIAS",
+    "COLUMN_NAME": "COL_ALIAS",
 }
