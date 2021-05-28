@@ -6,9 +6,8 @@ logging.basicConfig(level=logging.INFO)
 from idioms.stat import StatCollector
 from idioms.eval import step_evaluation
 import datasets.comp_gen_bundle as cg_bundle
-# cg_bundle.install_sql_qa_datasets()
-# cg_bundle.install_parsed_sql_datasets()
 cg_bundle.install_raw_sql_datasets()
+cg_bundle.install_raw_qa_datasets()
 import lark
 from tqdm import tqdm
 import io
@@ -32,8 +31,10 @@ def run_eval(ds, grammar, start, key):
     parser = lark.Lark(open(grammar), keep_all_tokens=True, start=start)
     train_trees = _parse(train, parser, key)
     dev_trees = _parse(dev, parser, key)
-    grammar_succ = {"train": f"{len(train_trees)} / {len(train)}", "dev": f"{len(dev_trees)} / {len(dev)}"}
-    logging.info(grammar_succ)
+    test_trees = _parse(test, parser, key)
+    print(f"train:\t{len(train_trees)}\t{len(train)}")
+    print(f"dev:\t{len(dev_trees)}\t{len(dev)}")
+    print(f"test:\t{len(test_trees)}\t{len(test)}")
 
     train_stat = c.run_for_statistics(0, train_trees)
     dev_stat = c.run_for_statistics(0, dev_trees)

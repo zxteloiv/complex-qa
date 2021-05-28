@@ -144,12 +144,12 @@ def install_parsed_sql_datasets(reg: dict = None):
             reg[f"pure_sql.{domain}_cg.{tag}"] = partial(_get_parsed_sql_ds, path, use_iid=False, grammar_file=g)
             logging.debug(f"registered pure_sql.{domain}_cg.{tag} lazily")
 
-def _get_raw_sql_ds(data_name: str, *, use_iid: bool):
+def _get_raw_sql_ds(data_name: str, *, use_iid: bool, sql_only: bool = True):
     ds_dir = join(CG_DATA_PATH, data_name, 'new_question_split' if use_iid else 'schema_full_split')
 
     def _build_ds(filename: str):
         nonlocal ds_dir
-        ds = FlattenSeqDS(JsonDataset(join(ds_dir, filename)), sql_only=True)
+        ds = FlattenSeqDS(JsonDataset(join(ds_dir, filename)), sql_only=sql_only)
         return ds
 
     train = _build_ds('aligned_train.json')
@@ -167,6 +167,17 @@ def install_raw_sql_datasets(reg: dict = None):
         reg[f"raw_sql.{domain}_iid"] = partial(_get_raw_sql_ds, path, use_iid=True)
         logging.debug(f"registered raw_sql.{domain}_iid lazily")
         reg[f"raw_sql.{domain}_cg"] = partial(_get_raw_sql_ds, path, use_iid=False)
+        logging.debug(f"registered raw_sql.{domain}_cg lazily")
+
+def install_raw_qa_datasets(reg: dict = None):
+    if reg is None:
+        reg = CG_DATA_REG
+    domains = ["atis", "geo", "advising", "scholar"]
+    path_names = ["atis", "geography", "advising", "scholar"]
+    for domain, path in zip(domains, path_names):
+        reg[f"raw_qa.{domain}_iid"] = partial(_get_raw_sql_ds, path, use_iid=True, sql_only=False)
+        logging.debug(f"registered raw_sql.{domain}_iid lazily")
+        reg[f"raw_qa.{domain}_cg"] = partial(_get_raw_sql_ds, path, use_iid=False, sql_only=False)
         logging.debug(f"registered raw_sql.{domain}_cg lazily")
 
 def _get_qa_ds(data_name: str, *,

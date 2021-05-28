@@ -10,6 +10,7 @@ vocab.pkl
 .idea
 env
 log.*
+logs/
 tmp.*
 *.out
 out.*
