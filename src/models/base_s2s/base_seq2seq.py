@@ -329,6 +329,8 @@ class BaseSeq2Seq(torch.nn.Module):
         p.decoder = "lstm"
         p.num_dec_layers = 2
         p.dropout = .2
+        p.enc_dropout = p.dropout # by default
+        p.dec_dropout = p.dropout # by default
         p.max_decoding_step = 100
         p.scheduled_sampling = .1
         p.decoder_init_strategy = "forward_last_parallel"

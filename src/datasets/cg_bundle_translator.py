@@ -2,7 +2,7 @@ from typing import List, Mapping, Generator, Tuple, Optional, Any, Literal, Iter
 from trialbot.training import Registry
 from .field import FieldAwareTranslator
 from .seq_field import SeqField
-from .cg_bundle_fields import TerminalRuleSeqField, ProcessedSentField
+from .cg_bundle_fields import TerminalRuleSeqField, ProcessedSentField, RuleSymbolSeqField
 from .cfq_fields import MidOrderTraversalField, TutorBuilderField
 
 @Registry.translator('sql_s2s')
@@ -41,6 +41,17 @@ class NoTermTranXTranslator(FieldAwareTranslator):
             ProcessedSentField(source_key='sent', renamed_key='source_tokens', add_start_end_toks=False,),
             TerminalRuleSeqField(no_terminal_rule=True,
                                  source_key='sql_tree', renamed_key="target_tokens", namespace="rule_seq",),
+        ])
+
+    batch_tensor = TranXTranslator.batch_tensor
+
+@Registry.translator('tranx_symbol')
+class TranXSymbolTranslator(FieldAwareTranslator):
+    def __init__(self):
+        super().__init__(field_list=[
+            ProcessedSentField(source_key='sent', renamed_key='source_tokens', add_start_end_toks=False,),
+            RuleSymbolSeqField(no_terminal_rule=True,
+                               source_key='sql_tree', renamed_key="target_tokens", namespace="rule_seq",),
         ])
 
     batch_tensor = TranXTranslator.batch_tensor

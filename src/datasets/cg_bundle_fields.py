@@ -206,4 +206,38 @@ class TerminalRuleSeqField(SeqField):
         rule_seq_tensor = torch.tensor(rule_id)
         return {self.renamed_key: rule_seq_tensor}
 
+class RuleSymbolSeqField(TerminalRuleSeqField):
+    def _get_rule_str(self, node: Union[_Tree, _Token]):
+        rule_str = super()._get_rule_str(node)
+        return START_SYMBOL + ' ' + rule_str if self.add_start_end_toks else rule_str
+
+    def generate_namespace_tokens(self, example) -> Generator[Tuple[str, str], None, None]:
+        Tree, Token = lark.Tree, lark.Token
+        tree: Tree = example.get(self.source_key)
+        if tree is not None:
+            for node in self.traverse_tree(tree):
+                rule_str = self._get_rule_str(node)
+                yield from product([self.ns], rule_str.split())
+
+        if self.add_start_end_toks:
+            yield self.ns, END_SYMBOL
+
+    def to_tensor(self, example) -> Mapping[str, Optional[torch.Tensor]]:
+        tree: _Tree = example.get(self.source_key)
+        if tree is None:
+            return {self.renamed_key: None}
+
+        tgt_raw = sum((self._get_rule_str(n).split() for n in self.traverse_tree(tree)), start=[])
+        tgt = [self.vocab.get_token_index(s, self.ns) for s in tgt_raw]
+
+        if self.add_start_end_toks:
+            end_id = self.vocab.get_token_index(END_SYMBOL, self.ns)
+            tgt += [end_id]
+
+        if self.max_seq_len > 0:
+            tgt = tgt[:self.max_seq_len]
+
+        tgt = torch.tensor(tgt)
+        return {self.renamed_key: tgt}
+
 

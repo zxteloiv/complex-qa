@@ -1,6 +1,32 @@
 import torch
-
 from ..interfaces.attention import VectorContextComposer
+from allennlp.nn.activations import Activation
+
+class NoneComposer(VectorContextComposer):
+    def __init__(self, vector_dim: int):
+        super().__init__()
+        self.output_dim = vector_dim
+
+    def get_output_dim(self) -> int:
+        return self.output_dim
+
+    def forward(self, context: torch.Tensor, hidden: torch.Tensor) -> torch.Tensor:
+        return hidden
+
+class NoneMappingComposer(VectorContextComposer):
+    def __init__(self, vector_dim: int, output_dim: int, activation: str = 'tanh'):
+        super().__init__()
+        self.output_dim = output_dim
+        self.mapping = torch.nn.Linear(vector_dim, output_dim)
+        self.activation = Activation.by_name(activation)()
+
+    def forward(self, context: torch.Tensor, hidden: torch.Tensor) -> torch.Tensor:
+        state = torch.cat([context, hidden], dim=-1)
+        return self.activation(self.mapping(state))
+
+    def get_output_dim(self) -> int:
+        return self.output_dim
+
 
 class CatComposer(VectorContextComposer):
     def __init__(self, context_dim: int, vector_dim: int):
@@ -19,7 +45,6 @@ class CatMappingComposer(VectorContextComposer):
         self.output_dim = output_dim
         self.mapping = torch.nn.Linear(context_dim + vector_dim, output_dim)
 
-        from allennlp.nn.activations import Activation
         self.activation = Activation.by_name(activation)()
 
     def forward(self, context: torch.Tensor, hidden: torch.Tensor) -> torch.Tensor:
@@ -50,7 +75,6 @@ class MappingAddComposer(VectorContextComposer):
         self.context_maping = torch.nn.Linear(context_dim, output_dim, bias=False)
         self.vector_mapping = torch.nn.Linear(vector_dim, output_dim, bias=False)
         self.output_dim: int = output_dim
-        from allennlp.nn.activations import Activation
         self.activation = Activation.by_name(activation)()
 
     def forward(self, context: torch.Tensor, hidden: torch.Tensor) -> torch.Tensor:
@@ -69,7 +93,10 @@ cls_mappings = {
 }
 
 def get_attn_composer(cls_type: str, context_dim: int, vector_dim: int, output_dim: int, activation: str):
-    if cls_type == "none": return None
+    if cls_type == "none":
+        return NoneComposer(vector_dim)
+    elif cls_type == "none_map":
+        return NoneMappingComposer(vector_dim, output_dim, activation)
     elif cls_type == "cat":
         assert output_dim == context_dim + vector_dim, "CatComposer will concatenate the context and vector"
         return CatComposer(context_dim, vector_dim)
