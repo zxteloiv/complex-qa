@@ -121,7 +121,8 @@ class BaseSeq2Seq(torch.nn.Module):
         output.update(predictions=preds, logits=logits, target=target)
 
         if target is not None:
-            self._compute_metrics(source_mask, preds, logits, target, target_mask)
+            total_err = self._compute_metrics(source_mask, preds, logits, target, target_mask)
+            output.update(errno=total_err.tolist())
 
         return output
 
@@ -137,7 +138,7 @@ class BaseSeq2Seq(torch.nn.Module):
             stop_ids=[self._padding_index],
         )
         output_dict['target_tokens'] = make_human_readable_text(
-            output_dict['target'], self.vocab, self._target_namespace,
+            output_dict['target'][:, 1:], self.vocab, self._target_namespace,
             stop_ids=[self._eos_id, self._padding_index]
         )
         return output_dict
@@ -303,6 +304,7 @@ class BaseSeq2Seq(torch.nn.Module):
             self.src_len(l)
         for l in gold_mask.sum(1):
             self.tgt_len(l)
+        return total_err
 
     @classmethod
     def from_param_and_vocab(cls, p, vocab: NSVocabulary):

@@ -87,8 +87,8 @@ def main():
             output = model.revert_tensor_to_string(output)
 
             batch_print = []
-            for src, gold, pred in zip(*map(output.get, ("source_tokens", "target_tokens", "predicted_tokens"))):
-                to_print = f'SRC:  {" ".join(src)}\nGOLD: {" ".join(gold)}\nPRED: {" ".join(pred)}'
+            for err, src, gold, pred in zip(*map(output.get, ("errno", "source_tokens", "target_tokens", "predicted_tokens"))):
+                to_print = f'ERR:  {err}\nSRC:  {" ".join(src)}\nGOLD: {" ".join(gold)}\nPRED: {" ".join(pred)}'
                 batch_print.append(to_print)
 
             sep = '\n' + '-' * 60 + '\n'
