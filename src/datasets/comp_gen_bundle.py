@@ -65,12 +65,14 @@ class FlattenSeqDS(CompositionalDataset):
                 'ext_sql': group['sql'][1:],
                 'sent': group['sentences'][idx[1]]['text'],
                 'sql_vars': group['variables'],
-                'sent_vars': group['sentences'][idx[1]]['variables']
+                'sent_vars': group['sentences'][idx[1]]['variables'],
+                'group_id': idx[0],
             }
         else:
             instance = {
                 "sql": group['sql'][idx[1]],
                 'variables': group['variables'],
+                'group_id': idx[0],
             }
 
         sql = instance['sql']

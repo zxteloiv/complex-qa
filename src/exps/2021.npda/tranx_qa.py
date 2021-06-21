@@ -13,7 +13,6 @@ import datasets.cg_bundle_translator
 def get_tranx_updater(bot: TrialBot):
     args, p, model, logger = bot.args, bot.hparams, bot.model, bot.logger
     from utils.select_optim import select_optim
-    from utils.maybe_random_iterator import MaybeRandomIterator
 
     params = model.parameters()
     optim = select_optim(p, params)
@@ -21,9 +20,15 @@ def get_tranx_updater(bot: TrialBot):
 
     device, dry_run = args.device, args.dry_run
     repeat_iter = shuffle_iter = not args.debug
-    iterator = MaybeRandomIterator(bot.train_set, p.batch_sz, bot.translator, shuffle=shuffle_iter, repeat=repeat_iter)
-    if args.debug and args.skip:
-        iterator.reset(args.skip)
+    cluster_id = getattr(p, 'cluster_iter_key', None)
+    if cluster_id is None:
+        from utils.maybe_random_iterator import MaybeRandomIterator
+        iterator = MaybeRandomIterator(bot.train_set, p.batch_sz, bot.translator, shuffle=shuffle_iter, repeat=repeat_iter)
+        logger.info(f"Using MaybeRandomIterator with batch={p.batch_sz}")
+    else:
+        from utils.cluster_iterator import ClusterIterator
+        iterator = ClusterIterator(bot.train_set, p.batch_sz, bot.translator, cluster_id, repeat=repeat_iter, shuffle=shuffle_iter)
+        logger.info(f"Using ClusterIterator with batch={p.batch_sz} cluster_key={cluster_id}")
 
     lr_scheduler_kwargs = getattr(p, 'lr_scheduler_kwargs', None)
     if lr_scheduler_kwargs is not None:
@@ -196,6 +201,15 @@ def scholar_common():
     p.proj_inp_composer = 'cat_mapping'
     p.proj_inp_comp_activation = 'relu'
     p.src_emb_pretrained_file = "~/.glove/glove.6B.100d.txt.gz"
+
+    p.cluster_iter_key = 'group_id'
+    return p
+
+@Registry.hparamset()
+def longterm_scholar():
+    p = scholar_common()
+    p.batch_sz = 1
+    p.TRAINING_LIMIT = 15
     return p
 
 @Registry.hparamset()
