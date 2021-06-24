@@ -105,47 +105,6 @@ def _get_grammar_start(grammar_file: str):
         raise ValueError(f"Unknown grammar file {grammar_file}")
     return startpoint
 
-def _get_parsed_sql_ds(data_name: str, *, use_iid: bool, grammar_file: str, conn: tuple = ('localhost', 6379, 2)):
-    ds_dir = join(CG_DATA_PATH, data_name, 'new_question_split' if use_iid else 'schema_full_split')
-    grammar_tag = _get_grammar_tag_by_filename(grammar_file)
-    iid_tag = 'iid' if use_iid else 'cg'
-
-    def _build_ds(filename: str, split_tag: str):
-        nonlocal ds_dir, grammar_tag
-        ds = RedisDataset(
-            dataset=LarkParserDatasetWrapper(
-                grammar_filename=grammar_file,
-                startpoint=_get_grammar_start(grammar_file),
-                parse_keys=['sql'],
-                dataset=FlattenSeqDS(JsonDataset(join(ds_dir, filename)), sql_only=True)
-            ),
-            conn=conn,
-            prefix=f"pure_sql.{split_tag}.{iid_tag}.{data_name}.{grammar_tag}_",
-        )
-        return ds
-
-    train = _build_ds('aligned_train.json', 'train')
-    dev = _build_ds('aligned_final_dev.json', 'dev')
-    test = _build_ds('final_test.json', 'test')
-    logging.info(f"load dataset: {ds_dir}")
-    return train, dev, test
-
-def install_parsed_sql_datasets(reg: dict = None):
-    if reg is None:
-        reg = CG_DATA_REG
-
-    domains = ["atis", "geo", "advising", "scholar"]
-    path_names = ["atis", "geography", "advising", "scholar"]
-    grammar_path = join('..', '..', 'statics', 'grammar')
-    for domain, path in zip(domains, path_names):
-        grammars = [join(grammar_path, x) for x in ('MySQL.lark', 'SQLite.lark', 'sql_handcrafted.lark')]
-        for g in grammars:
-            tag = _get_grammar_tag_by_filename(g)
-            reg[f"pure_sql.{domain}_iid.{tag}"] = partial(_get_parsed_sql_ds, path, use_iid=True, grammar_file=g)
-            logging.debug(f"registered pure_sql.{domain}_iid.{tag} lazily")
-            reg[f"pure_sql.{domain}_cg.{tag}"] = partial(_get_parsed_sql_ds, path, use_iid=False, grammar_file=g)
-            logging.debug(f"registered pure_sql.{domain}_cg.{tag} lazily")
-
 def _get_raw_sql_ds(data_name: str, *, use_iid: bool, sql_only: bool = True):
     ds_dir = join(CG_DATA_PATH, data_name, 'new_question_split' if use_iid else 'schema_full_split')
 
@@ -182,18 +141,22 @@ def install_raw_qa_datasets(reg: dict = None):
         reg[f"raw_qa.{domain}_cg"] = partial(_get_raw_sql_ds, path, use_iid=False, sql_only=False)
         logging.debug(f"registered raw_sql.{domain}_cg lazily")
 
-def _get_qa_ds(data_name: str, *,
-               use_iid: bool,
-               grammar_file: str,
-               sql_only: bool,
-               conn: tuple = ('localhost', 6379, 2),
-               ):
+def _get_parsed_ds(data_name: str, *,
+                   use_iid: bool,
+                   grammar_file: str,
+                   sql_only: bool,
+                   conn: tuple = ('localhost', 6379, 2),
+                   ):
     ds_dir = join(CG_DATA_PATH, data_name, 'new_question_split' if use_iid else 'schema_full_split')
     grammar_tag = _get_grammar_tag_by_filename(grammar_file)
     iid_tag = 'iid' if use_iid else 'cg'
 
     def _build_ds(filename: str, split_tag: str):
         nonlocal ds_dir, grammar_tag
+        prefix = f"{split_tag}.{iid_tag}.{data_name}.{grammar_tag}_"
+        if sql_only:
+            prefix = 'pure_sql.' + prefix
+
         ds = RedisDataset(
             dataset=LarkParserDatasetWrapper(
                 grammar_filename=grammar_file,
@@ -202,7 +165,7 @@ def _get_qa_ds(data_name: str, *,
                 dataset=FlattenSeqDS(JsonDataset(join(ds_dir, filename)), sql_only=sql_only)
             ),
             conn=conn,
-            prefix=f"{split_tag}.{iid_tag}.{data_name}.{grammar_tag}_",
+            prefix=prefix,
         )
         return ds
 
@@ -212,7 +175,23 @@ def _get_qa_ds(data_name: str, *,
     logging.info(f"load dataset: {ds_dir}")
     return train, dev, test
 
-def install_sql_qa_datasets(reg: dict = None):
+def install_parsed_sql_datasets(reg: dict = None):
+    if reg is None:
+        reg = CG_DATA_REG
+
+    domains = ["atis", "geo", "advising", "scholar"]
+    path_names = ["atis", "geography", "advising", "scholar"]
+    grammar_path = join('..', '..', 'statics', 'grammar')
+    for domain, path in zip(domains, path_names):
+        grammars = [join(grammar_path, x) for x in ('MySQL.lark', 'SQLite.lark', 'sql_handcrafted.lark')]
+        for g in grammars:
+            tag = _get_grammar_tag_by_filename(g)
+            reg[f"pure_sql.{domain}_iid.{tag}"] = partial(_get_parsed_ds, path, use_iid=True, grammar_file=g, sql_only=True)
+            logging.debug(f"registered pure_sql.{domain}_iid.{tag} lazily")
+            reg[f"pure_sql.{domain}_cg.{tag}"] = partial(_get_parsed_ds, path, use_iid=False, grammar_file=g, sql_only=True)
+            logging.debug(f"registered pure_sql.{domain}_cg.{tag} lazily")
+
+def install_parsed_qa_datasets(reg: dict = None):
     """
     The obtained instances are
     {
@@ -241,8 +220,8 @@ def install_sql_qa_datasets(reg: dict = None):
         grammars += list(join('run', f) for f in os.listdir('./run') if f.endswith('.lark') and f.startswith(domain))
         for g in grammars:
             tag = _get_grammar_tag_by_filename(g)
-            reg[domain + '_iid.' + tag] = partial(_get_qa_ds, path_name, use_iid=True, grammar_file=g, sql_only=False)
+            reg[domain + '_iid.' + tag] = partial(_get_parsed_ds, path_name, use_iid=True, grammar_file=g, sql_only=False)
             logging.debug(f"registered {domain}_iid.{tag} lazily")
-            reg[domain + '_cg.' + tag] = partial(_get_qa_ds, path_name, use_iid=False, grammar_file=g, sql_only=False)
+            reg[domain + '_cg.' + tag] = partial(_get_parsed_ds, path_name, use_iid=False, grammar_file=g, sql_only=False)
             logging.debug(f"registered {domain}_cg.{tag} lazily")
 
