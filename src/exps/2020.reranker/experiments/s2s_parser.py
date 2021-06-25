@@ -1,12 +1,11 @@
 from os.path import join, abspath, dirname
 import sys
 sys.path.insert(0, abspath(join(dirname(__file__), '..', '..', '..')))   # up to src
-from trialbot.training import TrialBot, Events, Registry
-import datasets.top
+from trialbot.training import TrialBot, Registry
+
 
 def main():
-    from utils.trialbot_setup import setup
-    from models.base_s2s.base_seq2seq import BaseSeq2Seq
+    from utils.trialbot.trialbot_setup import setup
     args = setup(seed=2020, translator='top', dataset='top', hparamset='s2s_top')
     bot = TrialBot(trial_name='s2s_parser', get_model_func=get_model, args=args)
     from trialbot.training import Events

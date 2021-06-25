@@ -7,8 +7,7 @@
 # ##
 
 from trialbot.data import JsonDataset
-from .composition_dataset import CompositionalDataset
-from .redis_dataset import RedisDataset
+from trialbot.data import CompositionalDataset, RedisDataset
 from .lark_dataset import LarkParserDatasetWrapper
 from trialbot.utils.root_finder import find_root
 import os

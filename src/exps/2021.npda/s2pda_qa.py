@@ -14,7 +14,7 @@ import datasets.cfq
 import datasets.cfq_translator as cfq_translator
 datasets.cfq.install_cfq_to_trialbot()
 import datasets.comp_gen_bundle as cg_bundle
-cg_bundle.install_sql_qa_datasets(Registry._datasets)
+cg_bundle.install_parsed_qa_datasets(Registry._datasets)
 import datasets.cg_bundle_translator as sql_translator
 
 @Registry.hparamset()
@@ -425,20 +425,24 @@ def get_model(p, vocab: NSVocabulary, *, dataset_name: str):
     return model
 
 class PDATrainingUpdater(Updater):
-    def __init__(self, models, iterators, optims, device=-1, clip_grad: float = 0., param_update=False):
+    def __init__(self, dataset, translator, models, iterators, optims, device=-1, clip_grad: float = 0., param_update=False):
         super().__init__(models, iterators, optims, device)
         self.clip_grad = clip_grad
         self.param_update = param_update
+        self.dataset = dataset
+        self.translator = translator
 
     def update_epoch(self):
         model, optim, iterator = self._models[0], self._optims[0], self._iterators[0]
-        if iterator.is_new_epoch:
+        if iterator.is_end_of_epoch:
             self.stop_epoch()
 
         device = self._device
         model.train()
         optim.zero_grad()
-        batch: Dict[str, torch.Tensor] = next(iterator)
+        indices = next(iterator)
+        tensor_list = [self.translator.to_tensor(self.dataset[index]) for index in indices]
+        batch = self.translator.batch_tensor(tensor_list)
 
         if device >= 0:
             batch = move_to_device(batch, device)
@@ -465,9 +469,7 @@ class PDATrainingUpdater(Updater):
 
     @classmethod
     def from_bot(cls, bot: TrialBot) -> 'PDATrainingUpdater':
-        from utils.maybe_random_iterator import MaybeRandomIterator
-        from models.neural_pda.seq2pda import Seq2PDA
-        model: Seq2PDA
+        from trialbot.data.iterators import RandomIterator
         args, p, model, logger = bot.args, bot.hparams, bot.model, bot.logger
 
         params = model.parameters()
@@ -476,15 +478,15 @@ class PDATrainingUpdater(Updater):
         logger.info(f"Using the optimizer {str(optim)}")
 
         repeat_iter = shuffle_iter = not args.debug
-        iterator = MaybeRandomIterator(bot.train_set, p.batch_sz, bot.translator, shuffle=shuffle_iter, repeat=repeat_iter)
+        iterator = RandomIterator(len(bot.train_set), p.batch_sz, shuffle=shuffle_iter, repeat=repeat_iter)
         if args.debug and args.skip:
             iterator.reset(args.skip)
 
-        updater = cls(model, iterator, optim, args.device, p.GRAD_CLIPPING, param_update=True)
+        updater = cls(bot.train_set, bot.translator, model, iterator, optim, args.device, p.GRAD_CLIPPING, param_update=True)
         return updater
 
 def main():
-    from utils.trialbot_setup import setup
+    from utils.trialbot.setup import setup
     args = setup(seed=2021)
 
     from functools import partial
@@ -502,14 +504,14 @@ def main():
     def print_models(bot: TrialBot):
         print(str(bot.models))
 
-    from utils.trial_bot_extensions import collect_garbage, print_hyperparameters
+    from utils.trialbot.extensions import collect_garbage, print_hyperparameters
     bot.add_event_handler(Events.STARTED, print_hyperparameters, 100)
     from trialbot.training import Events
     if not args.test:
         # --------------------- Training -------------------------------
         from trialbot.training.extensions import every_epoch_model_saver
-        from utils.trial_bot_extensions import end_with_nan_loss
-        from utils.trial_bot_extensions import evaluation_on_dev_every_epoch
+        from utils.trialbot.extensions import end_with_nan_loss
+        from utils.trialbot.extensions import evaluation_on_dev_every_epoch
         bot.add_event_handler(Events.EPOCH_COMPLETED, evaluation_on_dev_every_epoch, 90, skip_first_epochs=1)
         bot.add_event_handler(Events.ITERATION_COMPLETED, end_with_nan_loss, 100)
         bot.add_event_handler(Events.EPOCH_COMPLETED, every_epoch_model_saver, 100)
@@ -530,7 +532,7 @@ def main():
 
         # debug strange errors by inspecting running time, data size, etc.
         if args.debug:
-            from utils.trial_bot_extensions import track_pytorch_module_forward_time
+            from utils.trialbot.extensions import track_pytorch_module_forward_time
             bot.add_event_handler(Events.STARTED, track_pytorch_module_forward_time, 100)
 
         bot.updater = PDATrainingUpdater.from_bot(bot)

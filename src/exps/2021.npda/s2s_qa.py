@@ -1,15 +1,10 @@
 import sys, os.path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
-import logging
 
 from trialbot.training import TrialBot
 from trialbot.training import Registry
-from trialbot.training.updater import TrainingUpdater, TestingUpdater
-from trialbot.utils.move_to_device import move_to_device
 from models.base_s2s.base_seq2seq import BaseSeq2Seq
 
-import datasets.cfq
-import datasets.cfq_translator
 
 @Registry.hparamset()
 def cfq_seq_qa():
@@ -51,7 +46,7 @@ def cfq_seq_qa_scaled_training():
     return p
 
 def main():
-    from utils.trialbot_setup import setup
+    from utils.trialbot.setup import setup
     args = setup(seed=2021)
 
     bot = TrialBot(trial_name="s2s_qa", get_model_func=BaseSeq2Seq.from_param_and_vocab, args=args)
@@ -66,8 +61,8 @@ def main():
     if not args.test:
         # --------------------- Training -------------------------------
         from trialbot.training.extensions import every_epoch_model_saver
-        from utils.trial_bot_extensions import debug_models, end_with_nan_loss
-        from utils.trial_bot_extensions import evaluation_on_dev_every_epoch
+        from utils.trialbot.extensions import end_with_nan_loss
+        from utils.trialbot.extensions import evaluation_on_dev_every_epoch
         bot.add_event_handler(Events.EPOCH_COMPLETED, evaluation_on_dev_every_epoch, 90)
 
         bot.add_event_handler(Events.ITERATION_COMPLETED, end_with_nan_loss, 100)
@@ -78,7 +73,7 @@ def main():
 
         # debug strange errors by inspecting running time, data size, etc.
         if args.debug:
-            from utils.trial_bot_extensions import track_pytorch_module_forward_time
+            from utils.trialbot.extensions import track_pytorch_module_forward_time
             bot.add_event_handler(Events.STARTED, track_pytorch_module_forward_time, 100)
 
         @bot.attach_extension(Events.ITERATION_COMPLETED)

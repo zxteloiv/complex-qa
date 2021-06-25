@@ -52,6 +52,9 @@ def print_hyperparameters(bot: TrialBot):
     bot.logger.info(f"Hyperparamset Used: {bot.args.hparamset}")
     bot.logger.info(str(bot.hparams))
 
+def print_models(bot: TrialBot):
+    print(str(bot.models))
+
 def track_pytorch_module_forward_time(bot: TrialBot, max_depth: int = -1, timefmt="%H:%M:%S.%f"):
     models = bot.models
     from datetime import datetime
@@ -90,13 +93,17 @@ def evaluation_on_dev_every_epoch(bot: TrialBot, interval: int = 1,
         rewrite_eval_hparams = rewrite_eval_hparams or dict()
         for k, v in rewrite_eval_hparams.items():
             setattr(hparams, k, v)
-        from .maybe_random_iterator import MaybeRandomIterator
+        from trialbot.data import RandomIterator
         dataset = bot.test_set if on_test_data else bot.dev_set
-        iterator = MaybeRandomIterator(dataset, hparams.batch_sz, bot.translator, shuffle=False, repeat=False)
+        iterator = RandomIterator(len(dataset), hparams.batch_sz, shuffle=False, repeat=False)
         model = bot.model
         device = bot.args.device
         model.eval()
-        for batch in iterator:
+        for indices in iterator:
+            tensor_list = [bot.translator.to_tensor(dataset[index]) for index in indices]
+            batch = bot.translator.batch_tensor(tensor_list)
+            if batch is None or len(batch) == 0:
+                continue
             if device >= 0:
                 batch = move_to_device(batch, device)
             model(**batch)
@@ -148,3 +155,11 @@ def collect_garbage(bot: TrialBot):
         import torch.cuda
         torch.cuda.empty_cache()
 
+def get_metrics(bot: TrialBot):
+    import json
+    if getattr(bot.model, 'get_metric'):
+        print(json.dumps(bot.model.get_metric(reset=True)))
+    elif getattr(bot.model, 'get_metrics'):
+        print(json.dumps(bot.model.get_metrics(reset=True)))
+    else:
+        bot.logger.warning(f'neither get_metric nor get_metrics method is found')

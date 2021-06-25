@@ -117,7 +117,7 @@ def main():
     else:
         logging.getLogger().setLevel(logging.INFO)
 
-    from utils.fix_seed import fix_seed
+    from trialbot.utils.fix_seed import fix_seed
     logging.info(f"set seed={args.seed}")
     fix_seed(args.seed)
 

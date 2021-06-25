@@ -1,13 +1,8 @@
 import sys
 sys.path.insert(0, '..')
-from typing import List, Generator, Tuple, Mapping, Optional
 import logging
 import torch.nn
-import numpy as np
-import random
-from fairseq.optim.adafactor import Adafactor
 
-from trialbot.data import NSVocabulary, PADDING_TOKEN
 from trialbot.training import Registry, TrialBot, Events
 from trialbot.training.updater import TrainingUpdater, TestingUpdater
 from trialbot.training.hparamset import HyperParamSet
@@ -74,10 +69,6 @@ def django_deep_giant():
     p.TRAINING_LIMIT = 30
     return p
 
-import datasets.atis_rank
-import datasets.atis_rank_translator
-import datasets.django_rank
-import datasets.django_rank_translator
 
 def get_model(hparams, vocab):
     from experiments.build_model import get_char_giant
@@ -159,7 +150,7 @@ class GiantTestingUpdater(TestingUpdater):
                 }
 
 def main():
-    from utils.trialbot_setup import setup
+    from utils.trialbot.trialbot_setup import setup
     args = setup(seed=2020)
     bot = TrialBot(trial_name="baseline2_giant", get_model_func=get_model, args=args)
     bot.translator.turn_special_token(on=True)

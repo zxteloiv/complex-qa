@@ -5,6 +5,7 @@ def setup(**default_args):
     :return:
     """
     from trialbot.training import TrialBot
+    from trialbot.utils.fix_seed import fix_seed
     import sys, logging
     args = sys.argv[1:]
     for argname, argval in default_args.items():
@@ -22,7 +23,6 @@ def setup(**default_args):
         logging.getLogger().setLevel(logging.INFO)
 
     if hasattr(args, "seed") and args.seed:
-        from utils.fix_seed import fix_seed
         logging.info(f"set seed={args.seed}")
         fix_seed(args.seed)
 

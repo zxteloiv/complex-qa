@@ -1,13 +1,10 @@
 import sys
 sys.path.insert(0, '..')
-from typing import List, Generator, Tuple, Mapping, Optional
 import logging
 import torch.nn
-import numpy as np
-import random
 from fairseq.optim.adafactor import Adafactor
 
-from trialbot.data import NSVocabulary, PADDING_TOKEN
+from trialbot.data import NSVocabulary
 from trialbot.training import Registry, TrialBot, Events
 from trialbot.training.updater import TrainingUpdater, TestingUpdater
 from trialbot.training.hparamset import HyperParamSet
@@ -90,10 +87,6 @@ def django_deeper():
     p.TRAINING_LIMIT = 60
     return p
 
-import datasets.atis_rank
-import datasets.atis_rank_translator
-import datasets.django_rank
-import datasets.django_rank_translator
 
 def get_model(hparams, vocab: NSVocabulary):
     from experiments.build_model import get_re2_char_model
@@ -195,7 +188,7 @@ def main():
         logging.getLogger().setLevel(logging.INFO)
 
     if hasattr(args, "seed") and args.seed:
-        from utils.fix_seed import fix_seed
+        from trialbot.utils.fix_seed import fix_seed
         logging.info(f"set seed={args.seed}")
         fix_seed(args.seed)
 

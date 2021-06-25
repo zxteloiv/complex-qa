@@ -1,7 +1,7 @@
-from os.path import join, abspath, dirname, expanduser
+from os.path import join, abspath, dirname
 import sys
 sys.path.insert(0, abspath(join(dirname(__file__), '..', '..')))   # up to src
-from trialbot.training import TrialBot, Events, Registry, Updater
+from trialbot.training import TrialBot, Events, Registry
 
 import logging
 import datasets.cfq
@@ -18,16 +18,14 @@ def get_tranx_updater(bot: TrialBot):
     optim = select_optim(p, params)
     logger.info(f"Using Optimizer {optim}")
 
-    device, dry_run = args.device, args.dry_run
-    repeat_iter = shuffle_iter = not args.debug
     cluster_id = getattr(p, 'cluster_iter_key', None)
     if cluster_id is None:
-        from utils.maybe_random_iterator import MaybeRandomIterator
-        iterator = MaybeRandomIterator(bot.train_set, p.batch_sz, bot.translator, shuffle=shuffle_iter, repeat=repeat_iter)
-        logger.info(f"Using MaybeRandomIterator with batch={p.batch_sz}")
+        from trialbot.data.iterators import RandomIterator
+        iterator = RandomIterator(len(bot.train_set), p.batch_sz)
+        logger.info(f"Using RandomIterator with batch={p.batch_sz}")
     else:
-        from utils.cluster_iterator import ClusterIterator
-        iterator = ClusterIterator(bot.train_set, p.batch_sz, bot.translator, cluster_id, repeat=repeat_iter, shuffle=shuffle_iter)
+        from trialbot.data.iterators import ClusterIterator
+        iterator = ClusterIterator(bot.train_set, p.batch_sz, cluster_id)
         logger.info(f"Using ClusterIterator with batch={p.batch_sz} cluster_key={cluster_id}")
 
     lr_scheduler_kwargs = getattr(p, 'lr_scheduler_kwargs', None)
@@ -42,12 +40,12 @@ def get_tranx_updater(bot: TrialBot):
                 logger.info(f"update lr to {bot.scheduler.get_values()}")
         bot.add_event_handler(Events.ITERATION_COMPLETED, _sched_step, 100)
 
-    from trialbot.training.updater import TrainingUpdater
-    updater = TrainingUpdater(model, iterator, optim, device, dry_run)
+    from trialbot.training.updaters.training_updater import TrainingUpdater
+    updater = TrainingUpdater(bot.train_set, bot.translator, model, iterator, optim, args.device, args.dry_run)
     return updater
 
 def main():
-    from utils.trialbot_setup import setup
+    from utils.trialbot.setup import setup
     from models.base_s2s.base_seq2seq import BaseSeq2Seq
     args = setup(seed=2021, translator='cfq_tranx_mod_ent_qa', dataset='cfq_mcd1', hparamset='cfq_mod_ent_tranx')
     bot = TrialBot(trial_name='tranx_qa', get_model_func=BaseSeq2Seq.from_param_and_vocab, args=args)
@@ -58,7 +56,7 @@ def main():
         import json
         print(json.dumps(bot.model.get_metric(reset=True)))
 
-    from utils.trial_bot_extensions import print_hyperparameters
+    from utils.trialbot.extensions import print_hyperparameters
     bot.add_event_handler(Events.STARTED, print_hyperparameters, 90)
 
     from trialbot.training import Events
@@ -69,8 +67,8 @@ def main():
             print(str(bot.models))
 
         from trialbot.training.extensions import every_epoch_model_saver
-        from utils.trial_bot_extensions import end_with_nan_loss
-        from utils.trial_bot_extensions import evaluation_on_dev_every_epoch, collect_garbage
+        from utils.trialbot.extensions import end_with_nan_loss
+        from utils.trialbot.extensions import evaluation_on_dev_every_epoch, collect_garbage
         bot.add_event_handler(Events.EPOCH_STARTED, collect_garbage, 95)
         bot.add_event_handler(Events.ITERATION_COMPLETED, end_with_nan_loss, 100)
         bot.add_event_handler(Events.ITERATION_COMPLETED, collect_garbage, 95)
@@ -202,7 +200,7 @@ def scholar_common():
     p.proj_inp_comp_activation = 'relu'
     p.src_emb_pretrained_file = "~/.glove/glove.6B.100d.txt.gz"
 
-    p.cluster_iter_key = 'group_id'
+    # p.cluster_iter_key = 'group_id'
     return p
 
 @Registry.hparamset()

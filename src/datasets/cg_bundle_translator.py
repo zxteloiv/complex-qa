@@ -1,7 +1,7 @@
 from typing import List, Mapping, Generator, Tuple, Optional, Any, Literal, Iterable, Union, DefaultDict
 from trialbot.training import Registry
-from .field import FieldAwareTranslator
-from .seq_field import SeqField
+from trialbot.data.translator import FieldAwareTranslator
+from trialbot.data.fields import SeqField
 from .cg_bundle_fields import TerminalRuleSeqField, ProcessedSentField, RuleSymbolSeqField
 from .cfq_fields import MidOrderTraversalField, TutorBuilderField
 
@@ -45,8 +45,8 @@ class NoTermTranXTranslator(FieldAwareTranslator):
 
     batch_tensor = TranXTranslator.batch_tensor
 
-@Registry.translator('tranx_symbol')
-class TranXSymbolTranslator(FieldAwareTranslator):
+@Registry.translator('gd')
+class GrammarDerivationTranslator(FieldAwareTranslator):
     def __init__(self):
         super().__init__(field_list=[
             ProcessedSentField(source_key='sent', renamed_key='source_tokens', add_start_end_toks=False,),
@@ -80,7 +80,7 @@ class SQLDerivations(FieldAwareTranslator):
         for field in self.fields:
             try:
                 output.update(field.batch_tensor_by_key(batch_dict))
-            except:
+            except KeyError:
                 return None
 
         return output

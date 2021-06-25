@@ -1,12 +1,10 @@
 from typing import List, Mapping, Generator, Tuple, Optional, Any, Literal, Iterable, Union, DefaultDict
 import torch
-from .field import Field
-from .seq_field import SeqField
+from trialbot.data.fields import SeqField
 import lark
 from trialbot.data import START_SYMBOL, END_SYMBOL
 _Tree, _Token = lark.Tree, lark.Token
 from itertools import product
-from torch.nn.utils.rnn import pad_sequence
 import nltk
 import re
 
