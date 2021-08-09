@@ -2,8 +2,9 @@ from typing import List, Mapping, Generator, Tuple, Optional, Any, Literal, Iter
 from collections import defaultdict
 import torch
 from torch.nn.utils.rnn import pad_sequence
-from .field import FieldAwareTranslator, Field
-from .seq_field import SeqField
+from trialbot.data.field import Field
+from trialbot.data.translator import FieldAwareTranslator
+from trialbot.data.fields.seq_field import SeqField
 import lark
 from trialbot.data import START_SYMBOL, END_SYMBOL
 from utils.preprocessing import nested_list_numbers_to_tensors

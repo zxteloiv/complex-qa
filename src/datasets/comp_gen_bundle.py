@@ -8,6 +8,8 @@
 
 from trialbot.data import JsonDataset
 from trialbot.data import CompositionalDataset, RedisDataset
+from .writable_redis import WritableRedis
+from .id_supplement_dataset import IDSupplement
 from .lark_dataset import LarkParserDatasetWrapper
 from trialbot.utils.root_finder import find_root
 import os
@@ -109,7 +111,7 @@ def _get_raw_sql_ds(data_name: str, *, use_iid: bool, sql_only: bool = True):
 
     def _build_ds(filename: str):
         nonlocal ds_dir
-        ds = FlattenSeqDS(JsonDataset(join(ds_dir, filename)), sql_only=sql_only)
+        ds = IDSupplement(FlattenSeqDS(JsonDataset(join(ds_dir, filename)), sql_only=sql_only))
         return ds
 
     train = _build_ds('aligned_train.json')
@@ -156,12 +158,12 @@ def _get_parsed_ds(data_name: str, *,
         if sql_only:
             prefix = 'pure_sql.' + prefix
 
-        ds = RedisDataset(
+        ds = WritableRedis(
             dataset=LarkParserDatasetWrapper(
                 grammar_filename=grammar_file,
                 startpoint=_get_grammar_start(grammar_file),
                 parse_keys=['sql'],
-                dataset=FlattenSeqDS(JsonDataset(join(ds_dir, filename)), sql_only=sql_only)
+                dataset=IDSupplement(FlattenSeqDS(JsonDataset(join(ds_dir, filename)), sql_only=sql_only))
             ),
             conn=conn,
             prefix=prefix,

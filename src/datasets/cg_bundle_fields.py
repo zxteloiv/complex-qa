@@ -1,12 +1,14 @@
-from typing import List, Mapping, Generator, Tuple, Optional, Any, Literal, Iterable, Union, DefaultDict
+from typing import List, Mapping, Generator, Tuple, Optional, Any, Literal, Sequence, Union, DefaultDict
 import torch
 from trialbot.data.fields import SeqField
+from trialbot.data.field import Field, NullableTensor
 import lark
 from trialbot.data import START_SYMBOL, END_SYMBOL
 _Tree, _Token = lark.Tree, lark.Token
 from itertools import product
 import nltk
 import re
+from utils.preprocessing import nested_list_numbers_to_tensors
 
 class ProcessedSentField(SeqField):
     def get_sent(self, example):
@@ -237,5 +239,74 @@ class RuleSymbolSeqField(TerminalRuleSeqField):
 
         tgt = torch.tensor(tgt)
         return {self.renamed_key: tgt}
+
+class TreeField(Field):
+    def batch_tensor_by_key(self, tensors_by_keys: Mapping[str, List[NullableTensor]]) -> Mapping[str, torch.Tensor]:
+        return {k: nested_list_numbers_to_tensors(tensors_by_keys[k]) for k in self.output_keys}
+
+    def __init__(self,
+                 tree_key: str,
+                 ns: Union[str, Sequence[str], None] = None,
+                 output_keys: Optional[Sequence[str]] = None,
+                 padding: int = 0,
+                 max_node_position: int = 12,
+                 ):
+        super().__init__()
+        self.tree_key = tree_key
+        # None: default value; str: wrapped into a tuple; sequence: converted into a tuple
+        self.ns = ("symbols",) if ns is None else (ns,) if isinstance(ns, str) else tuple(ns)
+        self.output_keys = tuple(output_keys) if output_keys else (
+            "tree_nodes", "node_pos", "node_parents"
+        )
+        self.padding = padding
+        self.max_node_pos = max_node_position
+
+    def generate_namespace_tokens(self, example) -> Generator[Tuple[str, str], None, None]:
+        # nothing of the tree is required to be aligned with an index.
+        # all the relied tokens are symbols and ordered positions
+        yield from []
+
+    def to_tensor(self, example) -> Mapping[str, NullableTensor]:
+        tree: _Tree = example.get(self.tree_key)
+        if tree is None:
+            return dict((k, None) for k in self.output_keys)
+
+        # to get the symbol_id and the exact_token id from a token string
+        s_id = lambda t: self.vocab.get_token_index(t, self.ns[0])
+        is_tree = lambda s: isinstance(s, _Tree)
+
+        tree_nodes, node_parent, node_pos = [], [], []
+
+        # pre-assign an ID, otherwise the system won't work
+        # IDs are allocated in the left-most derivation order
+        _id = 0
+        def _assign_id_to_tree(t: _Tree):
+            nonlocal _id
+            t.id = _id
+            _id += 1
+            for c in t.children:
+                if is_tree(c):
+                    _assign_id_to_tree(c)
+
+        _assign_id_to_tree(tree)
+
+        # traverse again the tree in the order of left-most derivation
+        op_stack: List[Tuple[int, _Tree, List]] = [(0, tree, [1])]
+        while len(op_stack) > 0:
+            parent_id, node, route = op_stack.pop()
+            tree_nodes.append(s_id(node.data))
+            node_pos.append(route)
+            node_parent.append(parent_id)
+
+            for i, c in reversed(list(enumerate(node.children))):
+                i = min(i, self.max_node_pos)
+                if is_tree(c):
+                    op_stack.append((node.id, c, route + [i]))
+
+        # output_vals = [nested_list_numbers_to_tensors(x, self.padding) for x in (tree_nodes, node_pos, node_parent)]
+        output = dict(zip(self.output_keys, (tree_nodes, node_pos, node_parent)))
+
+        return output
+
 
 

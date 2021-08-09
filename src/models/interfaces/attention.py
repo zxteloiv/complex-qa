@@ -1,6 +1,6 @@
 from typing import Optional, Tuple
 import torch
-
+from .composer import TwoVecComposer
 
 class Attention(torch.nn.Module):
     """Compute the attention and merged for the context value, returns only the context vector"""
@@ -38,7 +38,7 @@ class AttentionWeight(torch.nn.Module):
         """
         raise NotImplementedError
 
-class VectorContextComposer(torch.nn.Module):
+class VectorContextComposer(TwoVecComposer):
     """
     How to combine the context vector and the hidden states then?
     """

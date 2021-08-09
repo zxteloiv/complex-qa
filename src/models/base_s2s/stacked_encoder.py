@@ -68,6 +68,13 @@ class StackedEncoder(torch.nn.Module):
 
     @classmethod
     def get_encoder(cls, p):
+        """
+        p.enc_dropout = 0.
+        p.enc_out_dim = xxx # otherwise p.hidden_sz is used
+        p.emb_sz = 300
+        p.encoder = "lstm"  # lstm, transformer, bilstm, aug_lstm, aug_bilstm
+        p.num_heads = 8     # heads for transformer when used
+        """
         from allennlp.modules.seq2seq_encoders import PytorchSeq2SeqWrapper, AugmentedLstmSeq2SeqEncoder
         from allennlp.modules.seq2seq_encoders import StackedBidirectionalLstmSeq2SeqEncoder
 
