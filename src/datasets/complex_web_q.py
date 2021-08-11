@@ -1,6 +1,6 @@
 from trialbot.training import Registry
 from trialbot.data.datasets.json_dataset import JsonDataset
-from utils.root_finder import find_root
+from trialbot.utils.root_finder import find_root
 
 import os.path
 _ds_path = os.path.join(find_root(), 'data', 'ComplexWebQ')

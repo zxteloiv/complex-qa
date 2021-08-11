@@ -11,7 +11,7 @@ import sys
 sys.path.insert(0, '../..')
 import lark
 import re
-from utils.root_finder import find_root
+from trialbot.utils.root_finder import find_root
 from typing import List, Union
 from os.path import join
 from datetime import datetime as dt

@@ -20,7 +20,7 @@ import datasets.cg_bundle_translator as sql_translator
 @Registry.hparamset()
 def cfq_pda():
     from trialbot.training.hparamset import HyperParamSet
-    from utils.root_finder import find_root
+    from trialbot.utils.root_finder import find_root
     ROOT = find_root()
     p = HyperParamSet.common_settings(ROOT)
     p.TRAINING_LIMIT = 10

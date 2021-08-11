@@ -2,7 +2,7 @@ from typing import Literal, List, Dict, Union, Generator, Tuple, Any, Optional, 
 import logging
 from os.path import join
 import dill
-from utils.root_finder import find_root
+from trialbot.utils.root_finder import find_root
 import lark
 TREE, TOKEN = lark.Tree, lark.Token
 from collections import Counter, defaultdict

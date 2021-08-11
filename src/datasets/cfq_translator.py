@@ -1,7 +1,7 @@
 from trialbot.training import Registry
 from utils.sparql_tokenizer import split_sparql
-from .field import FieldAwareTranslator
-from .seq_field import SeqField
+from trialbot.data.translator import FieldAwareTranslator
+from trialbot.data.fields import SeqField
 from .cfq_fields import MidOrderTraversalField, GrammarPatternSeqField, GrammarModEntSeqField, TutorBuilderField
 
 @Registry.translator('cfq_seq_mod_ent_qa')

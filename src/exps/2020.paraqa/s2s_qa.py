@@ -3,7 +3,7 @@ import logging
 from trialbot.training import TrialBot
 from trialbot.training import Registry
 from trialbot.training.updater import TrainingUpdater, TestingUpdater
-from utils.root_finder import find_root
+from trialbot.utils.root_finder import find_root
 from trialbot.utils.move_to_device import move_to_device
 from models.base_s2s.base_seq2seq import BaseS2SBuilder
 

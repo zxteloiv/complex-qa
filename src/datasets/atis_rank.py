@@ -1,6 +1,6 @@
 from trialbot.training import Registry
 from trialbot.data.datasets.jsonl_dataset import JsonLDataset
-from utils.root_finder import find_root
+from trialbot.utils.root_finder import find_root
 
 import os.path
 _DATA_PATH = os.path.join(find_root(), 'data')

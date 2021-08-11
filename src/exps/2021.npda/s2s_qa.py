@@ -9,7 +9,7 @@ from models.base_s2s.base_seq2seq import BaseSeq2Seq
 @Registry.hparamset()
 def cfq_seq_qa():
     from trialbot.training.hparamset import HyperParamSet
-    from utils.root_finder import find_root
+    from trialbot.utils.root_finder import find_root
     ROOT = find_root()
     p = HyperParamSet.common_settings(ROOT)
     p.TRAINING_LIMIT = 50
