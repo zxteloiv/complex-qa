@@ -27,7 +27,7 @@ class StackedRNNCell(torch.nn.Module):
         updated_hiddens = []
         for i, rnn in enumerate(self.layer_rnns):
             if i > 0:
-                last_layer_output = self._input_dropouts[i](last_layer_output)
+                last_layer_output = self._input_dropouts[i - 1](last_layer_output)
 
             layer_hidden, last_layer_output = rnn(last_layer_output, None if hidden is None else hidden[i])
             updated_hiddens.append(layer_hidden)

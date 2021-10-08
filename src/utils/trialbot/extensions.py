@@ -30,7 +30,7 @@ def debug_models(bot: TrialBot):
 
 def end_with_nan_loss(bot: TrialBot):
     import numpy as np
-    output = getattr(bot.state, 'output')
+    output = getattr(bot.state, 'output', None)
     if output is None:
         return
     loss = output["loss"]
@@ -49,8 +49,8 @@ def end_with_nan_loss(bot: TrialBot):
         bot.updater.stop_epoch()
 
 def print_hyperparameters(bot: TrialBot):
-    bot.logger.info(f"Hyperparamset Used: {bot.args.hparamset}")
-    bot.logger.info(str(bot.hparams))
+    bot.logger.info(f"Cmd Arguments Used:\n{bot.args}")
+    bot.logger.info(f"Hyperparamset Used: {bot.args.hparamset}\n{str(bot.hparams)}")
 
 def print_models(bot: TrialBot):
     print(str(bot.models))
@@ -157,9 +157,9 @@ def collect_garbage(bot: TrialBot):
 
 def get_metrics(bot: TrialBot):
     import json
-    if getattr(bot.model, 'get_metric'):
+    if getattr(bot.model, 'get_metric', None):
         print(json.dumps(bot.model.get_metric(reset=True)))
-    elif getattr(bot.model, 'get_metrics'):
+    elif getattr(bot.model, 'get_metrics', None):
         print(json.dumps(bot.model.get_metrics(reset=True)))
     else:
         bot.logger.warning(f'neither get_metric nor get_metrics method is found')

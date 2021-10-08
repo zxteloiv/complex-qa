@@ -8,7 +8,10 @@ _Tree, _Token = lark.Tree, lark.Token
 from itertools import product
 import nltk
 import re
+from copy import deepcopy
+from functools import partial
 from utils.preprocessing import nested_list_numbers_to_tensors
+from utils.tree import preorder_traverse, non_terminal_children_from_property, assign_node_id
 
 class ProcessedSentField(SeqField):
     def get_sent(self, example):
@@ -277,21 +280,10 @@ class TreeField(Field):
 
         tree_nodes, node_parent, node_pos = [], [], []
 
-        # pre-assign an ID, otherwise the system won't work
+        # assign an ID for each node along with the traversal
         # IDs are allocated in the left-most derivation order
-        _id = 0
-        def _assign_id_to_tree(t: _Tree):
-            nonlocal _id
-            t.id = _id
-            _id += 1
-            for c in t.children:
-                if is_tree(c):
-                    _assign_id_to_tree(c)
-
-        _assign_id_to_tree(tree)
-
-        # traverse again the tree in the order of left-most derivation
         op_stack: List[Tuple[int, _Tree, List]] = [(0, tree, [1])]
+        node_id = 0
         while len(op_stack) > 0:
             parent_id, node, route = op_stack.pop()
             tree_nodes.append(s_id(node.data))
@@ -301,7 +293,9 @@ class TreeField(Field):
             for i, c in reversed(list(enumerate(node.children))):
                 i = min(i, self.max_node_pos)
                 if is_tree(c):
-                    op_stack.append((node.id, c, route + [i]))
+                    op_stack.append((node_id, c, route + [i]))
+
+            node_id += 1
 
         # output_vals = [nested_list_numbers_to_tensors(x, self.padding) for x in (tree_nodes, node_pos, node_parent)]
         output = dict(zip(self.output_keys, (tree_nodes, node_pos, node_parent)))

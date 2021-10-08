@@ -1,10 +1,13 @@
-#
+from typing import Literal, Tuple
 import torch
+import torch.nn.functional
 from .partial_tree_encoder import TopDownTreeEncoder
 from ..interfaces.composer import TwoVecComposer
 from ..base_s2s.stacked_encoder import StackedEncoder
 from utils.nn import get_final_encoder_states
-from allennlp.nn.util import masked_log_softmax, masked_softmax
+import utils.nn as utilnn
+import allennlp.nn.util as utilsallen
+
 
 class TreeActionPolicy(torch.nn.Module):
     def __init__(self,
@@ -56,26 +59,67 @@ class TreeActionPolicy(torch.nn.Module):
         # node_logits: (B, N, action_types)
         node_logits = self.action_mapping(node_hid)
 
-        logprob = self.get_logprob(node_logits, (tree_nodes != self.padding).long())
-        return node_logits, logprob
+        output = {
+            "logits": node_logits,
+            "node_mask": (tree_nodes != self.padding)
+        }
 
-    def get_logprob(self, node_logits, mask):
-        while mask.dim() < node_logits.dim():
-            mask = mask.unsqueeze(-1)
-        logprob = masked_log_softmax(node_logits, mask)
-        return logprob
+        return output
 
-    def decode(self, masked_logprob: torch.Tensor):
-        # max_logprob_each_node, action_each_node: (B, N)
-        max_logprob_each_node, action_each_node = torch.max(masked_logprob, dim=-1)
+    def get_logprob(self, node_logits: torch.Tensor, node_mask: torch.ByteTensor):
+        """
+        :param node_logits: (B, N, A)
+        :param node_mask: (B, N)
+        :return:
+        """
+        # (B, N, 1)
+        node_log_mask = (node_mask.unsqueeze(-1) + utilsallen.tiny_value_of_dtype(node_logits.dtype)).log()
+        # (B, N, A)
+        masked_logits = node_logits + node_log_mask
 
-        # max_logprob, node_idx: (B,)
-        max_logprob, node_idx = torch.max(max_logprob_each_node, dim=-1)
+        # (B, N * A)
+        masked_logits_rs = masked_logits.reshape(node_logits.size()[0], -1)
+        logprob_rs = utilnn.logits_to_prob(masked_logits_rs, 'bounded')
+        # (B, N, A)
+        logprob = logprob_rs.reshape(*node_logits.size())
+        prob = utilnn.logits_to_prob(masked_logits_rs, 'none').reshape(*node_logits.size())
+        return logprob, prob
 
-        # action: (B,)
-        action = action_each_node[torch.arange(node_idx.size()[0], device=node_idx.device), node_idx]
-        return node_idx.tolist(), action.tolist()
+    def decode(self, prob: torch.Tensor, logprob: torch.Tensor, sample_num: int = 5,
+               method: Literal["max", "topk", "multinomial"] = "max"
+               ) -> Tuple[list, list, torch.Tensor, torch.Tensor]:
+        """
+        :param prob: (batch, node_num, action_num)
+        :param logprob: (batch, node_num, action_num)
+        :param sample_num: int, used when method is not "max"
+        :param method: decoding method
+        :return: returns the decoded node idx, action idx, and the logprobs and probs, all of size (B, S)
+        """
+        batch, node_num, action_num = prob.size()
 
+        flat_prob = prob.reshape(batch, -1)
 
+        # (B, S)
+        selected_prob = None
+        if method == "max":
+            selected_prob, indices = torch.max(flat_prob, dim=-1)
+        elif method == "topk":
+            selected_prob, indices = torch.topk(flat_prob, sample_num, largest=True, dim=-1, sorted=True)
+        elif method == 'multinomial':
+            indices = torch.multinomial(flat_prob, sample_num)
+        else:
+            raise ValueError(f'unknown decoding method "{method}" is set')
 
+        node_idx = (indices // action_num)
+        action_idx = (indices % action_num)
+
+        # (B, 1)
+        batch_dim_indices = torch.arange(batch, device=prob.device).unsqueeze(-1)
+
+        # (B, S)
+        selected_logp = logprob[batch_dim_indices, node_idx, action_idx]
+        if selected_prob is None:
+            selected_prob = prob[batch_dim_indices, node_idx, action_idx]
+
+        return node_idx.tolist(), action_idx.tolist(), selected_logp, selected_prob
 

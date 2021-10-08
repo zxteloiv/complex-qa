@@ -4,7 +4,6 @@ from os.path import join
 import dill
 from trialbot.utils.root_finder import find_root
 import lark
-TREE, TOKEN = lark.Tree, lark.Token
 from collections import Counter, defaultdict
 import io
 import utils.cfg as cfg
@@ -13,6 +12,8 @@ from random import sample
 from .eval import step_evaluation
 from .compact_hash import compact_hash
 from .stat import EPS_RHS, StatCollector
+TREE, TOKEN = lark.Tree, lark.Token
+
 
 class GreedyIdiomMiner:
     def __init__(self, trees: List[TREE],

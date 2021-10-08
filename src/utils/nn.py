@@ -1,11 +1,9 @@
 from typing import List, Tuple, Dict, Mapping, Optional, Literal
 import torch
 import torch.nn
+import torch.nn.functional
 import re
-
-from allennlp.modules.matrix_attention import MatrixAttention
-from allennlp.modules.attention import Attention
-from allennlp.nn.util import masked_softmax
+import math
 
 def add_position_and_timestep_sinusoid(inputs: torch.Tensor,
                                        timestep: Optional[float] = None,
@@ -92,87 +90,76 @@ def prepare_input_mask(tokens, padding_val: int = 0):
         token_ids, mask = None, None
     return token_ids, mask
 
-def seq_likelihood(logits: torch.FloatTensor,
-                   targets: torch.LongTensor,
-                   weights: torch.FloatTensor,
-                   ):
-    # shape : (batch, ..., num_classes)
-    logits_flat = logits.reshape(-1, logits.size(-1))
-    # shape : (batch, ..., num_classes)
-    probs_flat = torch.nn.functional.softmax(logits_flat, dim=-1)
-    # shape : (batch, ..., 1)
-    targets_flat = targets.reshape(-1, 1).long()
 
-    # Contribution to the negative log likelihood only comes from the exact indices
-    # of the targets, as the target distributions are one-hot. Here we use torch.gather
-    # to extract the indices of the num_classes dimension which contribute to the loss.
-    # shape : (batch * ..., 1)
-    likelihood_flat = torch.gather(probs_flat, dim=1, index=targets_flat)
-    # shape : (batch, ...,)
-    likelihood = likelihood_flat.reshape(*targets.size())
-    # shape : (batch, ...,)
-    likelihood = likelihood * weights.float()
+def logits_to_prob(logits: torch.FloatTensor, log_transform: Literal['none', 'bounded', 'raw'] = 'none') -> torch.Tensor:
+    # probs: (batch, ..., num_classes)
+    if log_transform == 'none':
+        return torch.nn.functional.softmax(logits, dim=-1)
 
-    # shape : (batch_size,)
-    batch_size = targets.size()[0]
-    per_batch_loss = sum_to_batch_size(likelihood) / (sum_to_batch_size(weights).float() + 1e-13)
-    return per_batch_loss
+    elif log_transform == 'bounded':
+        probs = torch.nn.functional.softmax(logits, dim=-1) + 1
+        log_probs = probs.log()
+    else:
+        log_probs = torch.nn.functional.log_softmax(logits, dim=-1)
+
+    return log_probs
+
+
+def masked_reducing_gather(source: torch.Tensor,
+                           targets: torch.LongTensor,
+                           weights: Optional[torch.Tensor],
+                           reducing_method: Literal["token", "batch", "none"]):
+    """
+    :param source: (..., dim)
+    :param targets: (...,) -> (..., 1)
+    :param weights: (...,)
+    :param reducing_method: reduction methods after gathering
+    """
+    if reducing_method not in {None, "token", "batch", "none"}:
+        raise ValueError(f"Got method {reducing_method}, expected one of None, 'token', or 'batch'")
+
+    assert targets.ndim == weights.ndim
+    if targets.ndim < source.ndim:
+        targets = targets.unsqueeze(-1)
+
+    output = torch.gather(source, dim=-1, index=targets).squeeze(-1)
+    if weights is not None:
+        output = output * weights.float()
+
+    # (batch,)
+    batch_reduction = sum_to_batch_size(output)
+    weights = torch.ones_like(batch_reduction) if weights is None else sum_to_batch_size(weights)
+
+    if reducing_method == 'batch':
+        per_batch_loss = batch_reduction / (weights + 1e-13)
+        num_non_empty_sequences = ((weights > 0).float().sum() + 1e-13)
+        return per_batch_loss.sum() / num_non_empty_sequences           # scalar
+    elif reducing_method == "token":
+        return batch_reduction.sum() / (weights.sum().float() + 1e-13)  # scalar
+    else:
+        return batch_reduction / (weights + 1e-13)  # (batch,)
+
+
+def seq_likelihood(logits: torch.FloatTensor, targets: torch.LongTensor, weights: torch.FloatTensor):
+    probs = logits_to_prob(logits, log_transform='none')
+    ll = masked_reducing_gather(probs, targets, weights, reducing_method='none')
+    return ll
 
 
 def seq_cross_ent(logits: torch.FloatTensor,
                   targets: torch.LongTensor,
                   weights: torch.FloatTensor,
-                  average: Optional[str] = "batch",
-                  ):
+                  average: Literal["token", "batch", "none"] = "batch"):
     """
     :param logits: (batch_size, ..., num_classes), the logit (unnormalized probability) for each class.
     :param targets: (batch, ...) the index of the true class for each corresponding step.
     :param weights: (batch, ...)
     :param average: reduction method
-    :return (batch, ) if average mode is batch or (0,) if average mode is token or None
+    :return (batch, ) if average mode is none or (0,) if average mode is token or batch
     """
-    if average not in {None, "token", "batch", "scaled_batch", "bare_batch", "none"}:
-        raise ValueError("Got average f{average}, expected one of "
-                         "None, 'token', or 'batch'")
-
-    # shape : (batch * sequence_length, num_classes)
-    logits_flat = logits.reshape(-1, logits.size(-1))
-    # shape : (batch * sequence_length, num_classes)
-    log_probs_flat = torch.nn.functional.log_softmax(logits_flat, dim=-1)
-    # shape : (batch * max_len, 1)
-    targets_flat = targets.reshape(-1, 1).long()
-
-    # Contribution to the negative log likelihood only comes from the exact indices
-    # of the targets, as the target distributions are one-hot. Here we use torch.gather
-    # to extract the indices of the num_classes dimension which contribute to the loss.
-    # shape : (batch * sequence_length, 1)
-    negative_log_likelihood_flat = - torch.gather(log_probs_flat, dim=1, index=targets_flat)
-    # shape : (batch, sequence_length)
-    negative_log_likelihood = negative_log_likelihood_flat.reshape(*targets.size())
-    # shape : (batch, sequence_length)
-    negative_log_likelihood = negative_log_likelihood * weights.float()
-
-    batch_sz = targets.size()[0]
-    if average == "batch":
-        # shape : (batch_size,)
-        per_batch_loss = sum_to_batch_size(negative_log_likelihood) / (sum_to_batch_size(weights) + 1e-13)
-        num_non_empty_sequences = ((sum_to_batch_size(weights) > 0).float().sum() + 1e-13)
-        return per_batch_loss.sum() / num_non_empty_sequences
-    elif average == "scaled_batch":
-        # shape : (batch_size,)
-        scale_ = sum_to_batch_size(weights)
-        scale_ = scale_ * (scale_ + 1) / 2
-        per_batch_loss = sum_to_batch_size(negative_log_likelihood) / (scale_ + 1e-15)
-        num_non_empty_sequences = ((sum_to_batch_size(weights) > 0).float().sum() + 1e-13)
-        return per_batch_loss.sum() / num_non_empty_sequences
-    elif average == "token":
-        return negative_log_likelihood.sum() / (weights.sum().float() + 1e-13)
-    elif average == "bare_batch":
-        return negative_log_likelihood.mean(0).sum()
-    else:
-        # shape : (batch_size,)
-        per_batch_loss = sum_to_batch_size(negative_log_likelihood) / (sum_to_batch_size(weights) + 1e-13)
-        return per_batch_loss
+    log_probs = logits_to_prob(logits, log_transform='raw')
+    nll = - masked_reducing_gather(log_probs, targets, weights, reducing_method=average)
+    return nll
 
 def sum_to_batch_size(t: torch.Tensor):
     reducible_dims = list(range(t.ndim))[1:]

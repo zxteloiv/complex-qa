@@ -39,12 +39,6 @@ def cfq_seq_qa():
     p.concat_attn_to_dec_input = False  # concat attention is
     return p
 
-@Registry.hparamset()
-def cfq_seq_qa_scaled_training():
-    p = cfq_seq_qa()
-    p.training_average = "scaled_batch"
-    return p
-
 def main():
     from utils.trialbot.setup import setup
     args = setup(seed=2021)
