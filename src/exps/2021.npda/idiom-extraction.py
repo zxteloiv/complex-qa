@@ -8,6 +8,8 @@ TREE, TOKEN = lark.Tree, lark.Token
 import utils.cfg as cfg
 import datasets.comp_gen_bundle as cg_bundle
 from idioms.miner import GreedyIdiomMiner
+from idioms.export_conf import get_export_conf
+
 
 def sql_data_mining(prefix=""):
     for ds_name, get_ds_fn in cg_bundle.CG_DATA_REG.items():
@@ -27,27 +29,10 @@ def sql_data_mining(prefix=""):
                                  )
         miner.mine()
         miner.evaluation()
-        from utils.sql_keywords import SQLITE_KEYWORDS, MYSQL_KEYWORDS, HANDCRAFTED_SQL_KEYWORDS
-        if 'sqlite' in ds_name.lower():
-            lex_file = 'SQLite.lark.lex-in'
-            start = cfg.NonTerminal('parse')
-            export_terminals = False
-            excluded = list(SQLITE_KEYWORDS.keys())
-        elif 'mysql' in ds_name.lower():
-            lex_file = 'MySQL.lark.lex-in'
-            start = cfg.NonTerminal('query')
-            export_terminals = False
-            excluded = list(MYSQL_KEYWORDS.keys())
-        elif 'handcrafted' in ds_name.lower():
-            lex_file = 'sql_handcrafted.lark.lex-in'
-            start = cfg.NonTerminal('statement')
-            export_terminals = True
-            excluded = list(HANDCRAFTED_SQL_KEYWORDS.keys())
-        else:
-            raise ValueError(f"dataset invalid: {ds_name}, failed to recognize the lexer and the start nonterminal")
-
+        lex_file, start, export_terminals, excluded = get_export_conf(ds_name.lower())
         for i in range(0, len(miner.stat_by_iter), 5):
             miner.export_kth_rules(i, lex_file, start, export_terminals=export_terminals, excluded_terminals=excluded)
+
 
 def cfq_dataset_mining():
     import datasets.cfq as cfq_data
@@ -66,14 +51,10 @@ def cfq_dataset_mining():
                              )
     miner.mine()
     miner.evaluation()
-    lex_terminals = "IRIREF PNAME_NS PNAME_LN BLANK_NODE_LABEL VAR1 VAR2 LANGTAG INTEGER DECIMAL DOUBLE " + \
-                    "INTEGER_POSITIVE DECIMAL_POSITIVE DOUBLE_POSITIVE INTEGER_NEGATIVE DECIMAL_NEGATIVE " + \
-                    "DOUBLE_NEGATIVE EXPONENT STRING_LITERAL1 STRING_LITERAL2 STRING_LITERAL_LONG1 " + \
-                    "STRING_LITERAL_LONG2 ECHAR NIL WS ANON PN_CHARS_BASE PN_CHARS_U VARNAME PN_CHARS " + \
-                    "PN_PREFIX PN_LOCAL PLX PERCENT HEX PN_LOCAL_ESC"
+    lex_file, start, export_terminals, excluded = get_export_conf('cfq_mcd1')
     for i in range(0, len(miner.stat_by_iter), 10):
-        miner.export_kth_rules(i, 'sparql.lark.lex-in', cfg.NonTerminal('queryunit'),
-                               export_terminals=True, excluded_terminals=set(lex_terminals.split()))
+        miner.export_kth_rules(i, lex_file, start, export_terminals=export_terminals, excluded_terminals=excluded)
+
 
 def main():
     if len(sys.argv) > 1 and sys.argv[1].lower() == 'cfq':

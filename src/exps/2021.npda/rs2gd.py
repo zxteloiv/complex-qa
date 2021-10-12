@@ -21,10 +21,19 @@ from trialbot.data import NSVocabulary
 import datasets.comp_gen_bundle as cg_bundle
 cg_bundle.install_parsed_qa_datasets(Registry._datasets)
 import datasets.cg_bundle_translator
+
+from utils.trialbot.extensions import print_hyperparameters, get_metrics, print_models
+from utils.trialbot.extensions import save_multiple_models_per_epoch
+from utils.trialbot.extensions import end_with_nan_loss
+from utils.trialbot.extensions import collect_garbage
+
 from utils.select_optim import select_optim
 from trialbot.utils.move_to_device import move_to_device
 from utils.trialbot.setup import setup
 from utils.seq_collector import SeqCollector
+from utils.lark.restore_cfg import restore_grammar_from_trees, export_grammar
+from idioms.export_conf import get_export_conf
+import lark
 
 
 class RS2GDTraining(Updater):
@@ -155,12 +164,78 @@ class RS2GDTraining(Updater):
         return parser_loss, policy_loss
 
 
-def eval_on_epoch_grammars(bot: TrialBot):
-    for data in bot.train_set:
-        pass
+def collect_epoch_grammars(bot: TrialBot):
+    bot.logger.info("Collecting grammar from the training trees...")
+    train_trees = [data['runtime_tree'] for data in bot.train_set]
+    g, terminals = restore_grammar_from_trees(train_trees)
+    lex_file, start, export_terminals, excluded = get_export_conf(bot.args.dataset)
+    lex_in = osp.join(find_root(), 'src', 'statics', 'grammar', lex_file)
+    bot.logger.debug(f"Got grammar: start={start.name}, lex_in={lex_in}")
+    g_txt = export_grammar(g, start, lex_in, terminals if export_terminals else None, excluded)
+    bot.state.g_txt = g_txt
+    grammar_filename = osp.join(bot.savepath, f"grammar_{bot.state.epoch}.lark")
+    bot.logger.info(f"Grammar saved to {grammar_filename}")
+    print(g_txt, file=open(grammar_filename, 'w'))
+    parser = lark.Lark(bot.state.g_txt, start=start.name, keep_all_tokens=True)
+    bot.state.parser = parser
 
-    pass
+def parse_and_eval_on_dev(bot: TrialBot, interval: int = 1,
+                          clear_cache_each_batch: bool = True,
+                          rewrite_eval_hparams: dict = None,
+                          skip_first_epochs: int = 0,
+                          on_test_data: bool = False,
+                          ):
+    from trialbot.utils.move_to_device import move_to_device
+    import json
+    if bot.state.epoch % interval == 0 and bot.state.epoch > skip_first_epochs:
+        if on_test_data:
+            bot.logger.info("Running for evaluation metrics on testing ...")
+        else:
+            bot.logger.info("Running for evaluation metrics ...")
 
+        dataset, hparams = bot.dev_set, bot.hparams
+        rewrite_eval_hparams = rewrite_eval_hparams or dict()
+        for k, v in rewrite_eval_hparams.items():
+            setattr(hparams, k, v)
+        from trialbot.data import RandomIterator
+        dataset = bot.test_set if on_test_data else bot.dev_set
+        iterator = RandomIterator(len(dataset), hparams.batch_sz, shuffle=False, repeat=False)
+        _, parser_model = bot.models
+        device = bot.args.device
+        parser_model.eval()
+        lark_parser: lark.Lark = bot.state.parser
+        for indices in iterator:
+            raw_batch = []
+            for index in indices:
+                raw = dataset[index]
+                try:
+                    raw['runtime_tree'] = lark_parser.parse(raw['sql'])
+                except:
+                    bot.logger.warning(f'Failed to parse the example {str(raw)}')
+                    raw['runtime_tree'] = None
+                raw_batch.append(raw)
+            tensor_list = [bot.translator.to_tensor(example) for example in raw_batch]
+            try:
+                batch = bot.translator.batch_tensor(tensor_list)
+            except:
+                batch = None
+            if batch is None or len(batch) == 0:
+                continue
+            if device >= 0:
+                batch = move_to_device(batch, device)
+            parser_model(batch['source_tokens'], batch['target_tokens'])
+
+            if clear_cache_each_batch:
+                import gc
+                gc.collect()
+                if bot.args.device >= 0:
+                    import torch.cuda
+                    torch.cuda.empty_cache()
+
+        if on_test_data:
+            get_metrics(bot, prefix="Testing Metrics: ")
+        else:
+            get_metrics(bot, prefix="Evaluation Metrics: ")
 
 @Registry.hparamset()
 def crude_conf():
@@ -248,23 +323,24 @@ def main():
     args = setup(seed=2021, hparamset='crude_conf', translator="gd")
     bot = TrialBot(trial_name='rs2gd', get_model_func=get_models, args=args)
 
-    from utils.trialbot.extensions import print_hyperparameters, get_metrics, print_models
     bot.add_event_handler(Events.STARTED, print_hyperparameters, 90)
-    # bot.add_event_handler(Events.EPOCH_COMPLETED, get_metrics, 100)
+    bot.add_event_handler(Events.EPOCH_COMPLETED, get_metrics, 100)
     bot.add_event_handler(Events.STARTED, print_models, 100)
 
+    @bot.attach_extension(Events.STARTED, 50)
+    def print_snaptshot_path(bot: TrialBot):
+        print("savepath:", bot.savepath)
+
     if not args.test:   # training behaviors
-        from utils.trialbot.extensions import save_multiple_models_per_epoch
-        from utils.trialbot.extensions import end_with_nan_loss
-        from utils.trialbot.extensions import collect_garbage
+        bot.add_event_handler(Events.STARTED, collect_epoch_grammars, 80)
         bot.add_event_handler(Events.ITERATION_COMPLETED, end_with_nan_loss, 100)
         bot.add_event_handler(Events.ITERATION_COMPLETED, collect_garbage, 95)
-        from utils.trialbot.extensions import evaluation_on_dev_every_epoch
-        # bot.add_event_handler(Events.EPOCH_COMPLETED, evaluation_on_dev_every_epoch, 90,
-        #                       rewrite_eval_hparams={"batch_sz": 32})
-        # bot.add_event_handler(Events.EPOCH_COMPLETED, evaluation_on_dev_every_epoch, 80,
-        #                       rewrite_eval_hparams={"batch_sz": 32}, on_test_data=True)
+        bot.add_event_handler(Events.EPOCH_COMPLETED, collect_epoch_grammars, 120)
         bot.add_event_handler(Events.EPOCH_COMPLETED, save_multiple_models_per_epoch, 100)
+        bot.add_event_handler(Events.EPOCH_COMPLETED, parse_and_eval_on_dev, 90,
+                              rewrite_eval_hparams={"batch_sz": 32})
+        bot.add_event_handler(Events.EPOCH_COMPLETED, parse_and_eval_on_dev, 80,
+                              rewrite_eval_hparams={"batch_sz": 32}, on_test_data=True)
         bot.updater = RS2GDTraining(bot)
 
     bot.run()

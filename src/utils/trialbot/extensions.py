@@ -155,11 +155,12 @@ def collect_garbage(bot: TrialBot):
         import torch.cuda
         torch.cuda.empty_cache()
 
-def get_metrics(bot: TrialBot):
+def get_metrics(bot: TrialBot, prefix: str = ""):
     import json
-    if getattr(bot.model, 'get_metric', None):
-        print(json.dumps(bot.model.get_metric(reset=True)))
-    elif getattr(bot.model, 'get_metrics', None):
-        print(json.dumps(bot.model.get_metrics(reset=True)))
-    else:
-        bot.logger.warning(f'neither get_metric nor get_metrics method is found')
+    for i, model in enumerate(bot.models):
+        if getattr(model, 'get_metric', None):
+            print(prefix + json.dumps(model.get_metric(reset=True)))
+        elif getattr(model, 'get_metrics', None):
+            print(prefix + json.dumps(model.get_metrics(reset=True)))
+        else:
+            bot.logger.warning(f'neither get_metric nor get_metrics method is found')

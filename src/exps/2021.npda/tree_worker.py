@@ -36,6 +36,8 @@ def modify_tree(tree: TREE, node_idx: int, action_id: int) -> bool:
         logging.getLogger(__name__).warning(str(e))
         return False
 
+    logging.getLogger(__name__).debug(f"successfully applied tree action {action_id}: {actions[action_id].__name__}")
+
     enrich_tree(tree)
     return True
 

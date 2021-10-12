@@ -3,7 +3,7 @@ from os.path import join
 sys.path.insert(0, join('..', '..'))
 import logging
 logging.basicConfig(level=logging.INFO)
-from idioms.stat import StatCollector
+from utils.lark.stat import RuleCollector
 from idioms.eval import step_evaluation
 import datasets.comp_gen_bundle as cg_bundle
 cg_bundle.install_raw_sql_datasets()
@@ -27,7 +27,7 @@ def main():
 
 def run_eval(ds, grammar, start, key):
     train, dev, test = cg_bundle.CG_DATA_REG[ds]()
-    c = StatCollector()
+    c = RuleCollector()
     parser = lark.Lark(open(grammar), keep_all_tokens=True, start=start)
     train_trees = _parse(train, parser, key)
     dev_trees = _parse(dev, parser, key)
