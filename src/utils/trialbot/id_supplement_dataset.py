@@ -1,5 +1,6 @@
 from trialbot.data import CompositionalDataset
 
+
 class IDSupplement(CompositionalDataset):
     def __init__(self, dataset, key='id'):
         super().__init__(dataset)

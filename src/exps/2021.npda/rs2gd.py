@@ -74,12 +74,8 @@ class RS2GDTraining(Updater):
         batch_data = []
         for i in indices:
             raw = self.dataset[i]
-            if 'sql_tree' not in raw:
-                continue
-            if 'runtime_tree' not in raw:
-                raw['runtime_tree'] = enrich_tree(raw['sql_tree'])
-
-            batch_data.append(raw)
+            if 'sql_tree' in raw:
+                batch_data.append(raw)
         # ends of iteration will raise a StopIteration after the current batch, and then event engine will return None.
         # an empty batch is set to return None, but raising the StopIteration exception is not required.
         if iterator.is_end_of_epoch:
@@ -88,7 +84,14 @@ class RS2GDTraining(Updater):
 
     def _run_policy_net(self, batch: list):
         tensor_list = [self.translator.to_tensor(x) for x in batch]
-        tensor_batch = self.translator.batch_tensor(tensor_list)
+
+        filtered_tensors, filtered_batch = [], []
+        for tensor, example in zip(tensor_list, batch):
+            if all(v is not None for v in tensor.values()):
+                filtered_tensors.append(tensor)
+                filtered_batch.append(example)
+
+        tensor_batch = self.translator.batch_tensor(filtered_tensors)
         if self._device >= 0:
             tensor_batch = move_to_device(tensor_batch, self._device)
 
@@ -102,7 +105,7 @@ class RS2GDTraining(Updater):
         nodes, actions, logprobs, probs = model.decode(out_prob, out_logprob, method="topk")
 
         mem = SeqCollector()
-        for i, data in enumerate(batch):
+        for i, data in enumerate(filtered_batch):
             sample_iter = zip(nodes[i], actions[i], logprobs[i], probs[i])
             # if a sampled modification is failed, the example will de facto be omitted,
             # which may be changed to select some examples along with the original one (representing a staged grammar)
@@ -111,7 +114,7 @@ class RS2GDTraining(Updater):
             reset = True
             for node, action, prob, logprob in sample_iter:
                 new_data = deepcopy(data)
-                success = modify_tree(new_data['runtime_tree'], node, action)
+                success = modify_tree(enrich_tree(new_data['runtime_tree']), node, action)
                 if success:
                     mem(data=new_data, prob=prob, logprob=logprob)
                     if reset:
@@ -166,7 +169,10 @@ class RS2GDTraining(Updater):
 
 def collect_epoch_grammars(bot: TrialBot):
     bot.logger.info("Collecting grammar from the training trees...")
-    train_trees = [data['runtime_tree'] for data in bot.train_set]
+    train_trees = list(filter(None, [data['runtime_tree'] for data in bot.train_set]))
+    if len(train_trees) == 0:
+        raise ValueError("runtime tree of the entire training set not available.")
+
     g, terminals = restore_grammar_from_trees(train_trees)
     lex_file, start, export_terminals, excluded = get_export_conf(bot.args.dataset)
     lex_in = osp.join(find_root(), 'src', 'statics', 'grammar', lex_file)
@@ -178,6 +184,7 @@ def collect_epoch_grammars(bot: TrialBot):
     print(g_txt, file=open(grammar_filename, 'w'))
     parser = lark.Lark(bot.state.g_txt, start=start.name, keep_all_tokens=True)
     bot.state.parser = parser
+
 
 def parse_and_eval_on_dev(bot: TrialBot, interval: int = 1,
                           clear_cache_each_batch: bool = True,
@@ -211,7 +218,7 @@ def parse_and_eval_on_dev(bot: TrialBot, interval: int = 1,
                 try:
                     raw['runtime_tree'] = lark_parser.parse(raw['sql'])
                 except:
-                    bot.logger.warning(f'Failed to parse the example {str(raw)}')
+                    bot.logger.warning(f'Failed to parse {dict((k, raw[k]) for k in ("sent", "sql"))}')
                     raw['runtime_tree'] = None
                 raw_batch.append(raw)
             tensor_list = [bot.translator.to_tensor(example) for example in raw_batch]
@@ -236,6 +243,7 @@ def parse_and_eval_on_dev(bot: TrialBot, interval: int = 1,
             get_metrics(bot, prefix="Testing Metrics: ")
         else:
             get_metrics(bot, prefix="Evaluation Metrics: ")
+
 
 @Registry.hparamset()
 def crude_conf():
@@ -294,6 +302,7 @@ def crude_conf():
 
     return p
 
+
 def get_models(p, vocab: NSVocabulary):
     from torch import nn
     p_hid_dim = p.policy_hid_sz
@@ -318,6 +327,7 @@ def get_models(p, vocab: NSVocabulary):
     parser_net = BaseSeq2Seq.from_param_and_vocab(p, vocab)
 
     return policy_net, parser_net
+
 
 def main():
     args = setup(seed=2021, hparamset='crude_conf', translator="gd")
@@ -344,6 +354,7 @@ def main():
         bot.updater = RS2GDTraining(bot)
 
     bot.run()
+
 
 if __name__ == '__main__':
     main()

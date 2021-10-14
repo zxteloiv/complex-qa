@@ -8,8 +8,9 @@
 
 from trialbot.data import JsonDataset
 from trialbot.data import CompositionalDataset, RedisDataset
-from .writable_redis import WritableRedis
-from .id_supplement_dataset import IDSupplement
+from utils.trialbot.volatile_mem import VolatileDataset
+from utils.trialbot.id_supplement_dataset import IDSupplement
+from utils.trialbot.transform_dataset import TransformData
 from .lark_dataset import LarkParserDatasetWrapper
 from trialbot.utils.root_finder import find_root
 import os
@@ -21,6 +22,7 @@ import re
 ROOT = find_root()
 CG_DATA_PATH = join(ROOT, 'data', 'CompGen', 'sql data')
 CG_DATA_REG = dict()
+
 
 class FlattenSeqDS(CompositionalDataset):
     """
@@ -90,10 +92,12 @@ class FlattenSeqDS(CompositionalDataset):
         instance['sql'] = sql
         return instance
 
+
 def _get_grammar_tag_by_filename(grammar_file: str):
     grammar_tag = grammar_file[grammar_file.rfind('/') + 1:grammar_file.index('.lark')]
     grammar_tag = grammar_tag[grammar_tag.rfind('_') + 1:].lower()
     return grammar_tag
+
 
 def _get_grammar_start(grammar_file: str):
     if 'sqlite' in grammar_file.lower():
@@ -105,6 +109,7 @@ def _get_grammar_start(grammar_file: str):
     else:
         raise ValueError(f"Unknown grammar file {grammar_file}")
     return startpoint
+
 
 def _get_raw_sql_ds(data_name: str, *, use_iid: bool, sql_only: bool = True):
     ds_dir = join(CG_DATA_PATH, data_name, 'new_question_split' if use_iid else 'schema_full_split')
@@ -120,6 +125,7 @@ def _get_raw_sql_ds(data_name: str, *, use_iid: bool, sql_only: bool = True):
     logging.info(f"load dataset: {ds_dir}")
     return train, dev, test
 
+
 def install_raw_sql_datasets(reg: dict = None):
     if reg is None:
         reg = CG_DATA_REG
@@ -130,6 +136,7 @@ def install_raw_sql_datasets(reg: dict = None):
         logging.debug(f"registered raw_sql.{domain}_iid lazily")
         reg[f"raw_sql.{domain}_cg"] = partial(_get_raw_sql_ds, path, use_iid=False)
         logging.debug(f"registered raw_sql.{domain}_cg lazily")
+
 
 def install_raw_qa_datasets(reg: dict = None):
     if reg is None:
@@ -142,6 +149,7 @@ def install_raw_qa_datasets(reg: dict = None):
         reg[f"raw_qa.{domain}_cg"] = partial(_get_raw_sql_ds, path, use_iid=False, sql_only=False)
         logging.debug(f"registered raw_sql.{domain}_cg lazily")
 
+
 def _get_parsed_ds(data_name: str, *,
                    use_iid: bool,
                    grammar_file: str,
@@ -152,22 +160,32 @@ def _get_parsed_ds(data_name: str, *,
     grammar_tag = _get_grammar_tag_by_filename(grammar_file)
     iid_tag = 'iid' if use_iid else 'cg'
 
+    def _add_runtime(x):
+        if x.get('runtime_tree') is None:
+            x['runtime_tree'] = x.get('sql_tree')
+        return x
+
     def _build_ds(filename: str, split_tag: str):
         nonlocal ds_dir, grammar_tag
         prefix = f"{split_tag}.{iid_tag}.{data_name}.{grammar_tag}_"
         if sql_only:
             prefix = 'pure_sql.' + prefix
 
-        ds = WritableRedis(
-            dataset=LarkParserDatasetWrapper(
-                grammar_filename=grammar_file,
-                startpoint=_get_grammar_start(grammar_file),
-                parse_keys=['sql'],
-                dataset=IDSupplement(FlattenSeqDS(JsonDataset(join(ds_dir, filename)), sql_only=sql_only))
+        # the read-only redis dataset will only cache the parsed trees,
+        # while the volatile memory will store the runtime tree
+        ds = VolatileDataset(TransformData(
+            dataset=RedisDataset(
+                LarkParserDatasetWrapper(
+                    grammar_filename=grammar_file,
+                    startpoint=_get_grammar_start(grammar_file),
+                    parse_keys=['sql'],
+                    dataset=IDSupplement(FlattenSeqDS(JsonDataset(join(ds_dir, filename)), sql_only=sql_only)),
+                ),
+                conn=conn,
+                prefix=prefix,
             ),
-            conn=conn,
-            prefix=prefix,
-        )
+            transform_fn=_add_runtime,
+        ))
         return ds
 
     train = _build_ds('aligned_train.json', 'train')
@@ -175,6 +193,7 @@ def _get_parsed_ds(data_name: str, *,
     test = _build_ds('final_test.json', 'test')
     logging.info(f"load dataset: {ds_dir}")
     return train, dev, test
+
 
 def install_parsed_sql_datasets(reg: dict = None):
     if reg is None:
@@ -191,6 +210,7 @@ def install_parsed_sql_datasets(reg: dict = None):
             logging.debug(f"registered pure_sql.{domain}_iid.{tag} lazily")
             reg[f"pure_sql.{domain}_cg.{tag}"] = partial(_get_parsed_ds, path, use_iid=False, grammar_file=g, sql_only=True)
             logging.debug(f"registered pure_sql.{domain}_cg.{tag} lazily")
+
 
 def install_parsed_qa_datasets(reg: dict = None):
     """

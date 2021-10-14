@@ -2,12 +2,14 @@ from trialbot.training import TrialBot
 import os.path
 import torch
 
+
 def save_model_every_num_iters(bot: TrialBot, interval: int = 100):
     if bot.state.iteration % interval == 0:
         savedir, model = bot.savepath, bot.model
         filename = os.path.join(savedir, f"model_state_{bot.state.epoch}-{bot.state.iteration}.th")
         torch.save(model.state_dict(), filename)
         bot.logger.info(f"model saved to {filename}")
+
 
 def save_multiple_models_every_num_iters(bot: TrialBot, interval: int = 100):
     if bot.state.iteration % interval == 0:
@@ -17,6 +19,7 @@ def save_multiple_models_every_num_iters(bot: TrialBot, interval: int = 100):
             torch.save(model.state_dict(), filename)
             bot.logger.info(f"model {model_id} saved to {filename}")
 
+
 def save_multiple_models_per_epoch(bot: TrialBot, interval: int = 1):
     if bot.state.epoch % interval == 0:
         savedir, models = bot.savepath, bot.models
@@ -25,8 +28,10 @@ def save_multiple_models_per_epoch(bot: TrialBot, interval: int = 1):
             torch.save(model.state_dict(), filename)
             bot.logger.info(f"model {model_id} saved to {filename}")
 
+
 def debug_models(bot: TrialBot):
     bot.logger.debug(str(bot.models))
+
 
 def end_with_nan_loss(bot: TrialBot):
     import numpy as np
@@ -48,12 +53,15 @@ def end_with_nan_loss(bot: TrialBot):
         bot.state.epoch = bot.hparams.TRAINING_LIMIT + 1
         bot.updater.stop_epoch()
 
+
 def print_hyperparameters(bot: TrialBot):
     bot.logger.info(f"Cmd Arguments Used:\n{bot.args}")
     bot.logger.info(f"Hyperparamset Used: {bot.args.hparamset}\n{str(bot.hparams)}")
 
+
 def print_models(bot: TrialBot):
     print(str(bot.models))
+
 
 def track_pytorch_module_forward_time(bot: TrialBot, max_depth: int = -1, timefmt="%H:%M:%S.%f"):
     models = bot.models
@@ -74,6 +82,7 @@ def track_pytorch_module_forward_time(bot: TrialBot, max_depth: int = -1, timefm
         for name, module in model.named_modules():
             if max_depth < 0 or name.count('.') - base_depth < max_depth:
                 module.register_forward_pre_hook(print_time_hook)
+
 
 def evaluation_on_dev_every_epoch(bot: TrialBot, interval: int = 1,
                                   clear_cache_each_batch: bool = True,
@@ -123,37 +132,19 @@ def evaluation_on_dev_every_epoch(bot: TrialBot, interval: int = 1,
         else:
             bot.logger.info("Evaluation Metrics: " + json.dumps(val_metrics))
 
-def init_tensorboard_writer(bot: TrialBot, interval: int = 32, histogram_interval: int = 100):
-    from utils.tensorboard_writer import TensorboardWriter
-    bot.tbx_writer = TensorboardWriter(bot.savepath,
-                                       summary_interval=interval,
-                                       histogram_interval=histogram_interval,
-                                       get_iteration_fn=lambda: bot.state.iteration)
-
-def write_batch_info_to_tensorboard(bot: TrialBot):
-    from utils.tensorboard_writer import TensorboardWriter
-    output = bot.state.output
-    if output is not None:
-        bot.tbx_writer: TensorboardWriter
-        metrics = bot.model.get_metric()
-        bot.tbx_writer.log_batch(bot.model, output.get('loss', 0), metrics, output.get('param_update', None))
-
-def close_tensorboard(bot: TrialBot):
-    from utils.tensorboard_writer import TensorboardWriter
-    bot.tbx_writer: TensorboardWriter
-    bot.tbx_writer.close()
 
 def collect_garbage(bot: TrialBot):
     for optim in bot.updater._optims:
         optim.zero_grad()
 
-    if bot.state.output is not None:
+    if hasattr(bot.state, "output") and bot.state.output is not None:
         del bot.state.output
     import gc
     gc.collect()
     if bot.args.device >= 0:
         import torch.cuda
         torch.cuda.empty_cache()
+
 
 def get_metrics(bot: TrialBot, prefix: str = ""):
     import json

@@ -27,10 +27,10 @@ class NodeAction(IntEnum):
 
 def modify_tree(tree: TREE, node_idx: int, action_id: int) -> bool:
     actions = [intact, del_self, add_parent, left_rotate, right_rotate, left_descent, right_descent]
-    node, route = find_node_by_idx(tree, node_idx)
 
-    foo: Callable[[TREE, List[int]], None] = actions[action_id]
     try:
+        node, route = find_node_by_idx(tree, node_idx)
+        foo: Callable[[TREE, List[int]], None] = actions[action_id]
         foo(node, route)
     except ValueError as e:
         logging.getLogger(__name__).warning(str(e))
@@ -60,6 +60,9 @@ def find_node_by_idx(tree: TREE, idx: int) -> Tuple[TREE, List[int]]:
         node_id += 1
     else:
         raise ValueError('node of the specified index not found from the tree')
+
+    if not is_tree(node):
+        raise ValueError('the node selected is a terminal and shall not be modified')
 
     return node, route
 
@@ -111,7 +114,7 @@ def del_self(node: TREE, route: List[int]) -> None:
 def category_generation(node: TREE) -> str:
     max_val = 4
     val = min(len(node.children), max_val)
-    return f"ANON_{val}"
+    return f"anon_nt_{val}"
 
 
 def add_parent(node: TREE, route: List[int]) -> None:
@@ -123,6 +126,8 @@ def add_parent(node: TREE, route: List[int]) -> None:
 def left_rotate(node: TREE, route: List[int]) -> None:
     parent = get_parent(node)
     right = get_rightmost_child(node)
+    if not is_tree(right):
+        raise ValueError("Failed to rotate on a terminal pivot")
     pos = route[-1]
     parent.children[pos] = right
     node.children = node.children[:-1]
@@ -132,6 +137,8 @@ def left_rotate(node: TREE, route: List[int]) -> None:
 def right_rotate(node: TREE, route: List[int]) -> None:
     parent = get_parent(node)
     left = get_leftmost_child(node)
+    if not is_tree(left):
+        raise ValueError("Failed to rotate on a terminal pivot")
     pos = route[-1]
     parent.children[pos] = left
     node.children = node.children[1:]
@@ -142,6 +149,8 @@ def left_descent(node: TREE, route: List[int]) -> None:
     parent = get_parent(node)
     pos = route[-1]
     left = get_left_sibling(node, route)
+    if not is_tree(left):
+        raise ValueError("Failed to rotate on a terminal pivot")
     parent.children = parent.children[:pos] + parent.children[pos + 1:]
     left.children.append(node)
 
@@ -150,6 +159,8 @@ def right_descent(node: TREE, route: List[int]) -> None:
     parent = get_parent(node)
     pos = route[-1]
     right = get_right_sibling(node, route)
+    if not is_tree(right):
+        raise ValueError("Failed to rotate on a terminal pivot")
     parent.children = parent.children[:pos] + parent.children[pos + 1:]
     right.children.insert(0, node)
 
