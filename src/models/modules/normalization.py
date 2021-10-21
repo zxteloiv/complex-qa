@@ -1,4 +1,5 @@
-import torch
+import torch.nn.functional
+
 
 class Normalization(torch.nn.Module):
     def __init__(self, p=2, dim=-1, eps=1e-2):

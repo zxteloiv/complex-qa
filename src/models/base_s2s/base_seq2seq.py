@@ -172,13 +172,11 @@ class BaseSeq2Seq(torch.nn.Module):
                           runtime_max_decoding_len: int = -1,
                           ) -> Tuple[torch.LongTensor, torch.FloatTensor]:
         """
-        :param batch_sz:
         :param enc_attn_fn: tensor -> tensor
         :param hx:
         :param target:
         :param target_mask:
         :param runtime_max_decoding_len:
-        :param device:
         :return:
         """
         last_pred = source_mask.new_full((source_mask.size()[0],), fill_value=self._start_id)
@@ -385,7 +383,7 @@ class BaseSeq2Seq(torch.nn.Module):
 
         enc_dropout = getattr(p, 'enc_dropout', getattr(p, 'dropout', 0.))
         dec_dropout = getattr(p, 'dec_dropout', getattr(p, 'dropout', 0.))
-        rnn_cls = cls._get_decoder_type(p.decoder)
+        rnn_cls = cls.get_decoder_type(p.decoder)
         decoder = StackedRNNCell([
             rnn_cls(dec_in_dim if floor == 0 else dec_out_dim, dec_out_dim)
             for floor in range(p.num_dec_layers)
@@ -422,7 +420,7 @@ class BaseSeq2Seq(torch.nn.Module):
         return model
 
     @staticmethod
-    def _get_decoder_type(decoder: str):
+    def get_decoder_type(decoder: str):
         from models.modules.torch_rnn_wrapper import RNNType
         from ..modules.torch_rnn_wrapper import TorchRNNWrapper as RNNWrapper
         cell_type = decoder

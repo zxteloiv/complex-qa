@@ -5,6 +5,7 @@ import torch.nn.functional
 import re
 import math
 
+
 def add_position_and_timestep_sinusoid(inputs: torch.Tensor,
                                        timestep: Optional[float] = None,
                                        base_num: float = 1.e4) -> torch.Tensor:
@@ -43,11 +44,13 @@ def add_position_and_timestep_sinusoid(inputs: torch.Tensor,
 
     return inputs + sinusoid
 
+
 def add_positional_features(inputs: torch.Tensor) -> torch.Tensor:
     """
     A wrapper with the same name from AllenNLP
     """
     return add_position_and_timestep_sinusoid(inputs, None)
+
 
 def add_depth_features_to_single_position(inputs: torch.Tensor, timestep: float) -> torch.Tensor:
     """
@@ -60,10 +63,12 @@ def add_depth_features_to_single_position(inputs: torch.Tensor, timestep: float)
     """
     return add_position_and_timestep_sinusoid(inputs, timestep)
 
+
 def filter_cat(iterable, dim):
     items = [item for item in iterable if item is not None]
     res = torch.cat(items, dim=dim)
     return res
+
 
 def filter_sum(iterable):
     items = [item for item in iterable if item is not None]
@@ -75,12 +80,14 @@ def filter_sum(iterable):
             res = res + item
     return res
 
+
 def roll(t: torch.Tensor, shift: int, axis: int = 0):
     length = t.size()[axis]
     assert length > 1, "The data size must be greater than 1, otherwise rolling is "
     shift = shift % length
     chunks = torch.split(t, [length - shift, shift], dim=axis)
     return torch.cat(list(reversed(chunks)), dim=axis)
+
 
 def prepare_input_mask(tokens, padding_val: int = 0):
     if tokens is not None:
@@ -161,9 +168,11 @@ def seq_cross_ent(logits: torch.FloatTensor,
     nll = - masked_reducing_gather(log_probs, targets, weights, reducing_method=average)
     return nll
 
+
 def sum_to_batch_size(t: torch.Tensor):
     reducible_dims = list(range(t.ndim))[1:]
     return t.sum(reducible_dims)
+
 
 def seq_masked_mean(x: torch.Tensor, mask: torch.LongTensor, dim: int = 1):
     """
@@ -209,6 +218,7 @@ def seq_masked_std_mean(x: torch.Tensor, mask: torch.LongTensor, dim: int = 1):
     std = (var.abs() + 1e-20) ** 0.5
     return std, mean
 
+
 def get_final_encoder_states(encoder_outputs: torch.Tensor,
                              mask: torch.Tensor,
                              bidirectional: bool = False) -> torch.Tensor:
@@ -244,6 +254,7 @@ def get_final_encoder_states(encoder_outputs: torch.Tensor,
         final_backward_output = encoder_outputs[:, 0, (encoder_output_dim // 2):]
         final_encoder_output = torch.cat([final_forward_output, final_backward_output], dim=-1)
     return final_encoder_output
+
 
 def init_stacked_dec_state_from_enc(layer_state: List[torch.Tensor],
                                     source_mask: torch.LongTensor,
@@ -305,6 +316,7 @@ def init_stacked_dec_state_from_enc(layer_state: List[torch.Tensor],
     init_state = init_state_for_stacked_rnn(src_agg, num_decoder_layers, assign_stg)
     return init_state
 
+
 def init_state_for_stacked_rnn(src_agg: List[torch.Tensor],
                                num_layers: int,
                                policy: Literal["lowest", "all", "parallel"]):
@@ -319,6 +331,7 @@ def init_state_for_stacked_rnn(src_agg: List[torch.Tensor],
         init_state = src_agg
 
     return init_state
+
 
 def expand_tensor_size_at_dim(t: torch.Tensor, size: int, dim: int =-2) -> torch.Tensor:
     old_size = t.size()

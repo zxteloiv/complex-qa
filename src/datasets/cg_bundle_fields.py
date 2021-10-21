@@ -4,14 +4,13 @@ from trialbot.data.fields import SeqField
 from trialbot.data.field import Field, NullableTensor
 import lark
 from trialbot.data import START_SYMBOL, END_SYMBOL
-_Tree, _Token = lark.Tree, lark.Token
 from itertools import product
 import nltk
 import re
-from copy import deepcopy
-from functools import partial
 from utils.preprocessing import nested_list_numbers_to_tensors
-from utils.tree import preorder_traverse, non_terminal_children_from_property, assign_node_id
+from utils.trialbot.char_array_field import CharArrayField
+_Tree, _Token = lark.Tree, lark.Token
+
 
 class ProcessedSentField(SeqField):
     def get_sent(self, example):
@@ -143,6 +142,7 @@ class ProcessedSentField(SeqField):
                 correct_tokens.append(word)
         return " ".join(correct_tokens)
 
+
 class TerminalRuleSeqField(SeqField):
     def __init__(self, keywords: dict = None, no_terminal_rule: bool = False, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -209,6 +209,7 @@ class TerminalRuleSeqField(SeqField):
         rule_seq_tensor = torch.tensor(rule_id)
         return {self.renamed_key: rule_seq_tensor}
 
+
 class RuleSymbolSeqField(TerminalRuleSeqField):
     def _get_rule_str(self, node: Union[_Tree, _Token]):
         rule_str = super()._get_rule_str(node)
@@ -242,6 +243,23 @@ class RuleSymbolSeqField(TerminalRuleSeqField):
 
         tgt = torch.tensor(tgt)
         return {self.renamed_key: tgt}
+
+
+class DerivationField(CharArrayField):
+    def tear_to_char_array(self, raw_data: Union[None, str, Any]) -> List[List[str]]:
+        if not isinstance(raw_data, _Tree):
+            return []
+        arr = []
+        for t in raw_data.iter_subtrees_topdown():
+            rule = [t.data]
+            for c in t.children:
+                if isinstance(c, _Tree):
+                    rule.append(c.data)
+                elif isinstance(c, _Token):
+                    rule.append(c.value)
+            arr.append(rule)
+        return arr
+
 
 class TreeField(Field):
     def batch_tensor_by_key(self, tensors_by_keys: Mapping[str, List[NullableTensor]]) -> Mapping[str, torch.Tensor]:

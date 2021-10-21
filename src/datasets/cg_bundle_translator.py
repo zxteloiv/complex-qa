@@ -2,7 +2,7 @@ from trialbot.training import Registry
 from trialbot.data.translator import FieldAwareTranslator
 from trialbot.data.fields import SeqField
 from trialbot.data.translators import KnownFieldTranslator
-from .cg_bundle_fields import TerminalRuleSeqField, ProcessedSentField, RuleSymbolSeqField, TreeField
+from .cg_bundle_fields import TerminalRuleSeqField, ProcessedSentField, RuleSymbolSeqField, TreeField, DerivationField
 from .cfq_fields import MidOrderTraversalField, TutorBuilderField
 
 @Registry.translator('sql_s2s')
@@ -37,15 +37,12 @@ class GrammarDerivationTranslator(KnownFieldTranslator):
         super().__init__(
             field_list=[
                 ProcessedSentField(source_key='sent', renamed_key='source_tokens', add_start_end_toks=False,),
-                RuleSymbolSeqField(no_terminal_rule=True, source_key='runtime_tree', renamed_key="target_tokens",
-                                   namespace="rule_seq"),
-                TreeField(tree_key="runtime_tree", ns="rule_seq", max_node_position=max_node_position)
+                DerivationField(source_key='runtime_tree', renamed_key="target_tokens", namespace="formal_token"),
+                TreeField(tree_key="runtime_tree", ns="formal_token", max_node_position=max_node_position)
             ],
             vocab_fields=[
                 ProcessedSentField(source_key='sent', renamed_key='source_tokens', add_start_end_toks=False,),
-                RuleSymbolSeqField(no_terminal_rule=True, source_key='sql_tree', renamed_key="target_tokens",
-                               namespace="rule_seq"),
-
+                DerivationField(source_key='sql_tree', renamed_key="target_tokens", namespace="formal_token"),
             ]
         )
 
