@@ -7,15 +7,15 @@ import tranx_bin
 def main():
     exp_args = [
         dict(dataset='scholar_iid.handcrafted', seed=2021, hparamset='scholar_common', device=0),
-        # dict(dataset='scholar_iid.handcrafted', seed=2022, hparamset='scholar_common', device=0),
-        # dict(dataset='scholar_iid.handcrafted', seed=2023, hparamset='scholar_common', device=0),
-        # dict(dataset='scholar_iid.handcrafted', seed=2024, hparamset='scholar_common', device=0),
-        # dict(dataset='scholar_iid.handcrafted', seed=2025, hparamset='scholar_common', device=0),
+        dict(dataset='scholar_iid.handcrafted', seed=2022, hparamset='scholar_common', device=0),
+        dict(dataset='scholar_iid.handcrafted', seed=2023, hparamset='scholar_common', device=0),
+        dict(dataset='scholar_iid.handcrafted', seed=2024, hparamset='scholar_common', device=0),
+        dict(dataset='scholar_iid.handcrafted', seed=2025, hparamset='scholar_common', device=0),
         dict(dataset='scholar_cg.handcrafted', seed=2021, hparamset='scholar_common', device=0),
-        # dict(dataset='scholar_cg.handcrafted', seed=2022, hparamset='scholar_common', device=0),
-        # dict(dataset='scholar_cg.handcrafted', seed=2023, hparamset='scholar_common', device=0),
-        # dict(dataset='scholar_cg.handcrafted', seed=2024, hparamset='scholar_common', device=0),
-        # dict(dataset='scholar_cg.handcrafted', seed=2025, hparamset='scholar_common', device=0),
+        dict(dataset='scholar_cg.handcrafted', seed=2022, hparamset='scholar_common', device=0),
+        dict(dataset='scholar_cg.handcrafted', seed=2023, hparamset='scholar_common', device=0),
+        dict(dataset='scholar_cg.handcrafted', seed=2024, hparamset='scholar_common', device=0),
+        dict(dataset='scholar_cg.handcrafted', seed=2025, hparamset='scholar_common', device=0),
     ]
 
     sys.argv[1:] = []
