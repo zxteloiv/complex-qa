@@ -1,5 +1,9 @@
 from trialbot.training import TrialBot
+import math
+from datetime import datetime
+from trialbot.utils.move_to_device import move_to_device
 import os.path
+import gc
 import torch
 
 
@@ -39,13 +43,13 @@ def end_with_nan_loss(bot: TrialBot):
     if output is None:
         return
     loss = output["loss"]
+
     def _isnan(x):
         if isinstance(x, torch.Tensor):
             return bool(torch.isnan(x).any())
         elif isinstance(x, np.ndarray):
             return bool(np.isnan(x).any())
         else:
-            import math
             return math.isnan(x)
 
     if _isnan(loss):
@@ -60,12 +64,12 @@ def print_hyperparameters(bot: TrialBot):
 
 
 def print_models(bot: TrialBot):
-    print(str(bot.models))
+    bot.logger.info("Model Specs:\n" + str(bot.models))
 
 
 def track_pytorch_module_forward_time(bot: TrialBot, max_depth: int = -1, timefmt="%H:%M:%S.%f"):
     models = bot.models
-    from datetime import datetime
+
     def print_time_hook(m: torch.nn.Module, inp):
         dt, micro = datetime.now().strftime(timefmt).split('.')
         time_str = "%s.%03d" % (dt, int(micro) / 1000)
@@ -90,8 +94,6 @@ def evaluation_on_dev_every_epoch(bot: TrialBot, interval: int = 1,
                                   skip_first_epochs: int = 0,
                                   on_test_data: bool = False,
                                   ):
-    from trialbot.utils.move_to_device import move_to_device
-    import json
     if bot.state.epoch % interval == 0 and bot.state.epoch > skip_first_epochs:
         if on_test_data:
             bot.logger.info("Running for evaluation metrics on testing ...")
@@ -124,13 +126,10 @@ def evaluation_on_dev_every_epoch(bot: TrialBot, interval: int = 1,
                     import torch.cuda
                     torch.cuda.empty_cache()
 
-        val_metrics = bot.model.get_metric(reset=True)
         if hasattr(bot, 'tbx_writer'):
+            val_metrics = bot.model.get_metric(reset=False)
             bot.tbx_writer.log_metrics(dict(), val_metrics=val_metrics)
-        if on_test_data:
-            bot.logger.info("Testing Metrics: " + json.dumps(val_metrics))
-        else:
-            bot.logger.info("Evaluation Metrics: " + json.dumps(val_metrics))
+        get_metrics(bot, prefix="Testing Metrics: " if on_test_data else "Evaluation Metrics: ")
 
 
 def collect_garbage(bot: TrialBot):
@@ -139,7 +138,6 @@ def collect_garbage(bot: TrialBot):
 
     if hasattr(bot.state, "output") and bot.state.output is not None:
         del bot.state.output
-    import gc
     gc.collect()
     if bot.args.device >= 0:
         import torch.cuda
@@ -150,8 +148,8 @@ def get_metrics(bot: TrialBot, prefix: str = ""):
     import json
     for i, model in enumerate(bot.models):
         if getattr(model, 'get_metric', None):
-            print(prefix + json.dumps(model.get_metric(reset=True)))
+            bot.logger.info(prefix + json.dumps(model.get_metric(reset=True)))
         elif getattr(model, 'get_metrics', None):
-            print(prefix + json.dumps(model.get_metrics(reset=True)))
+            bot.logger.info(prefix + json.dumps(model.get_metrics(reset=True)))
         else:
             bot.logger.warning(f'neither get_metric nor get_metrics method is found')

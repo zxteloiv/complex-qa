@@ -1,4 +1,6 @@
-from typing import Union, Optional, Tuple, Dict, Any
+from typing import Union, Optional, Tuple, Dict, Any, Literal
+
+import allennlp.nn
 import numpy as np
 import torch
 from trialbot.data.ns_vocabulary import NSVocabulary
@@ -6,10 +8,12 @@ from ..interfaces.attention import Attention as IAttn, VectorContextComposer as 
 from ..modules.variational_dropout import VariationalDropout
 from .stacked_rnn_cell import StackedRNNCell
 from .stacked_encoder import StackedEncoder
-from utils.nn import filter_cat, prepare_input_mask, seq_cross_ent, init_stacked_dec_state_from_enc
+from utils.nn import filter_cat, prepare_input_mask, seq_cross_ent
+from utils.nn import aggregate_layered_state, assign_stacked_states
 from utils.seq_collector import SeqCollector
 from utils.text_tool import make_human_readable_text
 from allennlp.training.metrics import BLEU, Perplexity, Average
+
 
 class BaseSeq2Seq(torch.nn.Module):
     def __init__(self,
@@ -24,6 +28,7 @@ class BaseSeq2Seq(torch.nn.Module):
                  dec_hist_attn: IAttn = None,
                  dec_inp_attn_comp: AttnComposer = None,
                  proj_inp_attn_comp: AttnComposer = None,
+                 enc_dec_transformer: torch.nn.Module = None,
 
                  # model configuration
                  source_namespace: str = "source_tokens",
@@ -33,12 +38,13 @@ class BaseSeq2Seq(torch.nn.Module):
                  padding_index: int = 0,
                  max_decoding_step: int = 50,
                  decoder_init_strategy: str = "forward_all",
+                 enc_dec_transform_usage: str = 'consistent',
 
                  # training_configuration
                  scheduled_sampling_ratio: float = 0.,
                  enc_dropout: float = 0,
                  dec_dropout: float = .1,
-                 training_average: str = "batch",
+                 training_average: Literal["token", "batch", "none"] = "batch",
                  ):
         super().__init__()
         self.vocab = vocab
@@ -53,6 +59,8 @@ class BaseSeq2Seq(torch.nn.Module):
         self._decoder: StackedRNNCell = decoder
         self._src_embedding = source_embedding
         self._tgt_embedding = target_embedding
+        self._enc_dec_trans = enc_dec_transformer
+        self._enc_dec_trans_usage = enc_dec_transform_usage
 
         self._start_id = vocab.get_token_index(start_symbol, target_namespace)
         self._eos_id = vocab.get_token_index(eos_symbol, target_namespace)
@@ -94,7 +102,8 @@ class BaseSeq2Seq(torch.nn.Module):
     # for possible misspelling error
     get_metrics = get_metric
 
-    def forward(self, source_tokens: torch.LongTensor, target_tokens: torch.LongTensor = None) -> Dict[str, torch.Tensor]:
+    def forward(self, source_tokens: torch.LongTensor, target_tokens: torch.LongTensor = None) -> Dict[
+        str, torch.Tensor]:
         # source: (batch, source_length), containing the input word IDs
         # target: (batch, target_length), containing the output IDs
         source, source_mask = prepare_input_mask(source_tokens, self._padding_index)
@@ -104,7 +113,7 @@ class BaseSeq2Seq(torch.nn.Module):
         self._reset_variational_dropouts()
 
         state, layer_states = self._encode(source, source_mask)
-        hx = self._get_decoder_hidden(layer_states, source_mask)
+        hx = self._init_decoder(layer_states, source_mask)
         enc_attn_fn = self._get_enc_attn_fn(state, source_mask)
 
         if self.training:
@@ -112,8 +121,8 @@ class BaseSeq2Seq(torch.nn.Module):
             # preds: (batch, seq_len)
             # logits: (batch, seq_len, vocab_size)
             preds, logits = self._forward_dec_loop(source_mask, enc_attn_fn, hx, target, target_mask)
-            loss = seq_cross_ent(logits, target[:, 1:].contiguous(), target_mask[:, 1:].contiguous(), self._training_avg)
-            output['loss'] = loss
+            output['loss'] = seq_cross_ent(logits, target[:, 1:].contiguous(), target_mask[:, 1:].contiguous(),
+                                           self._training_avg)
         else:
             runtime_len = -1 if target is None else target.size()[1] - 1
             preds, logits = self._forward_dec_loop(source_mask, enc_attn_fn, hx, None, None, runtime_len)
@@ -155,16 +164,23 @@ class BaseSeq2Seq(torch.nn.Module):
         source_embedding = self._src_embedding(source)
         source_embedding = self._src_emb_dropout(source_embedding)
         source_hidden, layered_hidden = self._encoder(source_embedding, source_mask)
+        if self._enc_dec_trans_usage == 'consistent':
+            source_hidden = self._enc_dec_trans(source_hidden)
+            layered_hidden = list(map(self._enc_dec_trans, layered_hidden))
         return source_hidden, layered_hidden
 
-    def _get_decoder_hidden(self, layer_states, source_mask):
-        hx, _ = self._decoder.init_hidden_states(init_stacked_dec_state_from_enc(
-            layer_states,
-            source_mask,
-            self._strategy,
-            self._encoder.is_bidirectional(),
-            self._decoder.get_layer_num(),
-        ))
+    def _init_decoder(self, layer_states, source_mask):
+        usage: str = self._enc_dec_trans_usage
+        use_first_half: bool = self._encoder.is_bidirectional() and usage not in ('dec_init', 'consistent')
+
+        agg_src = aggregate_layered_state(layer_states, source_mask, self._strategy, use_first_half)
+        if usage == 'dec_init':
+            agg_src = list(map(self._enc_dec_trans, agg_src))
+
+        dec_states = assign_stacked_states(agg_src, self._decoder.get_layer_num(), self._strategy)
+
+        # init the internal hiddens
+        hx, _ = self._decoder.init_hidden_states(dec_states)
         return hx
 
     def _forward_dec_loop(self, source_mask: torch.Tensor, enc_attn_fn, hx: Any,
@@ -184,18 +200,12 @@ class BaseSeq2Seq(torch.nn.Module):
         mem = SeqCollector()
         for timestep in range(num_decoding_steps):
             step_input = self._choose_rnn_input(last_pred, None if target is None else target[:, timestep])
-
             inputs_embedding = self._get_step_embedding(step_input)
-
             dec_hist_attn_fn = self._create_runtime_dec_hist_attn_fn(mem, target_mask, timestep)
-
             cell_inp = self._get_cell_input(inputs_embedding, hx, enc_attn_fn, dec_hist_attn_fn)
-
             hx, cell_out = self._decoder(cell_inp, hx)
-
             proj_inp = self._get_proj_input(cell_out, enc_attn_fn, dec_hist_attn_fn)
             step_logit = self._get_step_projection(proj_inp)
-
             # greedy decoding
             # last_pred: (batch,)
             last_pred = torch.argmax(step_logit, dim=-1)
@@ -209,10 +219,15 @@ class BaseSeq2Seq(torch.nn.Module):
         return predictions, logits
 
     def _get_enc_attn_fn(self, source_state, source_mask):
-        if self._enc_attn is not None:
-            enc_attn_fn = lambda out: self._enc_attn(out, source_state, source_mask)
-        else:
-            enc_attn_fn = lambda out: None
+        if 'attn' == self._enc_dec_trans_usage:
+            source_state = self._enc_dec_trans(source_state)
+
+        def enc_attn_fn(out):
+            if self._enc_attn is None:
+                return None
+            else:
+                return self._enc_attn(out, source_state, source_mask)
+
         return enc_attn_fn
 
     def _get_decoding_loop_len(self, target, maximum):
@@ -230,11 +245,12 @@ class BaseSeq2Seq(torch.nn.Module):
             # step_inputs: (batch,)
             step_inputs = last_pred
         elif not self.training or last_gold is None:
-            # no target present, maybe in validation
+            # either in non-training mode (validation or testing),
+            # or no target present (testing)
             # step_inputs: (batch,)
             step_inputs = last_pred
         else:
-            # gold choice
+            # gold choice, normal case in training (scheduler sampling not activated)
             # step_inputs: (batch,)
             step_inputs = last_gold
         return step_inputs
@@ -290,7 +306,7 @@ class BaseSeq2Seq(torch.nn.Module):
         gold_mask = target_mask[:, 1:].contiguous()
         # self.bleu(predictions, gold)
         # batch_xent: (batch,)
-        batch_xent = seq_cross_ent(logits, gold, gold_mask, average=None)
+        batch_xent = seq_cross_ent(logits, gold, gold_mask, average='none')
         for xent in batch_xent:
             self.ppl(xent)
 
@@ -324,6 +340,8 @@ class BaseSeq2Seq(torch.nn.Module):
         p.dec_inp_comp_activation = 'mish'
         p.proj_inp_composer = 'cat_mapping'
         p.proj_inp_comp_activation = 'mish'
+        p.enc_dec_trans_act = 'linear'
+        p.enc_dec_trans_usage = 'consistent'
         p.encoder = "bilstm"
         p.num_enc_layers = 2
         p.decoder = "lstm"
@@ -366,18 +384,41 @@ class BaseSeq2Seq(torch.nn.Module):
         dec_out_dim = getattr(p, 'dec_out_dim', p.hidden_sz)
         proj_in_dim = getattr(p, 'proj_in_dim', p.hidden_sz)
 
+        # expecting the dimensions matchs between the decoder and encoder, otherwise a transformer is introduced.
+        usage_for_dec_init = not (p.decoder_init_strategy.startswith('zero')
+                                  or (encoder.is_bidirectional() and dec_out_dim * 2 == enc_out_dim)
+                                  or (not encoder.is_bidirectional() and dec_out_dim == enc_out_dim))
+        # expecting the encoder output and decoder output matches when attention
+        usage_for_attn = (p.enc_attn == 'dot_product' and enc_out_dim != dec_out_dim)
+        forced_consistent = getattr(p, 'enc_dec_trans_usage', 'consistent') == 'consistent'
+        # consistent will not work if all the dimensions match
+        enc_dec_transformer = None
+        if usage_for_attn or usage_for_dec_init:
+            enc_dec_transformer = nn.Sequential(
+                nn.Linear(enc_out_dim, dec_out_dim),
+                allennlp.nn.Activation.by_name(getattr(p, 'enc_dec_trans_act', 'linear'))(),
+            )
+
+        if forced_consistent and enc_dec_transformer is not None:
+            enc_dec_trans_usage = "consistent"  # the output will be transformed immediately and never in the future
+        elif usage_for_dec_init:
+            enc_dec_trans_usage = "dec_init"    # the output will be only transformed when initializing the decoder
+        elif usage_for_attn:
+            enc_dec_trans_usage = "attn"    # the output will be only transformed when computing attentions
+        else:
+            enc_dec_trans_usage = ""    # no need at all
+
+        # Initialize attentions. And compute the dimension requirements for all attention modules
+        # the encoder attention size depends on the transformation usage
+        enc_attn_sz = dec_out_dim if usage_for_attn else enc_out_dim
+        enc_attn = get_wrapped_attention(p.enc_attn, dec_out_dim, enc_attn_sz)
         # dec output attend over previous dec outputs, thus attn_context dimension == dec_output_dim
         dec_hist_attn = get_wrapped_attention(p.dec_hist_attn, dec_out_dim, dec_out_dim)
-        # dec output attend over encoder outputs, thus attn_context dimension == enc_output_dim
-        enc_attn = get_wrapped_attention(p.enc_attn, dec_out_dim, enc_out_dim)
-        if p.enc_attn == 'dot_product':
-            assert enc_out_dim == dec_out_dim, "encoder hidden states must be able to multiply with decoder output"
-
-        # Compute the dimension requirements for all attention modules
-        attn_sz = sum(d for a, d in zip([enc_attn, dec_hist_attn], [enc_out_dim, dec_out_dim]) if a is not None)
-
+        attn_sz = 0 if dec_hist_attn is None else dec_out_dim
+        attn_sz += 0 if enc_attn is None else enc_attn_sz
         dec_inp_composer = get_attn_composer(p.dec_inp_composer, attn_sz, emb_sz, dec_in_dim, p.dec_inp_comp_activation)
-        proj_inp_composer = get_attn_composer(p.proj_inp_composer, attn_sz, dec_out_dim, proj_in_dim, p.proj_inp_comp_activation)
+        proj_inp_composer = get_attn_composer(p.proj_inp_composer, attn_sz, dec_out_dim, proj_in_dim,
+                                              p.proj_inp_comp_activation)
         if enc_attn is not None or dec_hist_attn is not None:
             assert dec_inp_composer is not None and proj_inp_composer is not None, "Attention must be composed"
 
@@ -405,6 +446,7 @@ class BaseSeq2Seq(torch.nn.Module):
             dec_hist_attn=dec_hist_attn,
             dec_inp_attn_comp=dec_inp_composer,
             proj_inp_attn_comp=proj_inp_composer,
+            enc_dec_transformer=enc_dec_transformer,
             source_namespace=p.src_namespace,
             target_namespace=p.tgt_namespace,
             start_symbol=START_SYMBOL,
@@ -412,6 +454,7 @@ class BaseSeq2Seq(torch.nn.Module):
             padding_index=0,
             max_decoding_step=p.max_decoding_step,
             decoder_init_strategy=p.decoder_init_strategy,
+            enc_dec_transform_usage=enc_dec_trans_usage,
             scheduled_sampling_ratio=p.scheduled_sampling,
             enc_dropout=enc_dropout,
             dec_dropout=dec_dropout,
@@ -441,6 +484,3 @@ class BaseSeq2Seq(torch.nn.Module):
 
         constructor = lambda in_dim, out_dim: RNNWrapper(cls(in_dim, out_dim))
         return constructor
-
-
-

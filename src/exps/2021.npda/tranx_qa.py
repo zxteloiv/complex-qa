@@ -1,232 +1,29 @@
-from os.path import join, abspath, dirname
-import sys
-sys.path.insert(0, abspath(join(dirname(__file__), '..', '..')))   # up to src
-from trialbot.training import TrialBot, Events, Registry
-
 import logging
-import datasets.cfq
-import datasets.cfq_translator
-import datasets.comp_gen_bundle as cg_bundle
-cg_bundle.install_parsed_qa_datasets(Registry._datasets)
-import datasets.cg_bundle_translator
-
-def get_tranx_updater(bot: TrialBot):
-    args, p, model, logger = bot.args, bot.hparams, bot.model, bot.logger
-    from utils.select_optim import select_optim
-
-    params = model.parameters()
-    optim = select_optim(p, params)
-    logger.info(f"Using Optimizer {optim}")
-
-    cluster_id = getattr(p, 'cluster_iter_key', None)
-    if cluster_id is None:
-        from trialbot.data.iterators import RandomIterator
-        iterator = RandomIterator(len(bot.train_set), p.batch_sz)
-        logger.info(f"Using RandomIterator with batch={p.batch_sz}")
-    else:
-        from trialbot.data.iterators import ClusterIterator
-        iterator = ClusterIterator(bot.train_set, p.batch_sz, cluster_id)
-        logger.info(f"Using ClusterIterator with batch={p.batch_sz} cluster_key={cluster_id}")
-
-    lr_scheduler_kwargs = getattr(p, 'lr_scheduler_kwargs', None)
-    if lr_scheduler_kwargs is not None:
-        from allennlp.training.learning_rate_schedulers import NoamLR
-        lr_scheduler = NoamLR(optimizer=optim, **lr_scheduler_kwargs)
-        bot.scheduler = lr_scheduler
-        logger.info(f'the scheduler enabled: {lr_scheduler}')
-        def _sched_step(bot: TrialBot):
-            bot.scheduler.step_batch()
-            if bot.state.iteration % 100 == 0:
-                logger.info(f"update lr to {bot.scheduler.get_values()}")
-        bot.add_event_handler(Events.ITERATION_COMPLETED, _sched_step, 100)
-
-    from trialbot.training.updaters.training_updater import TrainingUpdater
-    updater = TrainingUpdater(bot.train_set, bot.translator, model, iterator, optim, args.device, args.dry_run)
-    return updater
+import sys, os.path as osp
+sys.path.insert(0, osp.abspath(osp.join(osp.dirname(__file__), '..', '..')))   # up to src
+from utils.trialbot.setup import setup
+import tranx_bin
 
 def main():
-    from utils.trialbot.setup import setup
-    from models.base_s2s.base_seq2seq import BaseSeq2Seq
-    args = setup(seed=2021, translator='cfq_tranx_mod_ent_qa', dataset='cfq_mcd1', hparamset='cfq_mod_ent_tranx')
-    bot = TrialBot(trial_name='tranx_qa', get_model_func=BaseSeq2Seq.from_param_and_vocab, args=args)
+    exp_args = [
+        dict(dataset='scholar_iid.handcrafted', seed=2021, hparamset='scholar_common', device=0),
+        # dict(dataset='scholar_iid.handcrafted', seed=2022, hparamset='scholar_common', device=0),
+        # dict(dataset='scholar_iid.handcrafted', seed=2023, hparamset='scholar_common', device=0),
+        # dict(dataset='scholar_iid.handcrafted', seed=2024, hparamset='scholar_common', device=0),
+        # dict(dataset='scholar_iid.handcrafted', seed=2025, hparamset='scholar_common', device=0),
+        dict(dataset='scholar_cg.handcrafted', seed=2021, hparamset='scholar_common', device=0),
+        # dict(dataset='scholar_cg.handcrafted', seed=2022, hparamset='scholar_common', device=0),
+        # dict(dataset='scholar_cg.handcrafted', seed=2023, hparamset='scholar_common', device=0),
+        # dict(dataset='scholar_cg.handcrafted', seed=2024, hparamset='scholar_common', device=0),
+        # dict(dataset='scholar_cg.handcrafted', seed=2025, hparamset='scholar_common', device=0),
+    ]
 
-    from trialbot.training import Events
-    @bot.attach_extension(Events.EPOCH_COMPLETED)
-    def get_metrics(bot: TrialBot):
-        import json
-        print(json.dumps(bot.model.get_metric(reset=True)))
+    sys.argv[1:] = []
+    for i, args in enumerate(exp_args):
+        logfile_name = f'exp_{i}_sch_s{args["seed"]}.log'
+        logging.basicConfig(filename=logfile_name, force=True)  # reset the handlers for each exp
+        tranx_bin.run_exp(setup(translator='tranx_no_terminal', **args))
 
-    from utils.trialbot.extensions import print_hyperparameters
-    bot.add_event_handler(Events.STARTED, print_hyperparameters, 90)
-
-    from trialbot.training import Events
-    if not args.test:
-        # --------------------- Training -------------------------------
-        @bot.attach_extension(Events.STARTED)
-        def print_models(bot: TrialBot):
-            print(str(bot.models))
-
-        from trialbot.training.extensions import every_epoch_model_saver
-        from utils.trialbot.extensions import end_with_nan_loss
-        from utils.trialbot.extensions import evaluation_on_dev_every_epoch, collect_garbage
-        bot.add_event_handler(Events.EPOCH_STARTED, collect_garbage, 95)
-        bot.add_event_handler(Events.ITERATION_COMPLETED, end_with_nan_loss, 100)
-        bot.add_event_handler(Events.ITERATION_COMPLETED, collect_garbage, 95)
-        bot.add_event_handler(Events.EPOCH_COMPLETED, evaluation_on_dev_every_epoch, 90, rewrite_eval_hparams={"batch_sz": 32})
-        bot.add_event_handler(Events.EPOCH_COMPLETED, evaluation_on_dev_every_epoch, 80, rewrite_eval_hparams={"batch_sz": 32}, on_test_data=True)
-        bot.add_event_handler(Events.EPOCH_COMPLETED, collect_garbage, 95)
-        bot.add_event_handler(Events.EPOCH_COMPLETED, every_epoch_model_saver, 100)
-
-        bot.updater = get_tranx_updater(bot)
-    elif args.debug:
-        @bot.attach_extension(Events.ITERATION_COMPLETED)
-        def print_output(bot: TrialBot):
-            import json
-            output = bot.state.output
-            if output is None:
-                return
-
-            model = bot.model
-            output = model.revert_tensor_to_string(output)
-
-            batch_print = []
-            for err, src, gold, pred in zip(*map(output.get, ("errno", "source_tokens", "target_tokens", "predicted_tokens"))):
-                to_print = f'ERR:  {err}\nSRC:  {" ".join(src)}\nGOLD: {" ".join(gold)}\nPRED: {" ".join(pred)}'
-                batch_print.append(to_print)
-
-            sep = '\n' + '-' * 60 + '\n'
-            print(sep.join(batch_print))
-
-    bot.run()
-
-@Registry.hparamset()
-def cfq_mod_ent_tranx():
-    from trialbot.training.hparamset import HyperParamSet
-    from trialbot.utils.root_finder import find_root
-    p = HyperParamSet.common_settings(find_root())
-    p.TRAINING_LIMIT = 10  # in num of epochs
-    p.OPTIM = "adabelief"
-    p.batch_sz = 32
-
-    p.emb_sz = 256
-    p.src_namespace = 'questionPatternModEntities'
-    p.tgt_namespace = 'modent_rule_seq'
-    p.hidden_sz = 256
-    p.enc_attn = "bilinear"
-    p.dec_hist_attn = "dot_product"
-    p.dec_inp_composer = 'cat_mapping'
-    p.dec_inp_comp_activation = 'mish'
-    p.proj_inp_composer = 'mapping_add'
-    p.proj_inp_comp_activation = 'tanh'
-    p.encoder = "bilstm"
-    p.num_enc_layers = 2
-    p.decoder = "lstm"
-    p.num_dec_layers = 2
-    p.dropout = .2
-    p.max_decoding_step = 100
-    p.scheduled_sampling = .1
-    p.decoder_init_strategy = "forward_last_parallel"
-    p.tied_decoder_embedding = False
-    p.src_emb_trained_file = "~/.glove/glove.6B.100d.txt.gz"
-    return p
-
-@Registry.hparamset()
-def cfq_mod_ent_moderate_tranx():
-    p = cfq_mod_ent_tranx()
-    p.TRAINING_LIMIT = 10  # in num of epochs
-    p.WEIGHT_DECAY = .1
-    p.emb_sz = 128
-    p.hidden_sz = 128
-    p.dec_hist_attn = "dot_product"
-    return p
-
-@Registry.hparamset()
-def common_sql_tranx():
-    from trialbot.training.hparamset import HyperParamSet
-    from trialbot.utils.root_finder import find_root
-    p = HyperParamSet.common_settings(find_root())
-
-    p.TRAINING_LIMIT = 100  # in num of epochs
-    p.OPTIM = "adabelief"
-    p.WEIGHT_DECAY = .1
-    p.ADAM_BETAS = (0.9, 0.999)
-    p.batch_sz = 16
-
-    p.emb_sz = 128
-    p.hidden_sz = 128
-    p.src_namespace = 'sent'
-    p.tgt_namespace = 'rule_seq'
-    p.enc_attn = "bilinear"
-    p.dec_hist_attn = "none"
-    p.dec_inp_composer = 'cat_mapping'
-    p.dec_inp_comp_activation = 'mish'
-    p.proj_inp_composer = 'cat_mapping'
-    p.proj_inp_comp_activation = 'mish'
-    p.encoder = "bilstm"
-    p.num_enc_layers = 2
-    p.dropout = .5
-    p.decoder = "lstm"
-    p.num_dec_layers = 2
-    p.max_decoding_step = 100
-    p.scheduled_sampling = .1
-    p.decoder_init_strategy = "forward_last_parallel"
-    p.tied_decoder_embedding = True
-    return p
-
-@Registry.hparamset()
-def scholar_common():
-    p = common_sql_tranx()
-    p.TRAINING_LIMIT = 150
-    p.lr_scheduler_kwargs = {"model_size": 400, "warmup_steps": 50} # noam lr_scheduler
-    p.tied_decoder_embedding = False
-    p.num_enc_layers = 1
-    p.num_dec_layers = 1
-    p.emb_sz = 100
-
-    p.encoder = 'lstm'
-    p.enc_out_dim = 300
-    p.enc_attn = "dot_product"
-    p.dec_in_dim = p.enc_out_dim
-    p.dec_out_dim = p.enc_out_dim
-
-    p.proj_in_dim = p.emb_sz
-
-    p.enc_dropout = 0
-    p.dec_dropout = 0.5
-    p.dec_hist_attn = "none"
-    p.dec_inp_composer = 'cat_mapping'
-    p.dec_inp_comp_activation = 'relu'
-    p.proj_inp_composer = 'cat_mapping'
-    p.proj_inp_comp_activation = 'relu'
-    p.src_emb_pretrained_file = "~/.glove/glove.6B.100d.txt.gz"
-
-    # p.cluster_iter_key = 'group_id'
-    return p
-
-@Registry.hparamset()
-def longterm_scholar():
-    p = scholar_common()
-    p.batch_sz = 1
-    p.TRAINING_LIMIT = 15
-    return p
-
-@Registry.hparamset()
-def atis_common():
-    p = common_sql_tranx()
-    p.TRAINING_LIMIT = 100
-    p.tied_decoder_embedding = False
-    p.num_enc_layers = 1
-    p.num_dec_layers = 1
-    p.emb_sz = 100
-    p.hidden_sz = 300
-    p.lr_scheduler_kwargs = {"model_size": 600, "warmup_steps": 50} # noam lr_scheduler
-    p.WEIGHT_DECAY = 0.
-    return p
-
-@Registry.hparamset()
-def advising_common():
-    p = atis_common()
-    return p
 
 if __name__ == '__main__':
     main()

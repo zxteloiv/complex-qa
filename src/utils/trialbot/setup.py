@@ -1,12 +1,15 @@
+import logging
+import sys
+
+
 def setup(**default_args):
     """
     parse the setup and set default function as a boilerplate.
-    :param default_args:
+    :param default_args: set args if not found from commandline (sys.argv)
     :return:
     """
     from trialbot.training import TrialBot
     from trialbot.utils.fix_seed import fix_seed
-    import sys, logging
     args = sys.argv[1:]
     for argname, argval in default_args.items():
         if f'--{argname}' not in args:
@@ -27,6 +30,7 @@ def setup(**default_args):
         fix_seed(args.seed)
 
     return args
+
 
 if __name__ == '__main__':
     print(setup(seed=2020))

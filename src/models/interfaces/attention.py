@@ -2,6 +2,7 @@ from typing import Optional, Tuple
 import torch
 from .composer import TwoVecComposer
 
+
 class Attention(torch.nn.Module):
     """Compute the attention and merged for the context value, returns only the context vector"""
     def forward(self,
@@ -21,6 +22,7 @@ class Attention(torch.nn.Module):
     def get_latest_attn_weights(self) -> torch.Tensor:
         raise NotImplementedError
 
+
 class AttentionWeight(torch.nn.Module):
     """Compute the attention similarities only,
     NOTE the returned value is not context vector but the attention weights"""
@@ -37,6 +39,7 @@ class AttentionWeight(torch.nn.Module):
         :return: attention: (batch, max_input_length, max_attend_length)
         """
         raise NotImplementedError
+
 
 class VectorContextComposer(TwoVecComposer):
     """

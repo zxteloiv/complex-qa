@@ -211,6 +211,7 @@ class TerminalRuleSeqField(SeqField):
 
 
 class RuleSymbolSeqField(TerminalRuleSeqField):
+    """Convert a tree to a very long sequence of rules as plain tokens"""
     def _get_rule_str(self, node: Union[_Tree, _Token]):
         rule_str = super()._get_rule_str(node)
         return START_SYMBOL + ' ' + rule_str if self.add_start_end_toks else rule_str
