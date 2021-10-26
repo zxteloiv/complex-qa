@@ -11,6 +11,7 @@ from .stacked_rnn_cell import StackedRNNCell
 from .stacked_encoder import StackedEncoder
 from utils.nn import prepare_input_mask, seq_cross_ent, seq_likelihood, masked_reducing_gather
 from utils.nn import init_stacked_dec_state_from_enc, init_state_for_stacked_rnn
+from utils.nn import aggregate_layered_state, assign_stacked_states
 from utils.seq_collector import SeqCollector
 from utils.text_tool import make_human_readable_text
 from allennlp.training.metrics import BLEU, Perplexity, Average

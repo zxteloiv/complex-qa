@@ -59,7 +59,6 @@ def run_exp(args=None):
     from utils.trialbot.extensions import get_metrics, print_models
     bot.add_event_handler(Events.STARTED, print_hyperparameters, 90)
     bot.add_event_handler(Events.STARTED, print_models, 100)
-    bot.add_event_handler(Events.EPOCH_COMPLETED, get_metrics, 100)
 
     from trialbot.training import Events
     if not args.test:
@@ -74,6 +73,7 @@ def run_exp(args=None):
         bot.add_event_handler(Events.EPOCH_COMPLETED, evaluation_on_dev_every_epoch, 80, rewrite_eval_hparams={"batch_sz": 32}, on_test_data=True)
         bot.add_event_handler(Events.EPOCH_COMPLETED, collect_garbage, 95)
         bot.add_event_handler(Events.EPOCH_COMPLETED, every_epoch_model_saver, 100)
+        bot.add_event_handler(Events.EPOCH_COMPLETED, get_metrics, 100, prefix="Training Metrics")
 
         bot.updater = get_tranx_updater(bot)
 
@@ -95,6 +95,8 @@ def run_exp(args=None):
 
             sep = '\n' + '-' * 60 + '\n'
             print(sep.join(batch_print))
+    else:
+        bot.add_event_handler(Events.EPOCH_COMPLETED, get_metrics, 100)
 
     bot.run()
 

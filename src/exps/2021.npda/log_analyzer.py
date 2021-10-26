@@ -8,7 +8,7 @@ def process_tranx_log(data: List[str]):
     groups = split(scan(data, 'Epoch started'), '======*')
     metrics = []
     for g in groups:
-        train_metrics = grep(g, '^{.*}', only_matched_text=True)[-1]
+        train_metrics = grep(grep(g, ':{.*}|Trainaing Metrics'), '{.*}', only_matched_text=True)[-1]
         dev_metrics = grep(grep(g, 'Evaluation Metrics'), '{.*}', only_matched_text=True)[-1]
         test_metrics = grep(grep(g, 'Testing Metrics'), '{.*}', only_matched_text=True)[-1]
         metrics.append(tuple(json.loads(x)['ERR'] for x in (train_metrics, dev_metrics, test_metrics)))
