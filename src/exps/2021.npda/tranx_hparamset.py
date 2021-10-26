@@ -57,10 +57,10 @@ def scholar_common():
     p.emb_sz = 100
 
     p.encoder = 'bilstm'
-    p.enc_out_dim = 300
+    p.enc_out_dim = p.hidden_sz
     p.enc_attn = "dot_product"
-    p.dec_in_dim = p.enc_out_dim
-    p.dec_out_dim = p.enc_out_dim
+    p.dec_in_dim = p.hidden_sz
+    p.dec_out_dim = p.hidden_sz
 
     p.enc_dec_trans_act = 'tanh'
     p.enc_dec_trans_usage = 'consistent'
@@ -83,8 +83,9 @@ def scholar_common():
 @Registry.hparamset()
 def atis_common():
     p = scholar_common()
+    p.batch_sz = 32
     p.TRAINING_LIMIT = 100
-    p.hidden_sz = 300
+    p.hidden_sz = 200
     p.lr_scheduler_kwargs = {"model_size": 600, "warmup_steps": 50} # noam lr_scheduler
     return p
 
@@ -92,6 +93,13 @@ def atis_common():
 @Registry.hparamset()
 def advising_common():
     p = atis_common()
+    return p
+
+
+@Registry.hparamset()
+def geo_common():
+    p = scholar_common()
+    p.hidden_sz = 200
     return p
 
 
