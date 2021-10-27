@@ -153,3 +153,7 @@ def get_metrics(bot: TrialBot, prefix: str = ""):
             bot.logger.info(prefix + json.dumps(model.get_metrics(reset=True)))
         else:
             bot.logger.warning(f'neither get_metric nor get_metrics method is found')
+
+
+def print_snaptshot_path(bot: TrialBot):
+    bot.logger.info("Snapshot Dir: " + bot.savepath)

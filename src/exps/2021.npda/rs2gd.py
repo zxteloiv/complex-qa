@@ -22,7 +22,7 @@ import datasets.comp_gen_bundle as cg_bundle
 cg_bundle.install_parsed_qa_datasets(Registry._datasets)
 import datasets.cg_bundle_translator
 
-from utils.trialbot.extensions import print_hyperparameters, get_metrics, print_models
+from utils.trialbot.extensions import print_hyperparameters, get_metrics, print_models, print_snaptshot_path
 from utils.trialbot.extensions import save_multiple_models_per_epoch
 from utils.trialbot.extensions import end_with_nan_loss
 from utils.trialbot.extensions import collect_garbage
@@ -36,10 +36,9 @@ from idioms.export_conf import get_export_conf
 import lark
 
 
-class RS2GDTraining(Updater):
+class PolicyTraining(Updater):
     def __init__(self, bot: TrialBot):
         args, p, logger = bot.args, bot.hparams, bot.logger
-        cluster_id = getattr(p, 'cluster_iter_key', None)
         from trialbot.data.iterators import RandomIterator
         iterator = RandomIterator(len(bot.train_set), p.batch_sz)
         logger.info(f"Using RandomIterator with batch={p.batch_sz}")
@@ -249,6 +248,7 @@ def parse_and_eval_on_dev(bot: TrialBot, interval: int = 1,
 def crude_conf():
     from trialbot.training.hparamset import HyperParamSet
     p = HyperParamSet.common_settings(find_root())
+    # p.SNAPSHOT_PATH = osp.join()
 
     p.batch_sz = 16
 
@@ -336,10 +336,7 @@ def main():
     bot.add_event_handler(Events.STARTED, print_hyperparameters, 90)
     bot.add_event_handler(Events.EPOCH_COMPLETED, get_metrics, 100)
     bot.add_event_handler(Events.STARTED, print_models, 100)
-
-    @bot.attach_extension(Events.STARTED, 50)
-    def print_snaptshot_path(bot: TrialBot):
-        print("savepath:", bot.savepath)
+    bot.add_event_handler(Events.STARTED, print_snaptshot_path, 50)
 
     if not args.test:   # training behaviors
         bot.add_event_handler(Events.STARTED, collect_epoch_grammars, 80)
