@@ -84,9 +84,10 @@ def scholar_common():
 def atis_common():
     p = scholar_common()
     p.batch_sz = 32
-    p.TRAINING_LIMIT = 100
+    p.TRAINING_LIMIT = 80
     p.hidden_sz = 200
     p.lr_scheduler_kwargs = {"model_size": 600, "warmup_steps": 50} # noam lr_scheduler
+    p.encoder = 'lstm'
     return p
 
 
