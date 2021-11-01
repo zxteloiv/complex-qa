@@ -1,4 +1,5 @@
 from typing import List, Mapping, Generator, Tuple, Optional, Any, Literal, Iterable, Union, DefaultDict
+from itertools import product
 from collections import defaultdict
 import torch
 from torch.nn.utils.rnn import pad_sequence
@@ -9,7 +10,7 @@ import lark
 from trialbot.data import START_SYMBOL, END_SYMBOL
 from utils.preprocessing import nested_list_numbers_to_tensors
 _Tree, _Token = lark.Tree, lark.Token
-from itertools import product
+
 
 class GrammarPatternSeqField(SeqField):
     @classmethod
@@ -59,6 +60,7 @@ class GrammarPatternSeqField(SeqField):
         rule_seq_tensor = torch.tensor(rule_id)
         return {self.renamed_key: rule_seq_tensor}
 
+
 class GrammarModEntSeqField(GrammarPatternSeqField):
     @classmethod
     def _get_token_str(cls, tok):
@@ -74,6 +76,7 @@ class GrammarModEntSeqField(GrammarPatternSeqField):
                 return tok.type
         else:
             return tok
+
 
 class MidOrderTraversalField(Field):
     def __init__(self, tree_key: str,
@@ -187,6 +190,7 @@ class MidOrderTraversalField(Field):
         )))
 
         return output
+
 
 class TutorBuilderField(Field):
     def __init__(self, tree_key: str, ns: Tuple[str, str]):

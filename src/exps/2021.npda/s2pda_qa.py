@@ -1,21 +1,31 @@
 from typing import Dict
-import sys, os.path
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
-import logging
 from collections import defaultdict
-
-from trialbot.utils.move_to_device import move_to_device
+from functools import partial
 import torch.nn
-from trialbot.training import TrialBot, Registry
+import pickle
+import sys
+import os
+import os.path as osp
+import logging
+from tqdm import tqdm
+from trialbot.utils.move_to_device import move_to_device
+from trialbot.training import TrialBot, Registry, Events
 from trialbot.data import NSVocabulary
 from trialbot.training.updater import Updater
+from trialbot.training.hparamset import HyperParamSet
+from trialbot.utils.root_finder import find_root
 
+sys.path.insert(0, osp.abspath(osp.join(osp.dirname(__file__), '..', '..')))
+
+from utils.select_optim import select_optim
+from trialbot.data.iterators import RandomIterator
 import datasets.cfq
 import datasets.cfq_translator as cfq_translator
 datasets.cfq.install_cfq_to_trialbot()
 import datasets.comp_gen_bundle as cg_bundle
 cg_bundle.install_parsed_qa_datasets(Registry._datasets)
 import datasets.cg_bundle_translator as sql_translator
+
 
 @Registry.hparamset()
 def cfq_pda():
@@ -78,102 +88,112 @@ def cfq_pda():
     p.masked_exact_token_testing = True
 
     p.rule_scorer = "triple_inner_product" # heuristic, mlp, (triple|concat|add_inner_product)
-    p.neg_rule_scorer = None
     return p
 
-@Registry.hparamset()
-def cfq_simp():
-    p = cfq_pda()
-    p.enc_sz = 256
-    p.num_enc_layers = 2
-    p.TRAINING_LIMIT *= 5
-
-    p.emb_sz = 256
-    p.hidden_sz = 256
-    p.num_re0_layer = 6
-    p.num_expander_layer = 1
-    # p.expander_rnn = 'lstm'   # not implemented yet for inputs requiring broadcasting
-    p.GRAD_CLIPPING = .2    # grad norm required to be <= 2
-    p.ADAM_BETAS = (0.9, 0.999)
-    p.WEIGHT_DECAY = .1
-    p.bilinear_rank = 1
-    p.bilinear_pool = 32
-    p.dropout = 1e-4
-    p.rule_scorer = "triple_inner_product"
-    p.neg_rule_scorer = "triple_inner_product"
-
-    p.masked_exact_token_training = True
-    p.masked_exact_token_testing = True
-    return p
 
 @Registry.hparamset()
 def sql_pda():
-    p = cfq_pda()
-    # p.OPTIM = 'adabelief'
-    # p.optim_kwargs = {}
-    p.batch_sz = 16
+    p = HyperParamSet.common_settings(find_root())
+    p.TRAINING_LIMIT = 100
+    p.OPTIM = "adabelief"
+    p.batch_sz = 32
+    p.WEIGHT_DECAY = 1e-6
+    p.ADAM_LR = 1e-3
+    p.ADAM_BETAS = (0.9, 0.999)
+    p.optim_kwargs = {"rectify": False}
+    p.GRAD_CLIPPING = .2    # grad norm required to be <= 2
+
     p.src_ns = 'sent'
     p.tgt_ns = datasets.cfq_translator.UNIFIED_TREE_NS
-    p.TRAINING_LIMIT = 100
-    p.encoder = "transformer"
-    p.enc_attn = "seq_mha"
-    p.enc_sz = 128
+
+    # transformer requires input embedding equal to hidden size
+    p.encoder = "bilstm"
     p.num_enc_layers = 2
+    p.enc_sz = 128
     p.emb_sz = 128
     p.hidden_sz = 128
-    p.num_re0_layer = 6
-    p.num_expander_layer = 1
-    # p.expander_rnn = 'lstm'   # not implemented yet for inputs requiring broadcasting
-    p.GRAD_CLIPPING = .2    # grad norm
-    p.ADAM_BETAS = (0.9, 0.999)
-    p.WEIGHT_DECAY = 1e-3
-    p.bilinear_rank = 1
-    p.bilinear_pool = 8
     p.num_heads = 4
-    p.dropout = 1e-4
-    p.ADAM_LR = 1e-3
-    p.rule_scorer = "add_inner_product"
-    p.neg_rule_scorer = "add_inner_product"
+
+    p.enc_attn = 'generalized_bilinear'
+    p.attn_use_linear = False
+    p.attn_use_bias = False
+    p.attn_use_tanh_activation = False
+
+    p.dropout = .2
+    p.num_expander_layer = 1
+    p.expander_rnn = 'typed_rnn'    # typed_rnn, lstm
+    p.max_derivation_step = 200
+    p.grammar_entry = "queryunit"
+
+    # ----------- tree encoder settings -------------
+
+    p.tree_encoder = 're_zero_bilinear'
+    p.tree_encoder_weight_norm = False
+
+    p.bilinear_rank = 1
+    p.bilinear_pool = 32
+    p.bilinear_linear = True
+    p.bilinear_bias = True
+
+    p.num_re0_layer = 6
+
+    p.use_attn_residual_norm = True
+
+    p.tree_self_attn = 'seq_mha'    # seq_mha, generalized_dot_product
+
+    # ----------- end of tree settings -------------
+
+    p.exact_token_predictor = "quant" # linear, mos, quant
+    p.num_exact_token_mixture = 1
+    p.exact_token_quant_criterion = "dot_product"
     p.masked_exact_token_training = True
     p.masked_exact_token_testing = True
-    p.attn_use_tanh_activation = True
+
+    p.rule_scorer = "triple_inner_product"  # heuristic, mlp, (triple|concat|add_inner_product)
     return p
 
-def get_tailored_tutor(p, vocab, *, dataset_name: str):
-    from tqdm import tqdm
-    import pickle
+
+def get_tutor_from_train_set(p, vocab, train_set, dataset_name: str):
+    builder = cfq_translator.CFQTutorBuilder() if 'cfq_' in dataset_name else sql_translator.SQLTutorBuilder()
+    builder.index_with_vocab(vocab)
+    tutor_repr = builder.batch_tensor([builder.to_tensor(example) for example in tqdm(train_set)])
+    return tutor_repr
+
+
+def build_tutor_objects(tgt_ns, vocab, tutor_repr):
     from models.neural_pda.token_tutor import ExactTokenTutor
     from models.neural_pda.grammar_tutor import GrammarTutor
     from utils.preprocessing import nested_list_numbers_to_tensors
-
-    os.makedirs(os.path.join(p.DATA_PATH, 'npda-tutors-dump'), exist_ok=True)
-    tutor_dump_name = os.path.join(p.DATA_PATH, 'npda-tutors-dump', f"tt_{dataset_name}.pkl")
-
-    train_set = Registry.get_dataset(dataset_name)[0]
-    if os.path.exists(tutor_dump_name):
-        logging.getLogger(__name__).info(f"Use the existing tutor dump... {tutor_dump_name}")
-        tutor_repr = pickle.load(open(tutor_dump_name, 'rb'))
-    else:
-        logging.getLogger(__name__).info(f"Build the tutor dump for the first time...")
-
-        builder = cfq_translator.CFQTutorBuilder() if 'cfq_' in dataset_name else sql_translator.SQLTutorBuilder()
-        builder.index_with_vocab(vocab)
-        tutor_repr = builder.batch_tensor([builder.to_tensor(example) for example in tqdm(train_set)])
-
-        if tutor_dump_name is not None:
-            logging.getLogger(__name__).info(f"Dump the tutor information... {tutor_dump_name}")
-            pickle.dump(tutor_repr, open(tutor_dump_name, 'wb'))
-
+    ns_s, ns_et = tgt_ns
     token_map: defaultdict
     grammar_map: defaultdict
     token_map, grammar_map = map(tutor_repr.get, ('token_map', 'grammar_map'))
-    ns_s, ns_et = p.tgt_ns
     ett = ExactTokenTutor(vocab.get_vocab_size(ns_s), vocab.get_vocab_size(ns_et), token_map, False)
 
     ordered_lhs, ordered_rhs_options = list(zip(*grammar_map.items()))
     ordered_rhs_options = nested_list_numbers_to_tensors(ordered_rhs_options)
     gt = GrammarTutor(vocab.get_vocab_size(ns_s), ordered_lhs, ordered_rhs_options)
+
     return ett, gt
+
+
+def init_tailored_tutor(p, vocab, *, dataset_name: str):
+    os.makedirs(os.path.join(p.DATA_PATH, 'npda-tutors-dump'), exist_ok=True)
+    tutor_dump_name = os.path.join(p.DATA_PATH, 'npda-tutors-dump', f"tt_{dataset_name}.pkl")
+
+    if os.path.exists(tutor_dump_name):
+        logging.getLogger(__name__).info(f"Use the existing tutor dump... {tutor_dump_name}")
+        tutor_repr = pickle.load(open(tutor_dump_name, 'rb'))
+    else:
+        logging.getLogger(__name__).info(f"Build the tutor dump for the first time...")
+        tutor_repr = get_tutor_from_train_set(p, vocab, Registry.get_dataset(dataset_name)[0], dataset_name)
+
+        if tutor_dump_name is not None:
+            logging.getLogger(__name__).info(f"Dump the tutor information... {tutor_dump_name}")
+            pickle.dump(tutor_repr, open(tutor_dump_name, 'wb'))
+
+    return build_tutor_objects(p.tgt_ns, vocab, tutor_repr)
+
 
 def get_tree_encoder(p, vocab):
     import models.neural_pda.partial_tree_encoder as partial_tree
@@ -218,6 +238,7 @@ def get_tree_encoder(p, vocab):
 
     return tree_encoder
 
+
 def get_rule_scorer(p, vocab):
     from torch import nn
     from models.neural_pda.rule_scorer import MLPScorerWrapper, HeuristicMLPScorerWrapper
@@ -226,32 +247,6 @@ def get_rule_scorer(p, vocab):
     from models.modules.container import MultiInputsSequential
     from models.modules.variational_dropout import VariationalDropout
     from allennlp.nn.activations import Activation
-
-    if p.neg_rule_scorer == "triple_inner_product":
-        rule_scorer = GeneralizedInnerProductScorer(positive=False)
-    elif p.neg_rule_scorer == "concat_inner_product":
-        rule_scorer = ConcatInnerProductScorer(MultiInputsSequential(
-            nn.Linear(p.hidden_sz, p.hidden_sz),
-            nn.Tanh(),
-        ), positive=False)
-    elif p.neg_rule_scorer == "add_inner_product":
-        rule_scorer = AddInnerProductScorer(p.hidden_sz, positive=False)
-    elif p.neg_rule_scorer == "mlp":
-        rule_scorer = MLPScorerWrapper(MultiInputsSequential(
-            nn.Linear(p.hidden_sz * 2, p.hidden_sz // p.num_heads),
-            VariationalDropout(p.dropout),
-            nn.LayerNorm(p.hidden_sz // p.num_heads),
-            nn.Tanh(),
-            nn.Linear(p.hidden_sz // p.num_heads, p.hidden_sz),
-            VariationalDropout(p.dropout),
-            nn.LayerNorm(p.hidden_sz),
-            Activation.by_name('mish')(),
-            nn.Linear(p.hidden_sz, 1)
-        ), positive=False)
-    else:
-        rule_scorer = None
-
-    neg_scorer = rule_scorer
 
     if p.rule_scorer == "heuristic":
         rule_scorer = HeuristicMLPScorerWrapper(MultiInputsSequential(
@@ -287,8 +282,8 @@ def get_rule_scorer(p, vocab):
             nn.Linear(p.hidden_sz, 1)
         ))
 
-    pos_scorer = rule_scorer
-    return pos_scorer, neg_scorer
+    return rule_scorer
+
 
 def get_model(p, vocab: NSVocabulary, *, dataset_name: str):
     from torch import nn
@@ -346,22 +341,16 @@ def get_model(p, vocab: NSVocabulary, *, dataset_name: str):
             p.num_exact_token_mixture, p.hidden_sz + p.hidden_sz + p.emb_sz, vocab.get_vocab_size(ns_et),
         )
 
-    ett, gt = get_tailored_tutor(p, vocab, dataset_name=dataset_name)
-
-    pos_scorer, neg_scorer = get_rule_scorer(p, vocab)
-
+    ett, gt = init_tailored_tutor(p, vocab, dataset_name=dataset_name)
     if p.expander_rnn == 'lstm':
-        rhs_expander=StackedLSTMCell(p.emb_sz + 3, p.hidden_sz, p.num_expander_layer, intermediate_dropout=p.dropout)
+        rhs_expander=StackedLSTMCell(p.emb_sz + 1, p.hidden_sz, p.num_expander_layer, dropout=p.dropout)
     else:
-        rhs_expander=StackedRNNCell(
-            [
-                SymTypedRNNCell(input_dim=p.emb_sz + 3 if floor == 0 else p.hidden_sz,
-                                output_dim=p.hidden_sz,
-                                nonlinearity="tanh")
-                for floor in range(p.num_expander_layer)
-            ],
-            p.emb_sz + 3, p.hidden_sz, p.num_expander_layer, intermediate_dropout=p.dropout
-        )
+        rhs_expander=StackedRNNCell([
+            SymTypedRNNCell(input_dim=p.emb_sz + 1 if floor == 0 else p.hidden_sz,
+                            output_dim=p.hidden_sz,
+                            nonlinearity="tanh")
+            for floor in range(p.num_expander_layer)
+        ], dropout=p.dropout )
 
     npda = NeuralPDA(
         symbol_embedding=emb_s,
@@ -375,8 +364,7 @@ def get_model(p, vocab: NSVocabulary, *, dataset_name: str):
         grammar_tutor=gt,
         rhs_expander=rhs_expander,
 
-        rule_scorer=pos_scorer,
-        negative_rule_scorer=neg_scorer,
+        rule_scorer=get_rule_scorer(p, vocab),
 
         exact_token_predictor=exact_token_predictor,
         token_tutor=ett,
@@ -424,13 +412,18 @@ def get_model(p, vocab: NSVocabulary, *, dataset_name: str):
 
     return model
 
+
 class PDATrainingUpdater(Updater):
-    def __init__(self, dataset, translator, models, iterators, optims, device=-1, clip_grad: float = 0., param_update=False):
-        super().__init__(models, iterators, optims, device)
-        self.clip_grad = clip_grad
-        self.param_update = param_update
-        self.dataset = dataset
-        self.translator = translator
+    def __init__(self, bot: TrialBot):
+        args, p, model, logger = bot.args, bot.hparams, bot.model, bot.logger
+        params = model.parameters()
+        optim = select_optim(p, params)
+        logger.info(f"Using the optimizer {str(optim)}")
+        iterator = RandomIterator(len(bot.train_set), p.batch_sz)
+        super().__init__(model, iterator, optim, args.device)
+        self.clip_grad = p.GRAD_CLIPPING
+        self.dataset = bot.train_set
+        self.translator = bot.translator
 
     def update_epoch(self):
         model, optim, iterator = self._models[0], self._optims[0], self._iterators[0]
@@ -449,64 +442,27 @@ class PDATrainingUpdater(Updater):
 
         output = model(**batch)
         output['param_update'] = None
-        if self.param_update:
-            output['param_update'] =  {
-                name: param.detach().cpu().clone()
-                for name, param in model.named_parameters()
-            }
 
         loss = output['loss']
         loss.backward()
         if self.clip_grad > 0:
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=self.clip_grad)
         optim.step()
-
-        if self.param_update:
-            for name, param in model.named_parameters():
-                output['param_update'][name].sub_(param.detach().cpu())
-
         return output
 
-    @classmethod
-    def from_bot(cls, bot: TrialBot) -> 'PDATrainingUpdater':
-        from trialbot.data.iterators import RandomIterator
-        args, p, model, logger = bot.args, bot.hparams, bot.model, bot.logger
 
-        params = model.parameters()
-        from utils.select_optim import select_optim
-        optim = select_optim(p, params)
-        logger.info(f"Using the optimizer {str(optim)}")
-
-        repeat_iter = shuffle_iter = not args.debug
-        iterator = RandomIterator(len(bot.train_set), p.batch_sz, shuffle=shuffle_iter, repeat=repeat_iter)
-        if args.debug and args.skip:
-            iterator.reset(args.skip)
-
-        updater = cls(bot.train_set, bot.translator, model, iterator, optim, args.device, p.GRAD_CLIPPING, param_update=True)
-        return updater
-
-def main():
+def main(args=None):
     from utils.trialbot.setup import setup
-    args = setup(seed=2021)
+    if args is None:
+        args = setup(seed=2021)
 
-    from functools import partial
     get_model_fn = partial(get_model, dataset_name=args.dataset)
-
     bot = TrialBot(trial_name="s2pda_qa", get_model_func=get_model_fn, args=args)
 
-    from trialbot.training import Events
-    @bot.attach_extension(Events.EPOCH_COMPLETED)
-    def get_metric(bot: TrialBot):
-        import json
-        print(json.dumps(bot.model.get_metric(reset=True, diagnosis=True), sort_keys=True))
-
-    @bot.attach_extension(Events.STARTED)
-    def print_models(bot: TrialBot):
-        print(str(bot.models))
-
-    from utils.trialbot.extensions import collect_garbage, print_hyperparameters
+    from utils.trialbot.extensions import collect_garbage, print_hyperparameters, print_models, get_metrics
+    bot.add_event_handler(Events.STARTED, print_models, 100)
     bot.add_event_handler(Events.STARTED, print_hyperparameters, 100)
-    from trialbot.training import Events
+    bot.add_event_handler(Events.EPOCH_COMPLETED, get_metrics, 100)
     if not args.test:
         # --------------------- Training -------------------------------
         from trialbot.training.extensions import every_epoch_model_saver
@@ -518,34 +474,14 @@ def main():
         bot.add_event_handler(Events.ITERATION_COMPLETED, collect_garbage, 80)
         bot.add_event_handler(Events.EPOCH_COMPLETED, collect_garbage, 80)
 
-        @bot.attach_extension(Events.ITERATION_COMPLETED)
-        def iteration_metric(bot: TrialBot):
-            import json
-            print(json.dumps(bot.model.get_metric()))
+        bot.updater = PDATrainingUpdater(bot)
 
-        # from utils.trial_bot_extensions import init_tensorboard_writer
-        # from utils.trial_bot_extensions import write_batch_info_to_tensorboard
-        # from utils.trial_bot_extensions import close_tensorboard
-        # bot.add_event_handler(Events.STARTED, init_tensorboard_writer, 100, interval=4, histogram_interval=100)
-        # bot.add_event_handler(Events.ITERATION_COMPLETED, write_batch_info_to_tensorboard, 100)
-        # bot.add_event_handler(Events.COMPLETED, close_tensorboard, 100)
+    elif args.debug:
+        bot.add_event_handler(Events.ITERATION_COMPLETED, prediction_analysis, 100)
 
-        # debug strange errors by inspecting running time, data size, etc.
-        if args.debug:
-            from utils.trialbot.extensions import track_pytorch_module_forward_time
-            bot.add_event_handler(Events.STARTED, track_pytorch_module_forward_time, 100)
-
-        bot.updater = PDATrainingUpdater.from_bot(bot)
-
-    else:
-        @bot.attach_extension(Events.ITERATION_COMPLETED)
-        def iteration_metric(bot: TrialBot):
-            import json
-            print(json.dumps(bot.model.get_metric()))
-
-        if args.debug:
-            bot.add_event_handler(Events.ITERATION_COMPLETED, prediction_analysis, 100)
     bot.run()
+    return bot
+
 
 def prediction_analysis(bot: TrialBot):
     output = bot.state.output
@@ -566,6 +502,7 @@ def prediction_analysis(bot: TrialBot):
         print("GOLD: " + " ".join(gold))
         print("PRED_symbol: " + " ".join(p_s))
         print("GOLD_symbol: " + " ".join(g_s))
+
 
 if __name__ == '__main__':
     main()

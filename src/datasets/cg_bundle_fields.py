@@ -144,6 +144,7 @@ class ProcessedSentField(SeqField):
 
 
 class TerminalRuleSeqField(SeqField):
+    """Convert the sql into sequence of derivations guided by some grammar tree"""
     def __init__(self, keywords: dict = None, no_terminal_rule: bool = False, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.keywords = keywords or {}

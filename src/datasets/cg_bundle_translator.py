@@ -56,7 +56,7 @@ class SQLDerivations(FieldAwareTranslator):
     def __init__(self, max_derivation_symbols: int = 11):
         super().__init__(field_list=[
             ProcessedSentField(source_key='sent', renamed_key='source_tokens', add_start_end_toks=False,),
-            MidOrderTraversalField(tree_key='sql_tree',
+            MidOrderTraversalField(tree_key='runtime_tree',
                                    namespaces=UNIFIED_TREE_NS,
                                    max_derivation_symbols=max_derivation_symbols,
                                    grammar_token_generation=True,
@@ -79,6 +79,5 @@ class SQLDerivations(FieldAwareTranslator):
 class SQLTutorBuilder(FieldAwareTranslator):
     def __init__(self):
         super().__init__(field_list=[
-            TutorBuilderField(tree_key='sql_tree',
-                              ns=UNIFIED_TREE_NS)
+            TutorBuilderField(tree_key='runtime_tree', ns=UNIFIED_TREE_NS)
         ])

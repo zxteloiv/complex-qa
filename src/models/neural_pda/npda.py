@@ -11,7 +11,7 @@ from allennlp.nn.util import min_value_of_dtype
 from .partial_tree_encoder import TopDownTreeEncoder
 from .tree import Tree
 from .rule_scorer import RuleScorer
-from utils.nn import init_state_for_stacked_rnn, get_final_encoder_states
+from utils.nn import assign_stacked_states, get_final_encoder_states
 from utils.nn import prepare_input_mask, expand_tensor_size_at_dim
 
 from .tensor_typing_util import *
@@ -31,7 +31,6 @@ class NeuralPDA(nn.Module):
                  residual_norm_after_self_attn: nn.Module,
 
                  rule_scorer: RuleScorer,
-                 negative_rule_scorer: RuleScorer,
 
                  exact_token_predictor: nn.Module,
 
@@ -53,7 +52,6 @@ class NeuralPDA(nn.Module):
         self._pre_tree_encoder = pre_tree_encoder
         self._pre_tree_self_attn = pre_tree_self_attn
         self._rule_scorer = rule_scorer
-        self._neg_rule_scorer = negative_rule_scorer
         self._residual_norm = residual_norm_after_self_attn
 
         # -------------------
@@ -71,14 +69,14 @@ class NeuralPDA(nn.Module):
         self._stack: Optional[TensorBatchStack] = None
         self._partial_tree: Optional[Tree] = None
         self._tree_hx = None
-        self.diagnosis = dict()
 
-    def init_automata(self, batch_sz: int, device: torch.device, query_attn_fn: Callable,
-                      max_derivation_step: int = 0):
+    def init_automata(self, batch_sz: int, device: torch.device, query_attn_fn: Callable, max_derivation_step: int = 0):
         # init tree
         self._partial_tree = Tree(batch_sz, self.max_derivation_step * 5, 1, device=device)
         self._tree_hx = None
 
+        # a partial tree is only used in the generation task, so it's initialized with grammar entry as the root.
+        # For training/testing/validation, the complete tree is used.
         root_id = torch.zeros((batch_sz, 1), device=device).long()
         root_val = torch.full((batch_sz, 1), fill_value=self.grammar_entry, device=device).long()
         self._partial_tree.init_root(root_val)
@@ -116,8 +114,15 @@ class NeuralPDA(nn.Module):
         self._partial_tree = None
         self._stack = None
 
-    def forward(self, **kwargs):
-        return self._forward_parallel_training(**kwargs)
+    def forward(self, model_function: str = "parallel", **kwargs):
+        if model_function == "parallel":
+            return self._forward_parallel_training(**kwargs)
+        elif model_function == "generation":
+            return self._forward_derivation_step()
+        elif model_function == "validation":
+            return self._forward_validation(**kwargs)
+        else:
+            raise ValueError(f'Unknown function {model_function} specified.')
 
     def _forward_parallel_training(self,
                                    tree_nodes,  # (batch, n_d), the tree nodes = #lhs = num_derivations
@@ -125,7 +130,24 @@ class NeuralPDA(nn.Module):
                                    expansion_frontiers,  # (batch, n_d, max_runtime_stack_size),
                                    derivations,  # (batch, n_d, max_seq), the gold derivations for choice checking
                                    ):
-        self.diagnosis = dict()
+        tree_hid_att = self._encode_full_tree(tree_nodes, node_parents, expansion_frontiers)
+
+        # tree_grammar: (batch, n_d, opt_num, 4, max_seq)
+        tree_grammar = self._gt(tree_nodes)
+
+        # attention computation and compose the context vector with the symbol hidden states
+        # query_context: (batch, *, attention_out)
+        query_context = self._query_attn_fn(tree_hid_att)
+
+        # opt_prob: (batch, n_d, opt_num)
+        # opt_repr: (batch, n_d, opt_num, hid)
+        opt_prob, opt_repr = self._get_topological_choice_distribution(tree_nodes, tree_hid_att, query_context)
+
+        exact_logit = self._predict_exact_token_after_derivation(derivations, tree_hid_att, query_context)
+
+        return opt_prob, exact_logit, tree_grammar
+
+    def _encode_full_tree(self, tree_nodes, node_parents, expansion_frontiers):
         _, tree_mask = prepare_input_mask(tree_nodes)
 
         # nodes_emb: (batch, n_d, emb)
@@ -145,24 +167,68 @@ class NeuralPDA(nn.Module):
             tree_hid_att = tree_hid_att + tree_hid
             tree_hid_att = self._residual_norm(tree_hid_att)
 
-        # tree_grammar: (batch, n_d, opt_num, 4, max_seq)
-        tree_grammar = self._gt(tree_nodes)
+        return tree_hid_att
 
-        # attention computation and compose the context vector with the symbol hidden states
-        # query_context: (batch, *, attention_out)
+    def _forward_validation(self,
+                            tree_nodes,  # (batch, n_d), the tree nodes = #lhs = num_derivations
+                            node_parents,  # (batch, n_d),
+                            expansion_frontiers,  # (batch, n_d, max_runtime_stack_size),
+                            derivations,  # (batch, n_d, max_seq), the gold derivations for choice checking
+                            ):
+        # tree_hid: (batch, n_d, hid)
+        tree_hid_att = self._encode_full_tree(tree_nodes, node_parents, expansion_frontiers)
+        # query_context: (batch, n_d, attention_out)
         query_context = self._query_attn_fn(tree_hid_att)
-        if isinstance(query_context, tuple):
-            query_context = query_context[0]
 
-        # opt_prob: (batch, n_d, opt_num)
-        # opt_repr: (batch, n_d, opt_num, hid)
-        # neg_prob: (batch, n_d, opt_num)
-        opt_prob, opt_repr, neg_prob = self._get_topological_choice_distribution(tree_nodes, tree_hid_att, query_context)
+        # rule_repr: (batch, n_d, hid)
+        # rule_mask: (batch, n_d)
+        rule_repr, rule_mask = self._get_derivation_repr(tree_nodes, derivations)
 
-        exact_logit = self._predict_exact_token_after_derivation(derivations, tree_hid_att, query_context)
+        # rule_logit: (batch, n_d), the score dimension 1 is squeezed by default in the rule scorer
+        rule_logit = self._rule_scorer(rule_repr, query_context, tree_hid_att)
+        return rule_logit, rule_mask
 
-        self.diagnosis.update(tree_hid=tree_hid, tree_hid_att=tree_hid_att)
-        return opt_prob, neg_prob, exact_logit, tree_grammar
+    def _get_derivation_repr(self, tree_nodes, derivations):
+        batch_sz, num_symbols, max_rhs_len = derivations.size()
+
+        # init_state: (batch, num_symbols, hid)
+        init_state = self._lhs_symbol_mapper(self._embedder(tree_nodes))
+        hx, _ = self._expander.init_hidden_states(assign_stacked_states([init_state], self._expander.get_layer_num()))
+
+        mem = SeqCollector()
+        for step in range(max_rhs_len):
+            if step == 1:
+                self._expander.reset()
+
+            step_index = torch.tensor([step], device=derivations.device)
+            # use gold derivations as input for validation
+            # step_symbol: (batch, num_symbols)
+            step_symbol: torch.Tensor = derivations.index_select(dim=-1, index=step_index).squeeze(-1)
+            # same_as_lhs: (batch, num_symbols, 1)
+            same_as_lhs = (step_symbol == tree_nodes).unsqueeze(-1)
+
+            emb = self._embedder(step_symbol)  # (batch, num_symbols, emb_sz)
+            # step_inp: (batch, num_symbols, emb_sz + 1)
+            step_inp = torch.cat([emb, same_as_lhs], dim=-1)
+            # step_output: (batch, num_symbols, hid)
+            hx, step_out = self._expander(step_inp, hx)
+            mem(step_output=step_out)
+
+        # rhs_output: (batch, num_symbols, max_seq, hid)
+        rhs_output = mem.get_stacked_tensor('step_output', dim=-2)
+        # derivation_mask: (batch, num_symbols, max_seq)
+        _, derivations_mask = prepare_input_mask(derivations)
+
+        # rule_repr: (batch, num_symbols, hid)
+        rule_repr = get_final_encoder_states(
+            rhs_output.reshape(batch_sz * num_symbols, max_rhs_len, -1),
+            derivations_mask.reshape(batch_sz * num_symbols, max_rhs_len)
+        ).reshape(batch_sz, num_symbols, -1)
+
+        # rule_mask: (batch, num_symbols)
+        rule_mask = derivations_mask.sum(-1) > 0
+
+        return rule_repr, rule_mask
 
     def _forward_derivation_step(self):
         """
@@ -188,12 +254,10 @@ class NeuralPDA(nn.Module):
         # attention computation and compose the context vector with the symbol hidden states
         # query_context: (batch, *, attention_out)
         query_context = self._query_attn_fn(tree_state)
-        if isinstance(query_context, tuple):
-            query_context = query_context[0]
 
         # opt_prob: (batch, opt_num)
         # opt_repr: (batch, opt_num, hid)
-        opt_prob, opt_repr, _ = self._get_topological_choice_distribution(lhs, tree_state, query_context)
+        opt_prob, opt_repr = self._get_topological_choice_distribution(lhs, tree_state, query_context)
 
         # best_choice: (batch,)
         best_choice = opt_prob.argmax(dim=-1)
@@ -243,6 +307,8 @@ class NeuralPDA(nn.Module):
 
     def _select_node(self) -> Tuple[LT, LT, LT]:
         node, success = self._stack.pop()
+        node: LT
+        success: LT
         node_idx = node[:, 0]
         node_val = node[:, 1]
         return node_idx, node_val, success
@@ -274,13 +340,7 @@ class NeuralPDA(nn.Module):
         opt_logit = self._rule_scorer(opt_repr, exp_qc, exp_ts)
         opt_prob = masked_softmax(opt_logit, opt_mask.bool())
 
-        if self._neg_rule_scorer is not None:
-            neg_opt_logit = self._neg_rule_scorer(opt_repr, exp_qc, exp_ts)
-            neg_prob = masked_softmax(neg_opt_logit, opt_mask.bool())
-        else:
-            neg_prob = None
-
-        return opt_prob, opt_repr, neg_prob
+        return opt_prob, opt_repr
 
     def _get_full_grammar_repr(self):
         (
@@ -290,7 +350,7 @@ class NeuralPDA(nn.Module):
             symbol_mask,        # symbol_mask: (V, opt_num, max_seq)
         ) = self.decouple_grammar_guide(self._gt._g)
 
-        num_symbols, opt_num, max_symbol_len = valid_symbols.size()
+        num_symbols, opt_num, max_rhs_len = valid_symbols.size()
 
         # lhs symbol is all the symbol vocabulary
         # (V,)
@@ -298,30 +358,28 @@ class NeuralPDA(nn.Module):
 
         # init_state: (V, hid)
         init_state = self._lhs_symbol_mapper(self._embedder(lhs_symbol))
-        hx, _ = self._expander.init_hidden_states(
-            init_state_for_stacked_rnn([init_state], self._expander.get_layer_num(), "all")
-        )
+        hx, _ = self._expander.init_hidden_states(assign_stacked_states([init_state], self._expander.get_layer_num()))
 
         mem = SeqCollector()
-        for step in range(0, max_symbol_len):
+        for step in range(0, max_rhs_len):
+            if step == 1:
+                self._expander.reset()
             # prepare ranking features
             step_index = torch.tensor([step], device=valid_symbols.device)
-            step_symbol = valid_symbols.index_select(dim=-1, index=step_index).squeeze(-1)
-            step_p_growth = parental_growth.index_select(dim=-1, index=step_index)
-            step_f_growth = fraternal_growth.index_select(dim=-1, index=step_index)
+            step_symbol: torch.Tensor = valid_symbols.index_select(dim=-1, index=step_index).squeeze(-1)
             same_as_lhs = (step_symbol == lhs_symbol.unsqueeze(-1)).unsqueeze(-1)
-
             emb = self._embedder(step_symbol)  # (V, opt_num, emb_sz)
+            step_inp = torch.cat([emb, same_as_lhs], dim=-1)
             # step_output: (V, opt_num, hid)
-            hx, step_out = self._expander(emb, hx, input_aux=[step_p_growth, step_f_growth, same_as_lhs])
+            hx, step_out = self._expander(step_inp, hx)
             mem(step_output=step_out)
 
         # rhs_output: (V, opt_num, max_seq, hid)
         rhs_output = mem.get_stacked_tensor('step_output', dim=-2)
         # opt_repr: (V, opt_num, hid)
         opt_repr = get_final_encoder_states(
-            rhs_output.reshape(num_symbols * opt_num, max_symbol_len, -1),
-            symbol_mask.reshape(num_symbols * opt_num, max_symbol_len)
+            rhs_output.reshape(num_symbols * opt_num, max_rhs_len, -1),
+            symbol_mask.reshape(num_symbols * opt_num, max_rhs_len)
         ).reshape(num_symbols, opt_num, -1)
 
         # (V, opt_num)

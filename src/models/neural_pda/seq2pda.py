@@ -37,9 +37,6 @@ class Seq2PDA(nn.Module):
 
         self.token_loss = Average()
         self.topo_loss = Average()
-        self.distracting_loss = Average()
-        self.topo_err_stat = dict()
-        self.token_err_stat = dict()
         self.count_metric = 0
         self.err = Average()
         self.tok_pad = 0
@@ -48,42 +45,33 @@ class Seq2PDA(nn.Module):
         self.logger = logging.getLogger(self.__class__.__name__)
         self.vocab: NSVocabulary = vocab
 
-        # ------ diagnosis metrics ---------
-        # split the
-        self.tree_hid_norm = (Average(), Average(), Average())
-        self.tree_att_norm = (Average(), Average(), Average())
-
-    def get_metric(self, reset=False, diagnosis=False):
+    def get_metric(self, reset=False):
         token_loss = self.token_loss.get_metric(reset)
         topo_loss = self.topo_loss.get_metric(reset)
-        distract_loss = self.distracting_loss.get_metric(reset)
         count = self.count_metric
         err = self.err.get_metric(reset)
-        output = {"TokenLoss": token_loss, "TopoLoss": topo_loss, "TopoDistracting": distract_loss,
-                  "ERR": err, "COUNT": count}
-
-        if diagnosis:
-            tree_hid_norm = [m.get_metric(reset) for m in self.tree_hid_norm]
-            tree_att_norm = [m.get_metric(reset) for m in self.tree_att_norm]
-            output.update(TreeHidNorm=tree_hid_norm, TreeAttNorm=tree_att_norm)
-            output.update(SymbolErr=self.topo_err_stat, TokenErr=self.token_err_stat)
+        output = {"TokenLoss": token_loss, "TopoLoss": topo_loss, "ERR": err, "COUNT": count}
 
         if reset:
             self.count_metric = 0
-            self.topo_err_stat = dict()
-            self.token_err_stat = dict()
         return output
 
-    def forward(self, *args, **kwargs):
-        self._reset_variational_dropout()
-        if self.training:
-            return self._forward_parallel_training(*args, **kwargs)
+    def _reset_variational_dropout(self):
+        for m in self.modules():
+            if isinstance(m, VariationalDropout):
+                m.reset()
 
+    def forward(self, model_function: str = "parallel", *args, **kwargs):
+        self._reset_variational_dropout()
+
+        if model_function == "parallel":
+            return self._forward_parallel_training(*args, **kwargs)
+        elif model_function == 'generation':
+            return self.forward_inference(*args, **kwargs)
+        elif model_function == "validation":
+            return
         else:
-            output = self._forward_parallel_training(*args, **kwargs)
-            if 'loss' in output:
-                del output['loss']
-            return output
+            raise ValueError(f"Unknown model function {model_function} is specified.")
 
     def _forward_parallel_training(self,
                                    source_tokens: LT,  # (batch, src_len)
@@ -99,13 +87,13 @@ class Seq2PDA(nn.Module):
 
         # ================
         # opt_prob: (batch, n_d, opt_num)
-        # neg_prob: (batch, n_d, opt_num)
         # exact_logit: (batch, n_d, max_seq, V)
         # tree_grammar: (batch, n_d, opt_num, 4, max_seq)
-        opt_prob, neg_prob, exact_logit, tree_grammar = self.npda(tree_nodes=tree_nodes,
-                                                                  node_parents=node_parents,
-                                                                  expansion_frontiers=expansion_frontiers,
-                                                                  derivations=derivations)
+        opt_prob, exact_logit, tree_grammar = self.npda(model_function="parallel",
+                                                        tree_nodes=tree_nodes,
+                                                        node_parents=node_parents,
+                                                        expansion_frontiers=expansion_frontiers,
+                                                        derivations=derivations)
 
         # --------------- 1. training the topological choice --------------
         # valid_symbols, symbol_mask: (batch, n_d, opt_num, max_seq)
@@ -121,15 +109,8 @@ class Seq2PDA(nn.Module):
         topo_loss = (nll * tree_mask).sum() / (tree_mask.sum() + 1e-15)
         # topo_loss = (nll * tree_mask).sum() / (10 * source_tokens.size()[0])
 
-        # *_loss: (batch, n_d)
-        distracting = 0
-        if neg_prob is not None:
-            # bounded_nkl: (batch, n_d)
-            bounded_nkl = (opt_prob * torch.relu(((neg_prob + 1e-15).log() - (opt_prob + 1e-15).log()) + 1)).sum(-1)
-            support_gt_1 = ((opt_prob > 0).sum(-1) > 1).long()
-            distracting = (bounded_nkl * support_gt_1).mean()
-
         # ------------- 2. training the exact token prediction ------------
+        # *_loss: (batch, n_d)
         _, et_mask = prepare_input_mask(exact_tokens)
         tok_nll = -F.log_softmax(exact_logit, dim=-1).gather(dim=-1, index=exact_tokens.unsqueeze(-1)).squeeze(-1)
         # token_loss = seq_cross_ent(exact_logit, exact_tokens, et_mask, average="token")
@@ -147,19 +128,11 @@ class Seq2PDA(nn.Module):
         self.count_metric += (choice_validity > 0).sum().item()
 
         # ================
-        self._diagnose_tree_state(tree_mask)
-        self._diagnose_error(topo_pos_err, token_pos_err, tree_nodes, exact_tokens)
-
-        output = {"loss": topo_loss + token_loss + distracting}
+        output = {"loss": topo_loss + token_loss}
         self.token_loss(token_loss)
         self.topo_loss(topo_loss)
-        self.distracting_loss(distracting)
+        self.npda.reset_automata()
         return output
-
-    def _reset_variational_dropout(self):
-        for m in self.modules():
-            if isinstance(m, VariationalDropout):
-                m.reset()
 
     def _encode_source(self, source_tokens):
         source_tokens, source_mask = prepare_input_mask(source_tokens, padding_val=self.tok_pad)
@@ -173,46 +146,31 @@ class Seq2PDA(nn.Module):
 
         return _enc_attn_fn
 
-    def _diagnose_error(self, topo_pos_err, token_pos_err, tree_node, exact_tokens):
-        """
-        :param topo_pos_err: (batch, n_d)
-        :param token_pos_err: (batch, n_d, len)
-        :param tree_node: (batch, n_d)
-        :param exact_tokens: (batch, n_d, len)
-        :return:
-        """
-        flatten_zip = lambda x, y: zip(torch.flatten(x).tolist(), torch.flatten(y).tolist())
-        for err, node in flatten_zip(topo_pos_err, tree_node):
-            if err > 0:
-                err_symbol = self.vocab.get_token_from_index(node, self.tgt_ns[0])
-                if err_symbol in self.topo_err_stat:
-                    self.topo_err_stat[err_symbol] += 1
-                else:
-                    self.topo_err_stat[err_symbol] = 1
+    def _forward_validation(self,
+                            source_tokens: LT,  # (batch, src_len)
+                            tree_nodes,  # (batch, n_d), the tree nodes = #lhs = num_derivations
+                            node_parents,  # (batch, n_d),
+                            expansion_frontiers,  # (batch, n_d, max_runtime_stack_size),
+                            derivations,  # (batch, n_d, max_seq), the gold derivations for choice checking
+                            exact_tokens,  # (batch, n_d, max_seq)
+                            target_tokens,  # (batch, max_tgt_len)
+                            ):
+        enc_attn_fn = self._encode_source(source_tokens)
+        self.npda.init_automata(source_tokens.size()[0], source_tokens.device, enc_attn_fn)
+        # rule_repr: (batch, n_d, hid)
+        # rule_mask: (batch, n_d)
+        # rule_logit: (batch, n_d), the score dimension 1 is squeezed by default in the rule scorer
+        rule_logit, rule_mask = self.npda(model_function="validation",
+                                          tree_nodes=tree_nodes,
+                                          node_parents=node_parents,
+                                          expansion_frontiers=expansion_frontiers,
+                                          derivations=derivations)
 
-        for err, node in flatten_zip(token_pos_err, exact_tokens):
-            if err > 0:
-                err_symbol = self.vocab.get_token_from_index(node, self.tgt_ns[1])
-                if err_symbol in self.token_err_stat:
-                    self.token_err_stat[err_symbol] += 1
-                else:
-                    self.token_err_stat[err_symbol] = 1
+        self.npda.reset_automata()
+        output = {
 
-    def _diagnose_tree_state(self, tree_mask):
-        tree_hid, tree_att = map(self.npda.diagnosis.get, ('tree_hid', 'tree_hid_att'))
-        tree_hid_norm = tree_hid.norm(dim=-1)
-        tree_att_norm = tree_att.norm(dim=-1)
-        tree_hs = tree_hid_norm.split(50, dim=1)[:3]
-        tree_as = tree_att_norm.split(50, dim=1)[:3]
-        tree_ms = tree_mask.split(50, dim=1)[:3]
-        for i, (h, a, m) in enumerate(zip(tree_hs, tree_as, tree_ms)):
-            h = (h * m).sum(dim=-1) / (m.sum(dim=-1) + 1e-13)
-            a = (a * m).sum(dim=-1) / (m.sum(dim=-1) + 1e-13)
-            m = m.sum(dim=-1)
-            for instance_h, instance_a, instance_m in zip(h, a, m):
-                if instance_m > 0:
-                    self.tree_hid_norm[i](instance_h)
-                    self.tree_att_norm[i](instance_a)
+        }
+        pass
 
     def forward_inference(self,
                           source_tokens: LT,  # (batch, src_len)
@@ -225,13 +183,14 @@ class Seq2PDA(nn.Module):
                           ):
         batch_sz, device = source_tokens.size()[0], source_tokens.device
         enc_attn_fn = self._encode_source(source_tokens)
-        self.npda.init_automata(batch_sz, device, enc_attn_fn, max_derivation_step=tree_nodes.size()[-1])
+        _, max_derivation_num, max_rule_size = derivations.size()
+        self.npda.init_automata(batch_sz, device, enc_attn_fn, max_derivation_step=max_derivation_num)
 
         token_stack = TensorBatchStack(batch_sz, 500, item_size=1, dtype=torch.long, device=device)
         symbol_stack = TensorBatchStack(batch_sz, 1000, item_size=1, dtype=torch.long, device=device)
         symbol_list = []
         while self.npda.continue_derivation():
-            lhs_idx, lhs_mask, grammar_guide, opt_prob, exact_token_logit = self.npda()
+            lhs_idx, lhs_mask, grammar_guide, opt_prob, exact_token_logit = self.npda(model_function="generation")
 
             predicted_symbol, predicted_p_growth, predicted_mask = self._infer_topology_greedily(opt_prob, grammar_guide)
             symbol_list.append(predicted_symbol)
@@ -239,7 +198,7 @@ class Seq2PDA(nn.Module):
             self._arrange_predicted_symbols(symbol_stack, lhs_mask, predicted_symbol, predicted_mask)
             self.npda.update_pda_with_predictions(lhs_idx, predicted_symbol, predicted_p_growth, predicted_mask, lhs_mask)
 
-        predictions = torch.stack([F.pad(t, [0, derivations.size()[-1] - t.size()[-1]]) for t in symbol_list], dim=1)
+        predictions = torch.stack([F.pad(t, [0, max_rule_size - t.size()[-1]]) for t in symbol_list], dim=1)
         # compute metrics
         self._compute_err(token_stack, target_tokens)
 
@@ -262,8 +221,7 @@ class Seq2PDA(nn.Module):
 
     def _arrange_predicted_tokens(self, stack: TensorBatchStack,
                                   exact_token_logit, lhs_mask,
-                                  predicted_p_growth, predicted_mask,
-                                  ):
+                                  predicted_p_growth, predicted_mask,):
         # predicted_tokens: (batch, seq)
         predicted_tokens = exact_token_logit.argmax(dim=-1)
 
