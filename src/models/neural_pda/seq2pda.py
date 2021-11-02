@@ -39,6 +39,7 @@ class Seq2PDA(nn.Module):
         self.topo_loss = Average()
         self.count_metric = 0
         self.err = Average()
+        self.detail_err = (Average(), Average())
         self.tok_pad = 0
         self.src_ns = src_ns
         self.tgt_ns = tgt_ns
@@ -50,7 +51,10 @@ class Seq2PDA(nn.Module):
         topo_loss = self.topo_loss.get_metric(reset)
         count = self.count_metric
         err = self.err.get_metric(reset)
-        output = {"TokenLoss": token_loss, "TopoLoss": topo_loss, "ERR": err, "COUNT": count}
+        topo_err, token_err = [m.get_metric(reset) for m in self.detail_err]
+        output = {"TokenLoss": token_loss, "TopoLoss": topo_loss,
+                  "ERR": err, "ERR_TOPO": topo_err, "ERR_TOKN": token_err,
+                  "COUNT": count}
 
         if reset:
             self.count_metric = 0
@@ -125,6 +129,8 @@ class Seq2PDA(nn.Module):
         token_err = token_pos_err.sum([1, 2])
         for e1, e2 in zip(topo_err, token_err):
             self.err(1. if e1 + e2 > 0 else 0.)
+            self.detail_err[0](1. if e1 > 0 else 0.)
+            self.detail_err[1](1. if e2 > 0 else 0.)
         self.count_metric += (choice_validity > 0).sum().item()
 
         # ================

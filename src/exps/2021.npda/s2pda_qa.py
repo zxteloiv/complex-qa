@@ -1,4 +1,3 @@
-from typing import Dict
 from collections import defaultdict
 from functools import partial
 import torch.nn
@@ -12,8 +11,6 @@ from trialbot.utils.move_to_device import move_to_device
 from trialbot.training import TrialBot, Registry, Events
 from trialbot.data import NSVocabulary
 from trialbot.training.updater import Updater
-from trialbot.training.hparamset import HyperParamSet
-from trialbot.utils.root_finder import find_root
 
 sys.path.insert(0, osp.abspath(osp.join(osp.dirname(__file__), '..', '..')))
 
@@ -26,131 +23,7 @@ import datasets.comp_gen_bundle as cg_bundle
 cg_bundle.install_parsed_qa_datasets(Registry._datasets)
 import datasets.cg_bundle_translator as sql_translator
 
-
-@Registry.hparamset()
-def cfq_pda():
-    from trialbot.training.hparamset import HyperParamSet
-    from trialbot.utils.root_finder import find_root
-    ROOT = find_root()
-    p = HyperParamSet.common_settings(ROOT)
-    p.TRAINING_LIMIT = 10
-    p.OPTIM = "adabelief"
-    p.batch_sz = 32
-    p.WEIGHT_DECAY = .1
-    p.ADAM_BETAS = (0.9, 0.98)
-    p.optim_kwargs = {"rectify": False}
-    p.GRAD_CLIPPING = .2    # grad norm required to be <= 2
-
-    p.src_ns = 'questionPatternModEntities'
-    p.tgt_ns = datasets.cfq_translator.UNIFIED_TREE_NS
-
-    # transformer requires input embedding equal to hidden size
-    p.encoder = "bilstm"
-    p.num_enc_layers = 2
-    p.enc_sz = 128
-    p.emb_sz = 128
-    p.hidden_sz = 128
-    p.num_heads = 4
-
-    p.enc_attn = 'generalized_bilinear'
-    p.attn_use_linear = False
-    p.attn_use_bias = False
-    p.attn_use_tanh_activation = False
-
-    p.dropout = .2
-    p.num_expander_layer = 1
-    p.expander_rnn = 'typed_rnn'    # typed_rnn, lstm
-    p.max_derivation_step = 200
-    p.grammar_entry = "queryunit"
-
-    # ----------- tree encoder settings -------------
-
-    p.tree_encoder = 're_zero_bilinear'
-    p.tree_encoder_weight_norm = False
-
-    p.bilinear_rank = 1
-    p.bilinear_pool = p.hidden_sz // p.num_heads
-    p.bilinear_linear = True
-    p.bilinear_bias = True
-
-    p.num_re0_layer = 6
-
-    p.use_attn_residual_norm = True
-
-    p.tree_self_attn = 'seq_mha'    # seq_mha, generalized_dot_product
-
-    # ----------- end of tree settings -------------
-
-    p.exact_token_predictor = "quant" # linear, mos, quant
-    p.num_exact_token_mixture = 1
-    p.exact_token_quant_criterion = "dot_product"
-    p.masked_exact_token_training = True
-    p.masked_exact_token_testing = True
-
-    p.rule_scorer = "triple_inner_product" # heuristic, mlp, (triple|concat|add_inner_product)
-    return p
-
-
-@Registry.hparamset()
-def sql_pda():
-    p = HyperParamSet.common_settings(find_root())
-    p.TRAINING_LIMIT = 100
-    p.OPTIM = "adabelief"
-    p.batch_sz = 32
-    p.WEIGHT_DECAY = 1e-6
-    p.ADAM_LR = 1e-3
-    p.ADAM_BETAS = (0.9, 0.999)
-    p.optim_kwargs = {"rectify": False}
-    p.GRAD_CLIPPING = .2    # grad norm required to be <= 2
-
-    p.src_ns = 'sent'
-    p.tgt_ns = datasets.cfq_translator.UNIFIED_TREE_NS
-
-    # transformer requires input embedding equal to hidden size
-    p.encoder = "bilstm"
-    p.num_enc_layers = 2
-    p.enc_sz = 128
-    p.emb_sz = 128
-    p.hidden_sz = 128
-    p.num_heads = 4
-
-    p.enc_attn = 'generalized_bilinear'
-    p.attn_use_linear = False
-    p.attn_use_bias = False
-    p.attn_use_tanh_activation = False
-
-    p.dropout = .2
-    p.num_expander_layer = 1
-    p.expander_rnn = 'typed_rnn'    # typed_rnn, lstm
-    p.max_derivation_step = 200
-    p.grammar_entry = "queryunit"
-
-    # ----------- tree encoder settings -------------
-
-    p.tree_encoder = 're_zero_bilinear'
-    p.tree_encoder_weight_norm = False
-
-    p.bilinear_rank = 1
-    p.bilinear_pool = 32
-    p.bilinear_linear = True
-    p.bilinear_bias = True
-
-    p.num_re0_layer = 6
-
-    p.use_attn_residual_norm = True
-
-    p.tree_self_attn = 'seq_mha'    # seq_mha, generalized_dot_product
-
-    # ----------- end of tree settings -------------
-
-    p.exact_token_predictor = "quant" # linear, mos, quant
-    p.num_exact_token_mixture = 1
-    p.exact_token_quant_criterion = "dot_product"
-    p.masked_exact_token_training = True
-    p.masked_exact_token_testing = True
-
-    p.rule_scorer = "triple_inner_product"  # heuristic, mlp, (triple|concat|add_inner_product)
-    return p
+import s2pda_hparams
 
 
 def get_tutor_from_train_set(p, vocab, train_set, dataset_name: str):
@@ -221,11 +94,7 @@ def get_tree_encoder(p, vocab):
                 p.emb_sz, p.hidden_sz, p.hidden_sz, p.bilinear_rank, p.bilinear_pool,
                 use_linear=p.bilinear_linear, use_bias=p.bilinear_bias,
             )
-            if p.tree_encoder_weight_norm:
-                # apply weight norm per-pool
-                bilinear_mod = torch.nn.utils.weight_norm(bilinear_mod, 'w_o', dim=0)
             layer_encoder = partial_tree.SingleStepBilinear(bilinear_mod)
-
         elif p.tree_encoder.endswith('dot_prod'):
             layer_encoder = partial_tree.SingleStepDotProd()
         else:
@@ -257,7 +126,7 @@ def get_rule_scorer(p, vocab):
             nn.Linear(p.hidden_sz // p.num_heads, p.hidden_sz),
             VariationalDropout(p.dropout),
             nn.LayerNorm(p.hidden_sz),
-            Activation.by_name('mish')(),
+            Activation.by_name('tanh')(),
             nn.Linear(p.hidden_sz, 1)
         ))
     elif p.rule_scorer == "triple_inner_product":
@@ -278,8 +147,8 @@ def get_rule_scorer(p, vocab):
             nn.Linear(p.hidden_sz // p.num_heads, p.hidden_sz),
             VariationalDropout(p.dropout),
             nn.LayerNorm(p.hidden_sz),
-            Activation.by_name('mish')(),
-            nn.Linear(p.hidden_sz, 1)
+            Activation.by_name('tanh')(),
+            nn.Linear(p.hidden_sz, 1),
         ))
 
     return rule_scorer
@@ -293,7 +162,6 @@ def get_model(p, vocab: NSVocabulary, *, dataset_name: str):
     from models.modules.attention_wrapper import get_wrapped_attention
     from models.modules.quantized_token_predictor import QuantTokenPredictor
     from models.base_s2s.stacked_rnn_cell import StackedRNNCell, StackedLSTMCell
-    from models.modules.sym_typed_rnn_cell import SymTypedRNNCell
     from models.modules.container import MultiInputsSequential, UnpackedInputsSequential, SelectArgsById
     from models.modules.mixture_softmax import MoSProjection
     from allennlp.nn.activations import Activation
@@ -310,8 +178,8 @@ def get_model(p, vocab: NSVocabulary, *, dataset_name: str):
             num_layers=1,
             num_heads=p.num_heads,
             feedforward_hidden_dim=p.enc_sz,
-            feedforward_dropout=p.dropout,
-            residual_dropout=p.dropout,
+            feedforward_dropout=0.,
+            residual_dropout=0.,
             attention_dropout=0.,
             use_positional_embedding=(floor == 0),
         )
@@ -321,7 +189,7 @@ def get_model(p, vocab: NSVocabulary, *, dataset_name: str):
     else:
         raise NotImplementedError
 
-    encoder = StackedEncoder([enc_cls(floor) for floor in range(p.num_enc_layers)], input_dropout=p.dropout)
+    encoder = StackedEncoder([enc_cls(floor) for floor in range(p.num_enc_layers)], input_dropout=0.)
     emb_src = nn.Embedding(vocab.get_vocab_size(p.src_ns), embedding_dim=p.enc_sz)
 
     ns_s, ns_et = p.tgt_ns
@@ -342,15 +210,6 @@ def get_model(p, vocab: NSVocabulary, *, dataset_name: str):
         )
 
     ett, gt = init_tailored_tutor(p, vocab, dataset_name=dataset_name)
-    if p.expander_rnn == 'lstm':
-        rhs_expander=StackedLSTMCell(p.emb_sz + 1, p.hidden_sz, p.num_expander_layer, dropout=p.dropout)
-    else:
-        rhs_expander=StackedRNNCell([
-            SymTypedRNNCell(input_dim=p.emb_sz + 1 if floor == 0 else p.hidden_sz,
-                            output_dim=p.hidden_sz,
-                            nonlinearity="tanh")
-            for floor in range(p.num_expander_layer)
-        ], dropout=p.dropout )
 
     npda = NeuralPDA(
         symbol_embedding=emb_s,
@@ -362,7 +221,7 @@ def get_model(p, vocab: NSVocabulary, *, dataset_name: str):
             nn.Tanh(),
         ) if p.emb_sz != p.hidden_sz else Activation.by_name('linear')(),   # `linear` returns the identity function
         grammar_tutor=gt,
-        rhs_expander=rhs_expander,
+        rhs_expander=StackedLSTMCell(p.emb_sz + 1, p.hidden_sz, p.num_expander_layer, dropout=p.dropout),
 
         rule_scorer=get_rule_scorer(p, vocab),
 
@@ -446,7 +305,8 @@ class PDATrainingUpdater(Updater):
         loss = output['loss']
         loss.backward()
         if self.clip_grad > 0:
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=self.clip_grad)
+            # torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=self.clip_grad)
+            torch.nn.utils.clip_grad_value_(model.parameters(), self.clip_grad)
         optim.step()
         return output
 
@@ -462,13 +322,14 @@ def main(args=None):
     from utils.trialbot.extensions import collect_garbage, print_hyperparameters, print_models, get_metrics
     bot.add_event_handler(Events.STARTED, print_models, 100)
     bot.add_event_handler(Events.STARTED, print_hyperparameters, 100)
-    bot.add_event_handler(Events.EPOCH_COMPLETED, get_metrics, 100)
+    bot.add_event_handler(Events.EPOCH_COMPLETED, get_metrics, 100, prefix="Training Metrics: ")
     if not args.test:
         # --------------------- Training -------------------------------
         from trialbot.training.extensions import every_epoch_model_saver
         from utils.trialbot.extensions import end_with_nan_loss
         from utils.trialbot.extensions import evaluation_on_dev_every_epoch
-        bot.add_event_handler(Events.EPOCH_COMPLETED, evaluation_on_dev_every_epoch, 90, skip_first_epochs=1)
+        bot.add_event_handler(Events.EPOCH_COMPLETED, evaluation_on_dev_every_epoch, 90, skip_first_epochs=10)
+        bot.add_event_handler(Events.EPOCH_COMPLETED, evaluation_on_dev_every_epoch, 90, skip_first_epochs=10, on_test_data=True)
         bot.add_event_handler(Events.ITERATION_COMPLETED, end_with_nan_loss, 100)
         bot.add_event_handler(Events.EPOCH_COMPLETED, every_epoch_model_saver, 100)
         bot.add_event_handler(Events.ITERATION_COMPLETED, collect_garbage, 80)

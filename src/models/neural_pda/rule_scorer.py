@@ -5,6 +5,7 @@ import torch
 from .tensor_typing_util import *
 from ..modules.container import MultiInputsSequential
 
+
 class RuleScorer(nn.Module, ABC):
     def forward(self, rule_option: FT, query_context: FT, tree_state: FT) -> FT:
         """
@@ -19,6 +20,7 @@ class RuleScorer(nn.Module, ABC):
         """
         raise NotImplementedError
 
+
 class MLPScorerWrapper(RuleScorer):
     def __init__(self, module: MultiInputsSequential, positive: bool = True):
         super().__init__()
@@ -32,6 +34,7 @@ class MLPScorerWrapper(RuleScorer):
             inp = torch.cat([rule_option, tree_state], dim=-1)
         return self._module(inp).squeeze(-1)
 
+
 class HeuristicMLPScorerWrapper(RuleScorer):
     def __init__(self, module: MultiInputsSequential):
         super().__init__()
@@ -42,6 +45,7 @@ class HeuristicMLPScorerWrapper(RuleScorer):
             [rule_option, query_context, tree_state, query_context - tree_state, query_context * tree_state],
             dim=-1)
         return self._module(inp).squeeze(-1)
+
 
 class GeneralizedInnerProductScorer(RuleScorer):
     def __init__(self, normalized: bool = False, positive: bool = True):
@@ -70,6 +74,7 @@ class GeneralizedInnerProductScorer(RuleScorer):
 
         return inp
 
+
 class ConcatInnerProductScorer(RuleScorer):
     def __init__(self, module: MultiInputsSequential, positive: bool = True):
         super().__init__()
@@ -92,6 +97,7 @@ class ConcatInnerProductScorer(RuleScorer):
             state = self._module(tree_state)
         inp = (rule_option * state).sum(dim=-1)
         return inp
+
 
 class AddInnerProductScorer(RuleScorer):
     def __init__(self, hidden_sz: int, use_layer_norm: bool = True, positive: bool = True):

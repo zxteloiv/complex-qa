@@ -356,30 +356,37 @@ class NeuralPDA(nn.Module):
         # (V,)
         lhs_symbol = torch.arange(num_symbols, device=valid_symbols.device)
 
-        # init_state: (V, hid)
-        init_state = self._lhs_symbol_mapper(self._embedder(lhs_symbol))
+        # (V * opt_num,)
+        rs_exp_lhs = expand_tensor_size_at_dim(lhs_symbol, opt_num, dim=1).reshape(-1)
+
+        # init_state: (V * opt_num, hid)
+        init_state = self._lhs_symbol_mapper(self._embedder(rs_exp_lhs))
         hx, _ = self._expander.init_hidden_states(assign_stacked_states([init_state], self._expander.get_layer_num()))
 
         mem = SeqCollector()
         for step in range(0, max_rhs_len):
-            if step == 1:
-                self._expander.reset()
-            # prepare ranking features
             step_index = torch.tensor([step], device=valid_symbols.device)
             step_symbol: torch.Tensor = valid_symbols.index_select(dim=-1, index=step_index).squeeze(-1)
+            # (V, opt_num, emb_sz)
+            emb = self._embedder(step_symbol)
+            # (V, opt_num, 1)
             same_as_lhs = (step_symbol == lhs_symbol.unsqueeze(-1)).unsqueeze(-1)
-            emb = self._embedder(step_symbol)  # (V, opt_num, emb_sz)
+
+            # step_inp: (V, opt_num, emb_sz + 1)
             step_inp = torch.cat([emb, same_as_lhs], dim=-1)
-            # step_output: (V, opt_num, hid)
-            hx, step_out = self._expander(step_inp, hx)
+            # rs_step_inp: (V * opt_num, emb_sz + 1)
+            rs_step_inp = step_inp.reshape(num_symbols * opt_num, -1)
+
+            # step_out: (V * opt_num, hid)
+            hx, step_out = self._expander(rs_step_inp, hx)
+
             mem(step_output=step_out)
 
-        # rhs_output: (V, opt_num, max_seq, hid)
+        # rhs_output: (V * opt_num, max_seq, hid)
         rhs_output = mem.get_stacked_tensor('step_output', dim=-2)
         # opt_repr: (V, opt_num, hid)
         opt_repr = get_final_encoder_states(
-            rhs_output.reshape(num_symbols * opt_num, max_rhs_len, -1),
-            symbol_mask.reshape(num_symbols * opt_num, max_rhs_len)
+            rhs_output, symbol_mask.reshape(num_symbols * opt_num, max_rhs_len)
         ).reshape(num_symbols, opt_num, -1)
 
         # (V, opt_num)
