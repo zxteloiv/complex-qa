@@ -27,6 +27,8 @@ class Seq2PDA(nn.Module):
                  src_ns: str,
                  tgt_ns: List[str],
                  vocab,
+
+                 exact_token_loss_weight: float = 1.0
                  ):
         super().__init__()
         self.encoder = encoder
@@ -45,6 +47,8 @@ class Seq2PDA(nn.Module):
         self.tgt_ns = tgt_ns
         self.logger = logging.getLogger(self.__class__.__name__)
         self.vocab: NSVocabulary = vocab
+
+        self.token_loss_weight = exact_token_loss_weight
 
     def get_metric(self, reset=False):
         token_loss = self.token_loss.get_metric(reset)
@@ -134,7 +138,7 @@ class Seq2PDA(nn.Module):
         self.count_metric += (choice_validity > 0).sum().item()
 
         # ================
-        output = {"loss": topo_loss + token_loss}
+        output = {"loss": topo_loss + self.token_loss_weight * token_loss}
         self.token_loss(token_loss)
         self.topo_loss(topo_loss)
         self.npda.reset_automata()

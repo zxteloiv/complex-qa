@@ -7,14 +7,21 @@ import pandas as pd
 def process_tranx_log(data: List[str]):
     groups = split(scan(data, 'Epoch started'), '======*')
     metrics = []
-    for g in groups:
-        train_metrics = grep(grep(g, ':{.*}|Trainaing Metrics'), '{.*}', only_matched_text=True)[-1]
+    for g in groups[10:]:
+        train_metrics = grep(grep(g, ':{.*}|Training Metrics'), '{.*}', only_matched_text=True)[-1]
         dev_metrics = grep(grep(g, 'Evaluation Metrics'), '{.*}', only_matched_text=True)[-1]
         test_metrics = grep(grep(g, 'Testing Metrics'), '{.*}', only_matched_text=True)[-1]
-        metrics.append(tuple(json.loads(x)['ERR'] for x in (train_metrics, dev_metrics, test_metrics)))
+        g_m = tuple()
+        g_m = g_m + tuple(json.loads(x)['ERR'] for x in (train_metrics, dev_metrics, test_metrics))
+        g_m = g_m + tuple(json.loads(x)['ERR_TOPO'] for x in (train_metrics, dev_metrics, test_metrics))
+        g_m = g_m + tuple(json.loads(x)['ERR_TOKN'] for x in (train_metrics, dev_metrics, test_metrics))
+        metrics.append(g_m)
 
-    print("\t".join(('epoch', 'train', 'dev', 'test')))
-    print("\n".join("%d\t%.4f\t%.4f\t%.4f" % (i, m[0], m[1], m[2]) for i, m in enumerate(metrics)))
+    print("\t".join(('epoch', 'train-err', 'dev-err', 'test-err',
+                     'train-err-topo', 'dev-err-topo', 'test-err-topo',
+                     'train-err-tokn', 'dev-err-tokn', 'test-err-tokn',
+                     )))
+    print("\n".join(("%d" + ('\t%.4f' * len(m))) % ((i,) + tuple(m)) for i, m in enumerate(metrics)))
 
     # hparam = grep(data, 'Hyperparamset.*', only_matched_text=True)
     # print(hparam[0])
