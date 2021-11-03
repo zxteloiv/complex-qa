@@ -23,7 +23,6 @@ class NeuralPDA(nn.Module):
                  lhs_symbol_mapper,
 
                  grammar_tutor,
-                 token_tutor,
                  rhs_expander: StackedRNNCell,
 
                  pre_tree_encoder: TopDownTreeEncoder,
@@ -32,22 +31,16 @@ class NeuralPDA(nn.Module):
 
                  rule_scorer: RuleScorer,
 
-                 exact_token_predictor: nn.Module,
-
                  # configuration
                  grammar_entry: int,
                  max_derivation_step: int = 1000,
 
-                 masked_exact_token_training: bool = True,
-                 masked_exact_token_testing: bool = True,
                  ):
         super().__init__()
         self._expander = rhs_expander
         self._gt = grammar_tutor
-        self._tt = token_tutor
         self._embedder = symbol_embedding
         self._lhs_symbol_mapper = lhs_symbol_mapper
-        self._exact_token_predictor = exact_token_predictor
 
         self._pre_tree_encoder = pre_tree_encoder
         self._pre_tree_self_attn = pre_tree_self_attn
@@ -58,8 +51,6 @@ class NeuralPDA(nn.Module):
         # configurations
         self.grammar_entry = grammar_entry
         self.max_derivation_step = max_derivation_step  # a very large upper limit for the runtime storage
-        self.masked_exact_token_training = masked_exact_token_training
-        self.masked_exact_token_testing = masked_exact_token_testing
 
         # -------------------
         # the helpful storage for runtime forwarding
@@ -128,12 +119,8 @@ class NeuralPDA(nn.Module):
                                    tree_nodes,  # (batch, n_d), the tree nodes = #lhs = num_derivations
                                    node_parents,  # (batch, n_d),
                                    expansion_frontiers,  # (batch, n_d, max_runtime_stack_size),
-                                   derivations,  # (batch, n_d, max_seq), the gold derivations for choice checking
                                    ):
         tree_hid_att = self._encode_full_tree(tree_nodes, node_parents, expansion_frontiers)
-
-        # tree_grammar: (batch, n_d, opt_num, 4, max_seq)
-        tree_grammar = self._gt(tree_nodes)
 
         # attention computation and compose the context vector with the symbol hidden states
         # query_context: (batch, *, attention_out)
@@ -143,9 +130,12 @@ class NeuralPDA(nn.Module):
         # opt_repr: (batch, n_d, opt_num, hid)
         opt_prob, opt_repr = self._get_topological_choice_distribution(tree_nodes, tree_hid_att, query_context)
 
-        exact_logit = self._predict_exact_token_after_derivation(derivations, tree_hid_att, query_context)
+        return opt_prob
 
-        return opt_prob, exact_logit, tree_grammar
+    def get_grammar(self, nodes):
+        # tree_grammar: (batch, n_d, opt_num, 4, max_seq)
+        tree_grammar = self._gt(nodes)
+        return tree_grammar
 
     def _encode_full_tree(self, tree_nodes, node_parents, expansion_frontiers):
         _, tree_mask = prepare_input_mask(tree_nodes)
@@ -262,9 +252,8 @@ class NeuralPDA(nn.Module):
         # best_choice: (batch,)
         best_choice = opt_prob.argmax(dim=-1)
         chosen_symbols, _, _ = self.retrieve_the_chosen_structure(best_choice, grammar_guide)
-        exact_token_logit = self._predict_exact_token_after_derivation(chosen_symbols, tree_state, query_context)
 
-        return lhs_idx, lhs_mask, grammar_guide, opt_prob, exact_token_logit
+        return lhs_idx, lhs_mask, grammar_guide, opt_prob
 
     def _encode_partial_tree(self) -> FT:
         # node_val: (batch, node_num, node_val_dim)
@@ -392,30 +381,6 @@ class NeuralPDA(nn.Module):
         # (V, opt_num)
         opt_mask = symbol_mask.sum(-1) > 0
         return opt_repr, opt_mask
-
-    def _predict_exact_token_after_derivation(self, symbols: LT, tree_state: FT, query_context: FT) -> FT:
-        """
-        :param symbols: (batch, *, max_seq)
-        :param tree_state: (batch, *, hid)
-        :param query_context: (batch, *, attention_dim)
-        :return:
-        """
-        # compliant_weights: (batch, *, max_seq, V)
-        compliant_weights = self._tt(symbols).bool()
-
-        # symbol_emb: (batch, *, max_seq, emb)
-        symbol_emb = self._embedder(symbols)
-
-        seq_size = symbol_emb.size()[-2]
-        exp_ts = expand_tensor_size_at_dim(tree_state, seq_size, dim=-2)
-        exp_qc = expand_tensor_size_at_dim(query_context, seq_size, dim=-2)
-        proj_inp = torch.cat([symbol_emb, exp_ts, exp_qc], dim=-1)
-        # exact_logit: (batch, *, V)
-        exact_logit = self._exact_token_predictor(proj_inp)
-        # exact_logit = exact_logit + (compliant_weights + tiny_value_of_dtype(exact_logit.dtype)).log()
-        if (self.training and self.masked_exact_token_training) or (not self.training and self.masked_exact_token_testing):
-            exact_logit = exact_logit.masked_fill(~compliant_weights, min_value_of_dtype(exact_logit.dtype))
-        return exact_logit
 
     def update_pda_with_predictions(self, parent_idx: LT, symbol: LT, p_growth: LT, symbol_mask: LT, lhs_mask: NullOrLT):
         """

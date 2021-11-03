@@ -8,6 +8,7 @@ from trialbot.utils.root_finder import find_root
 
 sys.path.insert(0, osp.abspath(osp.join(osp.dirname(__file__), '..', '..')))
 import datasets.cfq_translator
+import datasets.cg_bundle_translator
 
 @Registry.hparamset()
 def cfq_pda():
@@ -24,7 +25,7 @@ def cfq_pda():
     p.GRAD_CLIPPING = .2    # grad norm required to be <= 2
 
     p.src_ns = 'questionPatternModEntities'
-    p.tgt_ns = datasets.cfq_translator.UNIFIED_TREE_NS
+    p.tgt_ns = datasets.cfq_translator.TREE_NS
 
     # transformer requires input embedding equal to hidden size
     p.encoder = "bilstm"
@@ -62,12 +63,6 @@ def cfq_pda():
 
     # ----------- end of tree settings -------------
 
-    p.exact_token_predictor = "quant" # linear, mos, quant
-    p.num_exact_token_mixture = 1
-    p.exact_token_quant_criterion = "dot_product"
-    p.masked_exact_token_training = True
-    p.masked_exact_token_testing = True
-
     p.rule_scorer = "triple_inner_product" # heuristic, mlp, (triple|concat|add_inner_product)
     return p
 
@@ -85,7 +80,7 @@ def sql_pda():
     p.GRAD_CLIPPING = 1    # grad norm required to be <= 2
 
     p.src_ns = 'sent'
-    p.tgt_ns = datasets.cfq_translator.UNIFIED_TREE_NS
+    p.tgt_ns = datasets.cg_bundle_translator.TREE_NS
 
     # transformer requires input embedding equal to hidden size
     p.encoder = "lstm"
@@ -119,13 +114,6 @@ def sql_pda():
     p.use_attn_residual_norm = True
 
     # ----------- end of tree settings -------------
-
-    p.exact_token_predictor = "mos"               # linear, mos, quant
-    p.num_exact_token_mixture = 10                   # used by mos predictor
-    p.exact_token_quant_criterion = "dot_product"   # distance, projection, dot_product, used by quant predictor
-    p.masked_exact_token_training = False
-    p.masked_exact_token_testing = False
-
     p.rule_scorer = "add_inner_product"  # heuristic, mlp, (triple|concat|add_inner_product)
     return p
 

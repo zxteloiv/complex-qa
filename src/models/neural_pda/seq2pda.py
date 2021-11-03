@@ -25,10 +25,8 @@ class Seq2PDA(nn.Module):
 
                  # configuration
                  src_ns: str,
-                 tgt_ns: List[str],
+                 tgt_ns: str,
                  vocab,
-
-                 exact_token_loss_weight: float = 1.0
                  ):
         super().__init__()
         self.encoder = encoder
@@ -37,29 +35,20 @@ class Seq2PDA(nn.Module):
         self.enc_attn_mapping = enc_attn_mapping
         self.npda = npda
 
-        self.token_loss = Average()
         self.topo_loss = Average()
         self.count_metric = 0
         self.err = Average()
-        self.detail_err = (Average(), Average())
         self.tok_pad = 0
         self.src_ns = src_ns
         self.tgt_ns = tgt_ns
         self.logger = logging.getLogger(self.__class__.__name__)
         self.vocab: NSVocabulary = vocab
 
-        self.token_loss_weight = exact_token_loss_weight
-
     def get_metric(self, reset=False):
-        token_loss = self.token_loss.get_metric(reset)
         topo_loss = self.topo_loss.get_metric(reset)
         count = self.count_metric
         err = self.err.get_metric(reset)
-        topo_err, token_err = [m.get_metric(reset) for m in self.detail_err]
-        output = {"TokenLoss": token_loss, "TopoLoss": topo_loss,
-                  "ERR": err, "ERR_TOPO": topo_err, "ERR_TOKN": token_err,
-                  "COUNT": count}
-
+        output = {"Loss": topo_loss, "ERR": err, "COUNT": count}
         if reset:
             self.count_metric = 0
         return output
@@ -87,21 +76,18 @@ class Seq2PDA(nn.Module):
                                    node_parents,  # (batch, n_d),
                                    expansion_frontiers,  # (batch, n_d, max_runtime_stack_size),
                                    derivations,  # (batch, n_d, max_seq), the gold derivations for choice checking
-                                   exact_tokens, # (batch, n_d, max_seq)
-                                   target_tokens, # (batch, max_tgt_len)
                                    ):
         enc_attn_fn = self._encode_source(source_tokens)
         self.npda.init_automata(source_tokens.size()[0], source_tokens.device, enc_attn_fn)
 
         # ================
         # opt_prob: (batch, n_d, opt_num)
-        # exact_logit: (batch, n_d, max_seq, V)
         # tree_grammar: (batch, n_d, opt_num, 4, max_seq)
-        opt_prob, exact_logit, tree_grammar = self.npda(model_function="parallel",
-                                                        tree_nodes=tree_nodes,
-                                                        node_parents=node_parents,
-                                                        expansion_frontiers=expansion_frontiers,
-                                                        derivations=derivations)
+        opt_prob = self.npda(model_function="parallel",
+                             tree_nodes=tree_nodes,
+                             node_parents=node_parents,
+                             expansion_frontiers=expansion_frontiers)
+        tree_grammar = self.npda.get_grammar(tree_nodes)
 
         # --------------- 1. training the topological choice --------------
         # valid_symbols, symbol_mask: (batch, n_d, opt_num, max_seq)
@@ -117,29 +103,16 @@ class Seq2PDA(nn.Module):
         topo_loss = (nll * tree_mask).sum() / (tree_mask.sum() + 1e-15)
         # topo_loss = (nll * tree_mask).sum() / (10 * source_tokens.size()[0])
 
-        # ------------- 2. training the exact token prediction ------------
-        # *_loss: (batch, n_d)
-        _, et_mask = prepare_input_mask(exact_tokens)
-        tok_nll = -F.log_softmax(exact_logit, dim=-1).gather(dim=-1, index=exact_tokens.unsqueeze(-1)).squeeze(-1)
-        # token_loss = seq_cross_ent(exact_logit, exact_tokens, et_mask, average="token")
-        # token_loss = (tok_nll * et_mask).sum() / (10 * source_tokens.size()[0])
-        token_loss = (tok_nll * et_mask).sum() / (et_mask.sum() + 1e-15)
-
         # ------------- 3. error metric computation -------------
         # *_err: (batch,)
         topo_pos_err = ((opt_prob.argmax(dim=-1) != choice) * tree_mask)
         topo_err = topo_pos_err.sum(dim=-1) + (1 - choice_validity.int())
-        token_pos_err = ((exact_logit.argmax(dim=-1) != exact_tokens) * et_mask)
-        token_err = token_pos_err.sum([1, 2])
-        for e1, e2 in zip(topo_err, token_err):
-            self.err(1. if e1 + e2 > 0 else 0.)
-            self.detail_err[0](1. if e1 > 0 else 0.)
-            self.detail_err[1](1. if e2 > 0 else 0.)
+        for e in topo_err:
+            self.err(1. if e > 0 else 0.)
         self.count_metric += (choice_validity > 0).sum().item()
 
         # ================
-        output = {"loss": topo_loss + self.token_loss_weight * token_loss}
-        self.token_loss(token_loss)
+        output = {"loss": topo_loss}
         self.topo_loss(topo_loss)
         self.npda.reset_automata()
         return output
@@ -162,8 +135,6 @@ class Seq2PDA(nn.Module):
                             node_parents,  # (batch, n_d),
                             expansion_frontiers,  # (batch, n_d, max_runtime_stack_size),
                             derivations,  # (batch, n_d, max_seq), the gold derivations for choice checking
-                            exact_tokens,  # (batch, n_d, max_seq)
-                            target_tokens,  # (batch, max_tgt_len)
                             ):
         enc_attn_fn = self._encode_source(source_tokens)
         self.npda.init_automata(source_tokens.size()[0], source_tokens.device, enc_attn_fn)
@@ -178,9 +149,8 @@ class Seq2PDA(nn.Module):
 
         self.npda.reset_automata()
         output = {
-
         }
-        pass
+        return output
 
     def forward_inference(self,
                           source_tokens: LT,  # (batch, src_len)
@@ -188,7 +158,6 @@ class Seq2PDA(nn.Module):
                           node_parents,  # (batch, n_d),
                           expansion_frontiers,  # (batch, n_d, max_runtime_stack_size),
                           derivations,  # (batch, n_d, max_seq), the gold derivations for choice checking
-                          exact_tokens,  # (batch, n_d, max_seq)
                           target_tokens,  # (batch, max_tgt_len)
                           ):
         batch_sz, device = source_tokens.size()[0], source_tokens.device
@@ -196,7 +165,6 @@ class Seq2PDA(nn.Module):
         _, max_derivation_num, max_rule_size = derivations.size()
         self.npda.init_automata(batch_sz, device, enc_attn_fn, max_derivation_step=max_derivation_num)
 
-        token_stack = TensorBatchStack(batch_sz, 500, item_size=1, dtype=torch.long, device=device)
         symbol_stack = TensorBatchStack(batch_sz, 1000, item_size=1, dtype=torch.long, device=device)
         symbol_list = []
         while self.npda.continue_derivation():
@@ -204,16 +172,12 @@ class Seq2PDA(nn.Module):
 
             predicted_symbol, predicted_p_growth, predicted_mask = self._infer_topology_greedily(opt_prob, grammar_guide)
             symbol_list.append(predicted_symbol)
-            self._arrange_predicted_tokens(token_stack, exact_token_logit, lhs_mask, predicted_p_growth, predicted_mask)
             self._arrange_predicted_symbols(symbol_stack, lhs_mask, predicted_symbol, predicted_mask)
             self.npda.update_pda_with_predictions(lhs_idx, predicted_symbol, predicted_p_growth, predicted_mask, lhs_mask)
 
         predictions = torch.stack([F.pad(t, [0, max_rule_size - t.size()[-1]]) for t in symbol_list], dim=1)
         # compute metrics
-        self._compute_err(token_stack, target_tokens)
-
-        exact_tokens, token_mask = token_stack.dump()
-        exact_tokens = exact_tokens.squeeze(-1)
+        # self._compute_err(token_stack, target_tokens)
 
         symbols, symbol_mask = symbol_stack.dump()
         symbols = symbols.squeeze(-1)
@@ -221,23 +185,13 @@ class Seq2PDA(nn.Module):
         output = {
             "source": source_tokens,
             "target": target_tokens,
-            "prediction": exact_tokens * token_mask,
+            # "prediction": exact_tokens * token_mask,
             "symbols": symbols * symbol_mask,
             "rhs_symbols": tree_nodes,
         }
 
         self.npda.reset_automata()
         return output
-
-    def _arrange_predicted_tokens(self, stack: TensorBatchStack,
-                                  exact_token_logit, lhs_mask,
-                                  predicted_p_growth, predicted_mask,):
-        # predicted_tokens: (batch, seq)
-        predicted_tokens = exact_token_logit.argmax(dim=-1)
-
-        for step in range(predicted_tokens.size()[-1]):
-            push_mask = (predicted_p_growth[:, step] == 0) * predicted_mask[:, step] * lhs_mask
-            stack.push(predicted_tokens[:, step].unsqueeze(-1), push_mask.long())
 
     def _arrange_predicted_symbols(self, stack: TensorBatchStack, lhs_mask, predicted_symbols, predicted_mask):
         # predicted_symbols: (batch, seq)
@@ -279,10 +233,10 @@ class Seq2PDA(nn.Module):
 
     def make_human_readable_output(self, output):
         output['source_surface'] = make_human_readable_text(output['source'], self.vocab, self.src_ns)
-        output['target_surface'] = make_human_readable_text(output['target'], self.vocab, self.tgt_ns[1])
-        output['prediction_surface'] = make_human_readable_text(output['prediction'], self.vocab, self.tgt_ns[1])
-        output['symbol_surface'] = make_human_readable_text(output['symbols'], self.vocab, self.tgt_ns[0])
-        output['rhs_symbol_surface'] = make_human_readable_text(output['rhs_symbols'], self.vocab, self.tgt_ns[0])
+        # output['target_surface'] = make_human_readable_text(output['target'], self.vocab, self.tgt_ns[1])
+        # output['prediction_surface'] = make_human_readable_text(output['prediction'], self.vocab, self.tgt_ns[1])
+        # output['symbol_surface'] = make_human_readable_text(output['symbols'], self.vocab, self.tgt_ns[0])
+        # output['rhs_symbol_surface'] = make_human_readable_text(output['rhs_symbols'], self.vocab, self.tgt_ns[0])
         return output
 
 

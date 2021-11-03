@@ -2,14 +2,13 @@ from typing import List, Mapping, Generator, Tuple, Optional, Any, Literal, Iter
 from itertools import product
 from collections import defaultdict
 import torch
-from torch.nn.utils.rnn import pad_sequence
 from trialbot.data.field import Field
-from trialbot.data.translator import FieldAwareTranslator
 from trialbot.data.fields.seq_field import SeqField
 import lark
 from trialbot.data import START_SYMBOL, END_SYMBOL
 from utils.preprocessing import nested_list_numbers_to_tensors
-_Tree, _Token = lark.Tree, lark.Token
+from utils.tree import Tree, PreorderTraverse
+from utils.lark.id_tree import build_from_lark_tree
 
 
 class GrammarPatternSeqField(SeqField):
@@ -78,134 +77,84 @@ class GrammarModEntSeqField(GrammarPatternSeqField):
             return tok
 
 
-class MidOrderTraversalField(Field):
+class TreeTraversalField(Field):
     def __init__(self, tree_key: str,
-                 namespaces: Iterable[str],
-                 max_derivation_symbols: int,
+                 namespace: str,
                  output_keys: Optional[List[str]] = None,
                  padding: int = 0,
-                 grammar_token_generation: bool = False,
                  ):
         super().__init__()
         self.tree_key = tree_key
-        self.namespaces = list(namespaces) or ('symbols', 'exact_token')
+        self.ns = namespace or 'symbols'
         self.padding = padding
-        self.max_derivation_symbols = max_derivation_symbols
-        self.grammar_token_generation = grammar_token_generation
         self.output_keys: List[str] = output_keys or [
             'tree_nodes',           # (batch, n_d), the tree nodes, i.e., all the expanded lhs
             'node_parents',         # (batch, n_d),
             'expansion_frontiers',  # (batch, n_d, max_runtime_stack_size),
             'derivations',          # (batch, n_d, max_seq), the gold derivations, actually num_derivations = num_lhs
-            'exact_tokens',         # (batch, n_d, max_seq),
-            'target_tokens',        # (batch, tgt_len),
         ]
 
     def batch_tensor_by_key(self, tensors_by_keys: Mapping[str, List[torch.Tensor]]) -> Mapping[str, torch.Tensor]:
         output = dict()
         for k in self.output_keys:
             tensor_list = tensors_by_keys[k]
-            output[k] = nested_list_numbers_to_tensors(tensor_list)
+            output[k] = nested_list_numbers_to_tensors(tensor_list, padding=self.padding)
         return output
 
     def generate_namespace_tokens(self, example) -> Generator[Tuple[str, str], None, None]:
         tree: lark.Tree = example.get(self.tree_key)
-        ns_s, ns_et = self.namespaces
         if tree is not None:
-            for subtree in tree.iter_subtrees_topdown():
-                if self.grammar_token_generation:
-                    yield ns_s, subtree.data
-                    yield ns_s, START_SYMBOL
-                yield ns_et, START_SYMBOL
-                for c in subtree.children:
-                    if isinstance(c, lark.Token):
-                        if self.grammar_token_generation:
-                            yield ns_s, c.type
-                        yield ns_et, c.value.lower()
+            id_tree = build_from_lark_tree(tree, add_eps_nodes=True)
+            for node in PreorderTraverse()(id_tree):
+                yield from product([self.ns], [node.label, END_SYMBOL])
 
-    def to_tensor(self, example) -> Mapping[str, torch.Tensor]:
-        tree: _Tree = example.get(self.tree_key)
+    def to_tensor(self, example) -> Mapping[str, Optional[list]]:
+        tree = example.get(self.tree_key)
         if tree is None:
             return dict((k, None) for k in self.output_keys)
 
-        # to get the symbol_id and the exact_token id from a token string
-        s_id = lambda t: self.vocab.get_token_index(t, self.namespaces[0])
-        et_id = lambda t: self.vocab.get_token_index(t, self.namespaces[1])
-        is_tree = lambda s: isinstance(s, _Tree)
-
-        tree_nodes = []
-        node_parent = []
-        frontiers = []
-        derivations = []
-        exact_tokens = []
-        target_tokens = []
-
+        # convert the lark tree to the decorated tree with IDs and eps rule expansions.
+        id_tree = build_from_lark_tree(tree, add_eps_nodes=True)
         # pre-assign an ID, otherwise the system won't work
         # IDs are allocated in the left-most derivation order
-        _id = 0
-        def _assign_id_to_tree(t: _Tree):
-            nonlocal _id
-            t.id = _id
-            _id += 1
-            for c in t.children:
-                if is_tree(c):
-                    _assign_id_to_tree(c)
+        id_tree: Tree = id_tree.assign_node_id(PreorderTraverse())
 
-        _assign_id_to_tree(tree)
+        # to get the symbol_id and the exact_token id from a token string
+        s_id = lambda t: self.vocab.get_token_index(t, self.ns)
 
-        tree_node_id_set = set()
-
+        tree_nodes, node_parent, frontiers, derivations = [], [], [], []
         # traverse again the tree in the order of left-most derivation
-        op_stack: List[Tuple[int, _Tree]] = [(0, tree)]
+        tree_node_id_set = set()
+        op_stack: List[Tuple[int, Tree]] = [(0, id_tree)]
         while len(op_stack) > 0:
             parent_id, node = op_stack.pop()
-            tree_nodes.append(s_id(node.data))
+            tree_nodes.append(s_id(node.label))
             node_parent.append(parent_id)
 
-            children: List[Union[_Tree, _Token]] = node.children
-            _expansion = [s_id(START_SYMBOL)] + [s_id(s.data) if is_tree(s) else s_id(s.type) for s in children]
-            _etokens = [et_id(START_SYMBOL)] + [et_id(s.value.lower()) if not is_tree(s) else self.padding for s in children]
+            _expansion = [s_id(c.label) for c in node.children] + [s_id(END_SYMBOL)]
             derivations.append(_expansion)
-            exact_tokens.append(_etokens)
-            target_tokens.extend(list(filter(lambda t: t != self.padding, _etokens)))
 
-            tree_node_id_set.add(node.id)
+            tree_node_id_set.add(node.node_id)
             frontiers.append([x for x in tree_node_id_set if x not in node_parent])
             # the expanded nodes will all get attended over
-            tree_node_id_set.update([n.id for n in children if is_tree(n)])
+            tree_node_id_set.update([c.node_id for c in node.children])
 
-            for c in reversed(children):
-                if is_tree(c):
-                    op_stack.append((node.id, c))
+            for c in reversed(node.children):
+                op_stack.append((node.node_id, c))
 
         frontiers[0].append(0)
 
-        output = dict(zip(self.output_keys, (
-            tree_nodes,
-            node_parent,
-            frontiers,
-            derivations,
-            exact_tokens,
-            target_tokens
-        )))
-
+        output = dict(zip(self.output_keys, (tree_nodes, node_parent, frontiers, derivations)))
         return output
 
 
 class TutorBuilderField(Field):
-    def __init__(self, tree_key: str, ns: Tuple[str, str]):
+    def __init__(self, tree_key: str, ns: str):
         super().__init__()
         self.tree_key = tree_key
         self.ns = ns
 
     def batch_tensor_by_key(self, tensors_by_keys: Mapping[str, List[DefaultDict]]) -> Mapping[str, DefaultDict]:
-        token_map = defaultdict(set)
-        for m in tensors_by_keys['token_map']:
-            if m is None:
-                continue
-            for symbol, tokens in m.items():
-                token_map[symbol].update(tokens)
-
         grammar_map = defaultdict(set)
         for m in tensors_by_keys['grammar_map']:
             if m is None:
@@ -213,40 +162,27 @@ class TutorBuilderField(Field):
             for lhs, rhs_list in m.items():
                 grammar_map[lhs].update(rhs_list)
 
-        return {"token_map": token_map, "grammar_map": grammar_map}
+        return {"grammar_map": grammar_map}
 
-    def to_tensor(self, example) -> Mapping[str, DefaultDict[int, list]]:
-        tree: _Tree = example.get(self.tree_key)
+    def to_tensor(self, example) -> Mapping[str, Optional[DefaultDict[int, set]]]:
+        tree = example.get(self.tree_key)
         if tree is None:
-            return {"token_map": None, "grammar_map": None}
+            return {"grammar_map": None}
 
-        token_map = defaultdict(set)
-        for k, v in self._generate_exact_token_mapping(tree):
-            token_map[k].add(v)
-
+        id_tree = build_from_lark_tree(tree, add_eps_nodes=True)
         grammar_map = defaultdict(set)
-        for lhs, grammar in self._traverse_tree_for_derivations(tree):
+        for lhs, grammar in self._traverse_tree_for_derivations(id_tree):
             grammar_map[lhs].add(grammar)
 
-        return {"token_map": token_map, "grammar_map": grammar_map}
+        return {"grammar_map": grammar_map}
 
-    def _generate_exact_token_mapping(self, tree: _Tree):
-        s_id = lambda t: self.vocab.get_token_index(t, self.ns[0])
-        et_id = lambda t: self.vocab.get_token_index(t, self.ns[1])
-        yield s_id(START_SYMBOL), et_id(START_SYMBOL)
-        for subtree in tree.iter_subtrees_topdown():
-            for s in subtree.children:
-                if isinstance(s, _Token):
-                    yield s_id(s.type), et_id(s.value.lower())
-
-    def _traverse_tree_for_derivations(self, tree: _Tree):
-        is_tree = lambda s: isinstance(s, _Tree)
-        s_id = lambda t: self.vocab.get_token_index(t, self.ns[0])
-        for subtree in tree.iter_subtrees_topdown():
-            children: List[Union[_Tree, _Token]] = subtree.children
-            lhs = s_id(subtree.data)
-            rhs = [s_id(START_SYMBOL)] + [s_id(s.data) if is_tree(s) else s_id(s.type) for s in children]
-            p_growth = [0] + [1 if is_tree(s) else 0 for s in children]
+    def _traverse_tree_for_derivations(self, tree: Tree):
+        s_id = lambda t: self.vocab.get_token_index(t, self.ns)
+        for node in PreorderTraverse()(tree):
+            children: List[Tree] = node.children
+            lhs = s_id(node.label)
+            rhs = [s_id(c.label) for c in children] + [s_id(END_SYMBOL)]
+            p_growth = [0 if c.is_terminal else 1 for c in children] + [0]
             f_growth = [1] * (len(rhs) - 1) + [0]
             mask = [1] * len(rhs)
             grammar = [rhs, p_growth, f_growth, mask]

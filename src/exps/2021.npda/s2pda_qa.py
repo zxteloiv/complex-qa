@@ -26,7 +26,7 @@ import datasets.cg_bundle_translator as sql_translator
 import s2pda_hparams
 
 
-def get_tutor_from_train_set(p, vocab, train_set, dataset_name: str):
+def get_tutor_from_train_set(vocab, train_set, dataset_name: str):
     builder = cfq_translator.CFQTutorBuilder() if 'cfq_' in dataset_name else sql_translator.SQLTutorBuilder()
     builder.index_with_vocab(vocab)
     tutor_repr = builder.batch_tensor([builder.to_tensor(example) for example in tqdm(train_set)])
@@ -34,20 +34,13 @@ def get_tutor_from_train_set(p, vocab, train_set, dataset_name: str):
 
 
 def build_tutor_objects(tgt_ns, vocab, tutor_repr):
-    from models.neural_pda.token_tutor import ExactTokenTutor
     from models.neural_pda.grammar_tutor import GrammarTutor
     from utils.preprocessing import nested_list_numbers_to_tensors
-    ns_s, ns_et = tgt_ns
-    token_map: defaultdict
-    grammar_map: defaultdict
-    token_map, grammar_map = map(tutor_repr.get, ('token_map', 'grammar_map'))
-    ett = ExactTokenTutor(vocab.get_vocab_size(ns_s), vocab.get_vocab_size(ns_et), token_map, False)
-
+    grammar_map: defaultdict = tutor_repr.get('grammar_map')
     ordered_lhs, ordered_rhs_options = list(zip(*grammar_map.items()))
     ordered_rhs_options = nested_list_numbers_to_tensors(ordered_rhs_options)
-    gt = GrammarTutor(vocab.get_vocab_size(ns_s), ordered_lhs, ordered_rhs_options)
-
-    return ett, gt
+    gt = GrammarTutor(vocab.get_vocab_size(tgt_ns), ordered_lhs, ordered_rhs_options)
+    return gt
 
 
 def init_tailored_tutor(p, vocab, *, dataset_name: str):
@@ -59,7 +52,7 @@ def init_tailored_tutor(p, vocab, *, dataset_name: str):
         tutor_repr = pickle.load(open(tutor_dump_name, 'rb'))
     else:
         logging.getLogger(__name__).info(f"Build the tutor dump for the first time...")
-        tutor_repr = get_tutor_from_train_set(p, vocab, Registry.get_dataset(dataset_name)[0], dataset_name)
+        tutor_repr = get_tutor_from_train_set(vocab, Registry.get_dataset(dataset_name)[0], dataset_name)
 
         if tutor_dump_name is not None:
             logging.getLogger(__name__).info(f"Dump the tutor information... {tutor_dump_name}")
@@ -160,10 +153,8 @@ def get_model(p, vocab: NSVocabulary, *, dataset_name: str):
     from models.neural_pda.npda import NeuralPDA
     from models.base_s2s.stacked_encoder import StackedEncoder
     from models.modules.attention_wrapper import get_wrapped_attention
-    from models.modules.quantized_token_predictor import QuantTokenPredictor
     from models.base_s2s.stacked_rnn_cell import StackedRNNCell, StackedLSTMCell
     from models.modules.container import MultiInputsSequential, UnpackedInputsSequential, SelectArgsById
-    from models.modules.mixture_softmax import MoSProjection
     from allennlp.nn.activations import Activation
 
     from models.transformer.encoder import TransformerEncoder
@@ -192,24 +183,7 @@ def get_model(p, vocab: NSVocabulary, *, dataset_name: str):
     encoder = StackedEncoder([enc_cls(floor) for floor in range(p.num_enc_layers)], input_dropout=0.)
     emb_src = nn.Embedding(vocab.get_vocab_size(p.src_ns), embedding_dim=p.enc_sz)
 
-    ns_s, ns_et = p.tgt_ns
-    emb_s = nn.Embedding(vocab.get_vocab_size(ns_s), p.emb_sz)
-
-    if p.exact_token_predictor == "linear":
-        exact_token_predictor = nn.Sequential(
-            nn.Linear(p.hidden_sz + p.hidden_sz + p.emb_sz, vocab.get_vocab_size(ns_et)),
-        )
-    elif p.exact_token_predictor == "quant":
-        exact_token_predictor = QuantTokenPredictor(
-            vocab.get_vocab_size(ns_et), p.hidden_sz + p.hidden_sz + p.emb_sz,
-            quant_criterion=p.exact_token_quant_criterion,
-        )
-    else:
-        exact_token_predictor = MoSProjection(
-            p.num_exact_token_mixture, p.hidden_sz + p.hidden_sz + p.emb_sz, vocab.get_vocab_size(ns_et),
-        )
-
-    ett, gt = init_tailored_tutor(p, vocab, dataset_name=dataset_name)
+    emb_s = nn.Embedding(vocab.get_vocab_size(p.tgt_ns), p.emb_sz)
 
     npda = NeuralPDA(
         symbol_embedding=emb_s,
@@ -220,14 +194,9 @@ def get_model(p, vocab: NSVocabulary, *, dataset_name: str):
             nn.LayerNorm(p.hidden_sz),  # rule embedding has the hidden_size
             nn.Tanh(),
         ) if p.emb_sz != p.hidden_sz else Activation.by_name('linear')(),   # `linear` returns the identity function
-        grammar_tutor=gt,
+        grammar_tutor=init_tailored_tutor(p, vocab, dataset_name=dataset_name),
         rhs_expander=StackedLSTMCell(p.emb_sz + 1, p.hidden_sz, p.num_expander_layer, dropout=p.dropout),
-
         rule_scorer=get_rule_scorer(p, vocab),
-
-        exact_token_predictor=exact_token_predictor,
-        token_tutor=ett,
-
         pre_tree_encoder=get_tree_encoder(p, vocab),
         pre_tree_self_attn=UnpackedInputsSequential(
             get_wrapped_attention(p.tree_self_attn, p.hidden_sz, p.hidden_sz,
@@ -240,10 +209,8 @@ def get_model(p, vocab: NSVocabulary, *, dataset_name: str):
         ),
         residual_norm_after_self_attn=nn.LayerNorm(p.hidden_sz) if p.use_attn_residual_norm else None,
 
-        grammar_entry=vocab.get_token_index(p.grammar_entry, ns_s),
+        grammar_entry=vocab.get_token_index(p.grammar_entry, p.tgt_ns),
         max_derivation_step=p.max_derivation_step,
-        masked_exact_token_training=p.masked_exact_token_training,
-        masked_exact_token_testing=p.masked_exact_token_testing,
     )
 
     enc_attn_net = UnpackedInputsSequential(
