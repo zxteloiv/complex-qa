@@ -13,13 +13,13 @@ def process_tranx_log(data: List[str]):
         test_metrics = grep(grep(g, 'Testing Metrics'), '{.*}', only_matched_text=True)[-1]
         g_m = tuple()
         g_m = g_m + tuple(json.loads(x)['ERR'] for x in (train_metrics, dev_metrics, test_metrics))
-        g_m = g_m + tuple(json.loads(x)['ERR_TOPO'] for x in (train_metrics, dev_metrics, test_metrics))
-        g_m = g_m + tuple(json.loads(x)['ERR_TOKN'] for x in (train_metrics, dev_metrics, test_metrics))
+        # g_m = g_m + tuple(json.loads(x)['ERR_TOPO'] for x in (train_metrics, dev_metrics, test_metrics))
+        # g_m = g_m + tuple(json.loads(x)['ERR_TOKN'] for x in (train_metrics, dev_metrics, test_metrics))
         metrics.append(g_m)
 
     print("\t".join(('epoch', 'train-err', 'dev-err', 'test-err',
-                     'train-err-topo', 'dev-err-topo', 'test-err-topo',
-                     'train-err-tokn', 'dev-err-tokn', 'test-err-tokn',
+                     # 'train-err-topo', 'dev-err-topo', 'test-err-topo',
+                     # 'train-err-tokn', 'dev-err-tokn', 'test-err-tokn',
                      )))
     print("\n".join(("%d" + ('\t%.4f' * len(m))) % ((i,) + tuple(m)) for i, m in enumerate(metrics)))
 

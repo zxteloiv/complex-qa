@@ -85,7 +85,7 @@ def sql_pda():
     # transformer requires input embedding equal to hidden size
     p.encoder = "lstm"
     p.num_enc_layers = 2
-    p.overall_dim = 128
+    p.overall_dim = 256
     p.enc_sz = p.overall_dim
     p.emb_sz = p.overall_dim
     p.hidden_sz = p.overall_dim

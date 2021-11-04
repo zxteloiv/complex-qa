@@ -102,6 +102,7 @@ class Seq2PDA(nn.Module):
         # use a sensitive loss such that the grad won't get discounted by the factor of 0-loss items
         topo_loss = (nll * tree_mask).sum() / (tree_mask.sum() + 1e-15)
         # topo_loss = (nll * tree_mask).sum() / (10 * source_tokens.size()[0])
+        # topo_loss = ((nll * tree_mask).sum(-1) / (tree_mask.sum(-1) + 1e-15)).mean()
 
         # ------------- 3. error metric computation -------------
         # *_err: (batch,)
