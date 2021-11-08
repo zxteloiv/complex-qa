@@ -1,6 +1,7 @@
 from trialbot.training import TrialBot
 import math
 from datetime import datetime
+from copy import copy
 from trialbot.utils.move_to_device import move_to_device
 import os.path
 import gc
@@ -100,7 +101,7 @@ def evaluation_on_dev_every_epoch(bot: TrialBot, interval: int = 1,
         else:
             bot.logger.info("Running for evaluation metrics ...")
 
-        dataset, hparams = bot.dev_set, bot.hparams
+        dataset, hparams = bot.dev_set, copy(bot.hparams)
         rewrite_eval_hparams = rewrite_eval_hparams or dict()
         for k, v in rewrite_eval_hparams.items():
             setattr(hparams, k, v)

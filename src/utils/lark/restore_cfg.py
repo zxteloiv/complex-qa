@@ -44,6 +44,7 @@ def export_grammar(g: cfg.T_CFG,
                    lex_in: Optional[str] = None,
                    export_terminal_vals: Optional[dict] = None,
                    excluded_terminals=None,
+                   treat_terminals_as_categories: bool = False,
                    remove_eps: bool = True,
                    remove_useless: bool = True,
                    remove_unit_rules: bool = False,
@@ -61,7 +62,14 @@ def export_grammar(g: cfg.T_CFG,
 
     for lhs, rhs_list in g.items():
         print(f"{lhs.name}: " + ('\n' + (' ' * len(lhs.name)) + '| ').join(
-            ' '.join(f"P{t.name}" if t.name.startswith('_') else t.name for t in rhs)
+            ' '.join(
+                (
+                    (f"P{t.name}" if t.name.startswith('_') else t.name)
+                    if treat_terminals_as_categories else f'"{t.name}"'
+                )
+                if isinstance(t, cfg.Terminal) else t.name
+                for t in rhs
+            )
             for rhs in rhs_list
         ), file=grammar_text)
 

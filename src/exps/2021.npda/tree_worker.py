@@ -1,18 +1,14 @@
 from typing import Callable, Optional, List, Union, Tuple
-import lark
 from enum import IntEnum, auto
 import logging
-
-TREE, TOKEN = lark.Tree, lark.Token
-is_tree = lambda s: isinstance(s, TREE)
+from utils.tree import Tree, PreorderTraverse
 
 
-def enrich_tree(tree: TREE, parent=None) -> TREE:
-    tree.parent = parent
-    for c in tree.children:
-        if is_tree(c):
-            enrich_tree(c, parent=tree)
-    return tree
+def build_parent_link(t: Tree, parent=None) -> Tree:
+    t.parent = parent
+    for c in t.children:
+        build_parent_link(c, parent=t)
+    return t
 
 
 class NodeAction(IntEnum):
@@ -25,56 +21,49 @@ class NodeAction(IntEnum):
     R_DESC = auto()
 
 
-def modify_tree(tree: TREE, node_idx: int, action_id: int) -> bool:
+def modify_tree(t: Tree, node_idx: int, action_id: int) -> bool:
     actions = [intact, del_self, add_parent, left_rotate, right_rotate, left_descent, right_descent]
+    t = build_parent_link(t)
 
     try:
-        node, route = find_node_by_idx(tree, node_idx)
-        foo: Callable[[TREE, List[int]], None] = actions[action_id]
+        node, route = find_node_by_idx(t, node_idx)
+        if node.is_terminal:
+            raise ValueError(f'the terminal node {node_idx}:{node.label} shall not be modified')
+        foo: Callable[[Tree, List[int]], None] = actions[action_id]
         foo(node, route)
     except ValueError as e:
         logging.getLogger(__name__).warning(str(e))
         return False
 
-    logging.getLogger(__name__).debug(f"successfully applied tree action {action_id}: {actions[action_id].__name__}")
+    logging.getLogger(__name__).debug(f"successfully applied to {node.label} action {actions[action_id].__name__}")
 
-    enrich_tree(tree)
+    build_parent_link(t)
     return True
 
 
-def intact(node: TREE, route: List[int]) -> None:
+def intact(node: Tree, route: List[int]) -> None:
     return
 
 
-def find_node_by_idx(tree: TREE, idx: int) -> Tuple[TREE, List[int]]:
-    node, node_id, route = None, 0, []
-    op_stack: List[Tuple[TREE, List[int]]] = [(tree, [])]
-    while len(op_stack) > 0:
-        node, route = op_stack.pop()
-        if node_id == idx:
-            break
+def find_node_by_idx(tree: Tree, idx: int) -> Tuple[Tree, List[int]]:
+    id_tree = tree.assign_node_id(PreorderTraverse())
+    id_tree = build_parent_link(id_tree)
 
-        for i, c in reversed(list(enumerate(node.children))):
-            if is_tree(c):
-                op_stack.append((c, route + [i]))
-        node_id += 1
-    else:
-        raise ValueError('node of the specified index not found from the tree')
+    for node, route in PreorderTraverse(output_path=True)(id_tree):
+        if node.node_id == idx:
+            return node, route
 
-    if not is_tree(node):
-        raise ValueError('the node selected is a terminal and shall not be modified')
-
-    return node, route
+    raise ValueError('node of the specified index not found from the tree')
 
 
-def get_parent(node: TREE) -> TREE:
+def get_parent(node: Tree) -> Tree:
     parent = getattr(node, 'parent', None)
     if parent is None:
         raise ValueError('root node must not be modified')
     return parent
 
 
-def get_left_sibling(node: TREE, route: List[int]):
+def get_left_sibling(node: Tree, route: List[int]):
     parent = get_parent(node)
     pos = route[-1]
     if pos == 0:
@@ -82,7 +71,7 @@ def get_left_sibling(node: TREE, route: List[int]):
     return parent.children[pos - 1]
 
 
-def get_right_sibling(node: TREE, route: List[int]):
+def get_right_sibling(node: Tree, route: List[int]):
     parent = get_parent(node)
     pos = route[-1]
     if pos + 1 >= len(parent.children):
@@ -90,43 +79,43 @@ def get_right_sibling(node: TREE, route: List[int]):
     return parent.children[pos + 1]
 
 
-def get_leftmost_child(node: TREE):
-    if not is_tree(node):
-        raise ValueError('the node is not a non-terminal')
+def get_leftmost_child(node: Tree):
+    if node.is_terminal:
+        raise ValueError('the node is a terminal')
     if len(node.children) == 0:
         raise ValueError('children list is empty')
 
     return node.children[0]
 
 
-def get_rightmost_child(node: TREE):
+def get_rightmost_child(node: Tree):
     get_leftmost_child(node)
     return node.children[-1]
 
 
-def del_self(node: TREE, route: List[int]) -> None:
+def del_self(node: Tree, route: List[int]) -> None:
     parent = get_parent(node)
     pos = route[-1]
     parent.children[pos:pos+1] = node.children
     del node
 
 
-def category_generation(node: TREE) -> str:
+def category_generation(node: Tree) -> str:
     max_val = 4
     val = min(len(node.children), max_val)
     return f"anon_nt_{val}"
 
 
-def add_parent(node: TREE, route: List[int]) -> None:
+def add_parent(node: Tree, route: List[int]) -> None:
     parent = get_parent(node)
     pos = route[-1]
-    parent.children[pos] = TREE(category_generation(node), [node])
+    parent.children[pos] = Tree(category_generation(node), is_terminal=False, children=[node])
 
 
-def left_rotate(node: TREE, route: List[int]) -> None:
+def left_rotate(node: Tree, route: List[int]) -> None:
     parent = get_parent(node)
     right = get_rightmost_child(node)
-    if not is_tree(right):
+    if right.is_terminal:
         raise ValueError("Failed to rotate on a terminal pivot")
     pos = route[-1]
     parent.children[pos] = right
@@ -134,10 +123,10 @@ def left_rotate(node: TREE, route: List[int]) -> None:
     right.children.insert(0, node)
 
 
-def right_rotate(node: TREE, route: List[int]) -> None:
+def right_rotate(node: Tree, route: List[int]) -> None:
     parent = get_parent(node)
     left = get_leftmost_child(node)
-    if not is_tree(left):
+    if left.is_terminal:
         raise ValueError("Failed to rotate on a terminal pivot")
     pos = route[-1]
     parent.children[pos] = left
@@ -145,27 +134,29 @@ def right_rotate(node: TREE, route: List[int]) -> None:
     left.children.append(node)
 
 
-def left_descent(node: TREE, route: List[int]) -> None:
+def left_descent(node: Tree, route: List[int]) -> None:
     parent = get_parent(node)
     pos = route[-1]
     left = get_left_sibling(node, route)
-    if not is_tree(left):
+    if left.is_terminal:
         raise ValueError("Failed to rotate on a terminal pivot")
     parent.children = parent.children[:pos] + parent.children[pos + 1:]
     left.children.append(node)
 
 
-def right_descent(node: TREE, route: List[int]) -> None:
+def right_descent(node: Tree, route: List[int]) -> None:
     parent = get_parent(node)
     pos = route[-1]
     right = get_right_sibling(node, route)
-    if not is_tree(right):
+    if right.is_terminal:
         raise ValueError("Failed to rotate on a terminal pivot")
     parent.children = parent.children[:pos] + parent.children[pos + 1:]
     right.children.insert(0, node)
 
 
 if __name__ == '__main__':
+    import lark, sys
+    from utils.lark.id_tree import build_from_lark_tree
     parser = lark.Lark("""
     start: ctok btok*
     ctok: atok ctok*
@@ -173,26 +164,28 @@ if __name__ == '__main__':
     btok: /[bB]/
     """, keep_all_tokens=True)
     s = "aaaabb"
-    tree = enrich_tree(parser.parse(s))
-    print(tree.pretty())
+    sys.path.insert(0, '../..')
+    tree = build_from_lark_tree(parser.parse(s), add_eps_nodes=True).assign_node_id(PreorderTraverse())
+    print(tree)
+    for n, path in PreorderTraverse(output_path=True)(tree):
+        print('    ' * len(path), (n.node_id, n.label))
 
-    for idx in range(11):
-        node, route = find_node_by_idx(tree, idx)
-        print(route, node.data)
 
-    node, route = find_node_by_idx(tree, 5)
+    for n in PreorderTraverse()(tree):
+        print(n.node_id, ":", n.label, '-->', ' '.join(c.immediate_str() for c in n.children))
+
+    node, route = find_node_by_idx(tree, 4)
+    print(node.immediate_str(), route)
 
     # del_self(node, route)
     # add_parent(node, route)
-    # left_rotate(node, route)
+    left_rotate(node, route)
     # right_rotate(node, route)
     # left_descent(node, route)
     # right_descent(node, route)
 
-    enrich_tree(tree)
+    build_parent_link(tree)
+    print(tree)
 
-    print(tree.pretty())
-
-    for idx in range(11):
-        node, route = find_node_by_idx(tree, idx)
-        print(route, node.data)
+    for n in PreorderTraverse()(tree):
+        print(n.node_id, ":", n.label, '-->', ' '.join(c.immediate_str() for c in n.children))

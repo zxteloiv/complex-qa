@@ -181,8 +181,8 @@ class NeuralPDA(nn.Module):
     def _get_derivation_repr(self, tree_nodes, derivations):
         batch_sz, num_symbols, max_rhs_len = derivations.size()
 
-        # init_state: (batch, num_symbols, hid)
-        init_state = self._lhs_symbol_mapper(self._embedder(tree_nodes))
+        # init_state: (batch * num_symbols, hid)
+        init_state = self._lhs_symbol_mapper(self._embedder(tree_nodes)).reshape(batch_sz * num_symbols, -1)
         hx, _ = self._expander.init_hidden_states(assign_stacked_states([init_state], self._expander.get_layer_num()))
 
         mem = SeqCollector()
@@ -200,24 +200,25 @@ class NeuralPDA(nn.Module):
             emb = self._embedder(step_symbol)  # (batch, num_symbols, emb_sz)
             # step_inp: (batch, num_symbols, emb_sz + 1)
             step_inp = torch.cat([emb, same_as_lhs], dim=-1)
-            # step_output: (batch, num_symbols, hid)
-            hx, step_out = self._expander(step_inp, hx)
+            # rs_step_inp: (batch * num_symbols, emb_sz + 1)
+            rs_step_inp = step_inp.reshape(batch_sz * num_symbols, -1)
+            # step_output: (batch * num_symbols, hid)
+            hx, step_out = self._expander(rs_step_inp, hx)
             mem(step_output=step_out)
 
-        # rhs_output: (batch, num_symbols, max_seq, hid)
+        # rhs_output: (batch * num_symbols, max_seq, hid)
         rhs_output = mem.get_stacked_tensor('step_output', dim=-2)
+
         # derivation_mask: (batch, num_symbols, max_seq)
         _, derivations_mask = prepare_input_mask(derivations)
 
         # rule_repr: (batch, num_symbols, hid)
         rule_repr = get_final_encoder_states(
-            rhs_output.reshape(batch_sz * num_symbols, max_rhs_len, -1),
-            derivations_mask.reshape(batch_sz * num_symbols, max_rhs_len)
+            rhs_output, derivations_mask.reshape(batch_sz * num_symbols, max_rhs_len)
         ).reshape(batch_sz, num_symbols, -1)
 
         # rule_mask: (batch, num_symbols)
         rule_mask = derivations_mask.sum(-1) > 0
-
         return rule_repr, rule_mask
 
     def _forward_derivation_step(self):

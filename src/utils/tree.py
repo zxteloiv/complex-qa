@@ -16,34 +16,55 @@ def get_filtered_children_fn(pred, fn: T_CHILDREN_FN) -> T_CHILDREN_FN:
 
 
 class Traversal:
-    def __init__(self, children_fn: Callable[[T], List[T]] = None):
-        self.children_fn: Callable[[T], List[T]] = children_fn or children_by_property
+    def __init__(self, children_fn: T_CHILDREN_FN = None):
+        self.children_fn: T_CHILDREN_FN = children_fn or children_by_property
 
-    def __call__(self, root: T) -> List[T]:
+    def __call__(self, root: T):
         raise NotImplementedError
 
 
 class PreorderTraverse(Traversal):
-    def __init__(self, children_fn=children_by_property):
+    def __init__(self, children_fn: T_CHILDREN_FN = None, output_parent: bool = False, output_path: bool = False):
         super().__init__(children_fn)
+        self.output_parent = output_parent
+        self.output_path = output_path
 
-    def __call__(self, root):
-        yield root
-        for c in self.children_fn(root):
-            yield from self(c)
+    def __call__(self, root: T):
+        yield from self._recursive_call(root, path=[])
+
+    def _recursive_call(self, root: T, parent: T = None, path: List[int] = None):
+        output = [root]
+        if self.output_parent:
+            output.append(parent)
+        if self.output_path:
+            output.append(path)
+        if len(output) == 1:
+            yield output[0]
+        else:
+            yield tuple(output)
+
+        for i, c in enumerate(self.children_fn(root)):
+            yield from self._recursive_call(c, root if self.output_parent else None, path + [i] if self.output_path else None)
 
 
 class Tree(Generic[T]):
     EPS_TOK: str = "%%EPS%%"
 
-    def __init__(self, label: str, is_terminal: bool, children: list = None):
+    def __init__(self, label: str, is_terminal: bool = False, children: list = None, payload = None):
         self.label = label
         self.node_id: int = 0
 
+        # Generally if is_terminal is set True, the children must be empty but we set them independently.
+        # When the children list are empty, is_terminal can be set False because of the EPS rule.
+        # In addition, however, we further differentiate a special situation where is_terminal is True and
+        # the children list contains a single terminal. such as:
+        #     Tree('NAME', is_terminal=True, children=[
+        #         Tree('yuki kajiura', is_terminal=True)
+        #     ])
+        # This is an important use case in the parse trees of many CFG grammars and parsers.
         self.is_terminal = is_terminal
         self.children: List[Tree] = children or []
-        if is_terminal:  # forced to be empty for a terminal
-            self.children: List[Tree] = []
+        self.payload = payload
 
     def __str__(self):
         if len(self.children) == 0:
@@ -59,7 +80,7 @@ class Tree(Generic[T]):
     def has_empty_rhs(self):
         return len(self.children) == 0
 
-    def iter_subtrees_topdown(self):
+    def iter_subtrees_topdown(self) -> Generator['Tree', None, None]:
         """mimic the behavior of a lark.Tree"""
         yield from PreorderTraverse(Tree.get_nt_children_fn())(self)
 
@@ -91,5 +112,15 @@ if __name__ == '__main__':
             print(node.data)
         elif isinstance(node, lark.Token):
             print(node.type, node.value)
+        else:
+            raise NotImplementedError
+
+    for node, node_parent in PreorderTraverse(output_parent=True)(tree):
+        pref = node_parent.data + ' --->' if node_parent is not None else '<gen> --->'
+
+        if isinstance(node, lark.Tree):
+            print(pref, node.data)
+        elif isinstance(node, lark.Token):
+            print(pref, node.type, node.value)
         else:
             raise NotImplementedError

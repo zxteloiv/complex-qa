@@ -11,6 +11,7 @@ from trialbot.data import CompositionalDataset, RedisDataset
 from utils.trialbot.volatile_mem import VolatileDataset
 from utils.trialbot.id_supplement_dataset import IDSupplement
 from utils.trialbot.transform_dataset import TransformData
+from utils.lark.id_tree import build_from_lark_tree
 from .lark_dataset import LarkParserDatasetWrapper
 from trialbot.utils.root_finder import find_root
 import os
@@ -161,8 +162,12 @@ def _get_parsed_ds(data_name: str, *,
     iid_tag = 'iid' if use_iid else 'cg'
 
     def _add_runtime(x):
+        if x.get('sql_tree') is None:
+            x['runtime_tree'] = None
+            return x
+
         if x.get('runtime_tree') is None:
-            x['runtime_tree'] = x.get('sql_tree')
+            x['runtime_tree'] = build_from_lark_tree(x.get('sql_tree'), add_eps_nodes=True)
         return x
 
     def _build_ds(filename: str, split_tag: str):

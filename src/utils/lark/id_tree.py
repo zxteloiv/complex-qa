@@ -4,16 +4,36 @@ import lark
 from utils.tree import Tree, PreorderTraverse
 
 
-def build_from_lark_tree(subtree_or_tok: Union[lark.Tree, lark.Token], add_eps_nodes: bool = False):
+def build_from_lark_tree(subtree_or_tok: Union[lark.Tree, lark.Token],
+                         retain_lark_terminal_categories: bool = False,
+                         add_eps_nodes: bool = False,
+                         retain_lark_node_ref: bool = False):
+    """
+    Convert a lark.Tree object into a plain utils.tree.Tree object.
+    :param subtree_or_tok: Lark object, either a lark.Tree or a lark.Token.
+    :param retain_lark_terminal_categories: if set True, the terminal category and terminal values will be retained
+                        in the lark.Tree, yielding an odd Tree node with is_terminal set to True and non-empty children
+    :param add_eps_nodes:
+    :param retain_lark_node_ref:
+    :return:
+    """
     if isinstance(subtree_or_tok, lark.Token):
-        return Tree(subtree_or_tok.value, is_terminal=True)
+        if retain_lark_terminal_categories:
+            t = Tree(subtree_or_tok.type, is_terminal=True, children=[Tree(subtree_or_tok.value, is_terminal=True)])
+        else:
+            t = Tree(subtree_or_tok.value, is_terminal=True)
 
-    tree = Tree(subtree_or_tok.data, is_terminal=False, children=[
-        Tree(Tree.EPS_TOK, is_terminal=True, children=[])
-    ] if len(subtree_or_tok.children) == 0 and add_eps_nodes else [
-        build_from_lark_tree(c, add_eps_nodes=add_eps_nodes) for c in subtree_or_tok.children
-    ])
-    return tree
+    else:
+        t = Tree(subtree_or_tok.data, is_terminal=False, children=[
+            build_from_lark_tree(c, add_eps_nodes=add_eps_nodes) for c in subtree_or_tok.children
+        ])
+        if len(subtree_or_tok.children) == 0 and add_eps_nodes:
+            t.children = [Tree(Tree.EPS_TOK, is_terminal=True)]
+
+    if retain_lark_node_ref:
+        t.payload = subtree_or_tok
+
+    return t
 
 
 if __name__ == '__main__':

@@ -11,8 +11,10 @@ from trialbot.utils.move_to_device import move_to_device
 from trialbot.training import TrialBot, Registry, Events
 from trialbot.data import NSVocabulary
 from trialbot.training.updater import Updater
+from utils.trialbot.setup import setup
 
-sys.path.insert(0, osp.abspath(osp.join(osp.dirname(__file__), '..', '..')))
+if __name__ == '__main__':
+    sys.path.insert(0, osp.abspath(osp.join(osp.dirname(__file__), '..', '..')))
 
 from utils.select_optim import select_optim
 from trialbot.data.iterators import RandomIterator
@@ -279,7 +281,6 @@ class PDATrainingUpdater(Updater):
 
 
 def main(args=None):
-    from utils.trialbot.setup import setup
     if args is None:
         args = setup(seed=2021)
 

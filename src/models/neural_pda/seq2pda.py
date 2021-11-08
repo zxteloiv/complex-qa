@@ -1,4 +1,6 @@
 from typing import List
+
+import allennlp.nn.util
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -66,7 +68,7 @@ class Seq2PDA(nn.Module):
         elif model_function == 'generation':
             return self.forward_inference(*args, **kwargs)
         elif model_function == "validation":
-            return
+            return self._forward_validation(*args, **kwargs)
         else:
             raise ValueError(f"Unknown model function {model_function} is specified.")
 
@@ -76,6 +78,8 @@ class Seq2PDA(nn.Module):
                                    node_parents,  # (batch, n_d),
                                    expansion_frontiers,  # (batch, n_d, max_runtime_stack_size),
                                    derivations,  # (batch, n_d, max_seq), the gold derivations for choice checking
+                                   *args,
+                                   **kwargs,
                                    ):
         enc_attn_fn = self._encode_source(source_tokens)
         self.npda.init_automata(source_tokens.size()[0], source_tokens.device, enc_attn_fn)
@@ -136,10 +140,11 @@ class Seq2PDA(nn.Module):
                             node_parents,  # (batch, n_d),
                             expansion_frontiers,  # (batch, n_d, max_runtime_stack_size),
                             derivations,  # (batch, n_d, max_seq), the gold derivations for choice checking
+                            *args,
+                            **kwargs,
                             ):
         enc_attn_fn = self._encode_source(source_tokens)
         self.npda.init_automata(source_tokens.size()[0], source_tokens.device, enc_attn_fn)
-        # rule_repr: (batch, n_d, hid)
         # rule_mask: (batch, n_d)
         # rule_logit: (batch, n_d), the score dimension 1 is squeezed by default in the rule scorer
         rule_logit, rule_mask = self.npda(model_function="validation",
@@ -148,8 +153,12 @@ class Seq2PDA(nn.Module):
                                           expansion_frontiers=expansion_frontiers,
                                           derivations=derivations)
 
+        # rule_reward: (batch,)
+        rule_reward = allennlp.nn.util.masked_mean(rule_logit, rule_mask, dim=-1)
+
         self.npda.reset_automata()
         output = {
+            "reward": rule_reward
         }
         return output
 

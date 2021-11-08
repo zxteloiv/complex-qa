@@ -2,8 +2,9 @@ from trialbot.training import Registry
 from trialbot.data.translator import FieldAwareTranslator
 from trialbot.data.fields import SeqField
 from trialbot.data.translators import KnownFieldTranslator
-from .cg_bundle_fields import TerminalRuleSeqField, ProcessedSentField, RuleSymbolSeqField, TreeField, DerivationField
+from .cg_bundle_fields import TerminalRuleSeqField, ProcessedSentField, RuleSymbolSeqField
 from .cfq_fields import TreeTraversalField, TutorBuilderField
+
 
 @Registry.translator('sql_s2s')
 class SQLSeq(FieldAwareTranslator):
@@ -12,6 +13,7 @@ class SQLSeq(FieldAwareTranslator):
             SeqField(source_key='sql', renamed_key="target_tokens",),
             SeqField(source_key='sent', renamed_key='source_tokens', add_start_end_toks=False,)
         ])
+
 
 @Registry.translator('tranx')
 class TranXTranslator(FieldAwareTranslator):
@@ -22,6 +24,7 @@ class TranXTranslator(FieldAwareTranslator):
                                  source_key='sql_tree', renamed_key="target_tokens", namespace="rule_seq", ),
         ])
 
+
 @Registry.translator('tranx_no_terminal')
 class NoTermTranXTranslator(FieldAwareTranslator):
     def __init__(self):
@@ -30,21 +33,6 @@ class NoTermTranXTranslator(FieldAwareTranslator):
             TerminalRuleSeqField(no_terminal_rule=True,
                                  source_key='sql_tree', renamed_key="target_tokens", namespace="rule_seq",),
         ])
-
-@Registry.translator('gd')
-class GrammarDerivationTranslator(KnownFieldTranslator):
-    def __init__(self, max_node_position=12):
-        super().__init__(
-            field_list=[
-                ProcessedSentField(source_key='sent', renamed_key='source_tokens', add_start_end_toks=False,),
-                DerivationField(source_key='runtime_tree', renamed_key="target_tokens", namespace="formal_token"),
-                TreeField(tree_key="runtime_tree", ns="formal_token", max_node_position=max_node_position)
-            ],
-            vocab_fields=[
-                ProcessedSentField(source_key='sent', renamed_key='source_tokens', add_start_end_toks=False,),
-                DerivationField(source_key='sql_tree', renamed_key="target_tokens", namespace="formal_token"),
-            ]
-        )
 
 
 TREE_NS = 'symbol'

@@ -8,7 +8,6 @@ import lark
 from trialbot.data import START_SYMBOL, END_SYMBOL
 from utils.preprocessing import nested_list_numbers_to_tensors
 from utils.tree import Tree, PreorderTraverse
-from utils.lark.id_tree import build_from_lark_tree
 
 
 class GrammarPatternSeqField(SeqField):
@@ -82,16 +81,19 @@ class TreeTraversalField(Field):
                  namespace: str,
                  output_keys: Optional[List[str]] = None,
                  padding: int = 0,
+                 max_node_pos: int = 12,
                  ):
         super().__init__()
         self.tree_key = tree_key
         self.ns = namespace or 'symbols'
         self.padding = padding
+        self.max_node_pos = max_node_pos
         self.output_keys: List[str] = output_keys or [
             'tree_nodes',           # (batch, n_d), the tree nodes, i.e., all the expanded lhs
             'node_parents',         # (batch, n_d),
             'expansion_frontiers',  # (batch, n_d, max_runtime_stack_size),
             'derivations',          # (batch, n_d, max_seq), the gold derivations, actually num_derivations = num_lhs
+            'node_pos',             # (batch, n_d, max_depth)
         ]
 
     def batch_tensor_by_key(self, tensors_by_keys: Mapping[str, List[torch.Tensor]]) -> Mapping[str, torch.Tensor]:
@@ -102,10 +104,9 @@ class TreeTraversalField(Field):
         return output
 
     def generate_namespace_tokens(self, example) -> Generator[Tuple[str, str], None, None]:
-        tree: lark.Tree = example.get(self.tree_key)
+        tree: Tree = example.get(self.tree_key)
         if tree is not None:
-            id_tree = build_from_lark_tree(tree, add_eps_nodes=True)
-            for node in PreorderTraverse()(id_tree):
+            for node in PreorderTraverse()(tree):
                 yield from product([self.ns], [node.label, END_SYMBOL])
 
     def to_tensor(self, example) -> Mapping[str, Optional[list]]:
@@ -113,38 +114,38 @@ class TreeTraversalField(Field):
         if tree is None:
             return dict((k, None) for k in self.output_keys)
 
-        # convert the lark tree to the decorated tree with IDs and eps rule expansions.
-        id_tree = build_from_lark_tree(tree, add_eps_nodes=True)
         # pre-assign an ID, otherwise the system won't work
         # IDs are allocated in the left-most derivation order
-        id_tree: Tree = id_tree.assign_node_id(PreorderTraverse())
+        id_tree: Tree = tree.assign_node_id(PreorderTraverse())
 
         # to get the symbol_id and the exact_token id from a token string
         s_id = lambda t: self.vocab.get_token_index(t, self.ns)
 
-        tree_nodes, node_parent, frontiers, derivations = [], [], [], []
+        tree_nodes, node_parent, frontiers, derivations, node_pos = [], [], [], [], []
+        root_path: List[int] = [0]
         # traverse again the tree in the order of left-most derivation
         tree_node_id_set = set()
-        op_stack: List[Tuple[int, Tree]] = [(0, id_tree)]
-        while len(op_stack) > 0:
-            parent_id, node = op_stack.pop()
+
+        for node, parent, path in PreorderTraverse(output_parent=True, output_path=True)(id_tree):
+            parent_id = parent.node_id if parent is not None else 0
             tree_nodes.append(s_id(node.label))
             node_parent.append(parent_id)
-
             _expansion = [s_id(c.label) for c in node.children] + [s_id(END_SYMBOL)]
             derivations.append(_expansion)
+            # child pos starts from 1 to spare 0 for padding, so we add 1 to each path node starting from 0
+            node_pos.append([min(i + 1, self.max_node_pos) for i in root_path + path])
 
+            # In the normal case, a node will attend to itself but not its parent,
+            # so the parent id is added to node_parent list and then ignored,
+            # but the node id added to the tree id set will get attended.
+            # For the edge case when the root is itself, the attention will conducted on itself,
+            # which has node id 0 and also the parent 0, so the frontier is set to [0] by default.
             tree_node_id_set.add(node.node_id)
-            frontiers.append([x for x in tree_node_id_set if x not in node_parent])
+            frontiers.append([x for x in tree_node_id_set if x not in node_parent] if node.node_id > 0 else [0])
             # the expanded nodes will all get attended over
             tree_node_id_set.update([c.node_id for c in node.children])
 
-            for c in reversed(node.children):
-                op_stack.append((node.node_id, c))
-
-        frontiers[0].append(0)
-
-        output = dict(zip(self.output_keys, (tree_nodes, node_parent, frontiers, derivations)))
+        output = dict(zip(self.output_keys, (tree_nodes, node_parent, frontiers, derivations, node_pos)))
         return output
 
 
@@ -169,9 +170,8 @@ class TutorBuilderField(Field):
         if tree is None:
             return {"grammar_map": None}
 
-        id_tree = build_from_lark_tree(tree, add_eps_nodes=True)
         grammar_map = defaultdict(set)
-        for lhs, grammar in self._traverse_tree_for_derivations(id_tree):
+        for lhs, grammar in self._traverse_tree_for_derivations(tree):
             grammar_map[lhs].add(grammar)
 
         return {"grammar_map": grammar_map}

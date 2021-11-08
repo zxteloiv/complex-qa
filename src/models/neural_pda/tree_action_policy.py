@@ -79,47 +79,36 @@ class TreeActionPolicy(torch.nn.Module):
 
         # (B, N * A)
         masked_logits_rs = masked_logits.reshape(node_logits.size()[0], -1)
-        logprob_rs = utilnn.logits_to_prob(masked_logits_rs, 'bounded')
         # (B, N, A)
-        logprob = logprob_rs.reshape(*node_logits.size())
+        logprob = utilnn.logits_to_prob(masked_logits_rs, 'bounded').reshape(*node_logits.size())
         prob = utilnn.logits_to_prob(masked_logits_rs, 'none').reshape(*node_logits.size())
         return logprob, prob
 
     def decode(self, prob: torch.Tensor, logprob: torch.Tensor, sample_num: int = 5,
                method: Literal["max", "topk", "multinomial"] = "max"
-               ) -> Tuple[list, list, torch.Tensor, torch.Tensor]:
+               ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         :param prob: (batch, node_num, action_num)
         :param logprob: (batch, node_num, action_num)
         :param sample_num: int, used when method is not "max"
         :param method: decoding method
-        :return: returns the decoded node idx, action idx, and the logprobs and probs, all of size (B, S)
+        :return: returns the decoded node idx, and action idx, with size (B, S)
         """
         batch, node_num, action_num = prob.size()
 
         flat_prob = prob.reshape(batch, -1)
 
         # (B, S)
-        selected_prob = None
         if method == "max":
-            selected_prob, indices = torch.max(flat_prob, dim=-1)
+            _, indices = torch.max(flat_prob, dim=-1)
         elif method == "topk":
-            selected_prob, indices = torch.topk(flat_prob, sample_num, largest=True, dim=-1, sorted=True)
+            _, indices = torch.topk(flat_prob, sample_num, largest=True, dim=-1, sorted=True)
         elif method == 'multinomial':
             indices = torch.multinomial(flat_prob, sample_num)
         else:
             raise ValueError(f'unknown decoding method "{method}" is set')
 
-        node_idx = (indices // action_num)
-        action_idx = (indices % action_num)
-
-        # (B, 1)
-        batch_dim_indices = torch.arange(batch, device=prob.device).unsqueeze(-1)
-
-        # (B, S)
-        selected_logp = logprob[batch_dim_indices, node_idx, action_idx]
-        if selected_prob is None:
-            selected_prob = prob[batch_dim_indices, node_idx, action_idx]
-
-        return node_idx.tolist(), action_idx.tolist(), selected_logp, selected_prob
+        node_idx = (indices // action_num).detach()
+        action_idx = (indices % action_num).detach()
+        return node_idx, action_idx
 

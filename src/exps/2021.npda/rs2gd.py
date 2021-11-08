@@ -1,22 +1,31 @@
 # Reinforced Seq-to-Grammar-Derivation
-import os.path as osp
+from typing import Optional
+import os, os.path as osp
+import logging
 import sys
 import math
+from copy import deepcopy
+from datetime import datetime as dt
+
+import torch
+import torch.nn.functional
+import lark
 from trialbot.utils.root_finder import find_root
+from trialbot.data.iterators import RandomIterator
 sys.path.insert(0, osp.abspath(osp.join(osp.dirname(__file__), '..', '..')))
 
 from allennlp.modules.seq2seq_encoders import LstmSeq2SeqEncoder
 from models.neural_pda.tree_action_policy import TreeActionPolicy
 from models.base_s2s.stacked_encoder import StackedEncoder
-from models.base_s2s.base_seq2seq import BaseSeq2Seq
 from models.modules.attention_composer import get_attn_composer
+from models.neural_pda.seq2pda import Seq2PDA
 from models.neural_pda import partial_tree_encoder as partial_tree
 from models.modules.decomposed_bilinear import DecomposedBilinear
-from tree_worker import enrich_tree, modify_tree
+from tree_worker import modify_tree
+from utils.trialbot.reset import reset
 import utils.nn as utilsnn
-from copy import deepcopy
 
-from trialbot.training import TrialBot, Events, Registry, Updater
+from trialbot.training import TrialBot, Events, Registry, Updater, State
 from trialbot.data import NSVocabulary
 import datasets.comp_gen_bundle as cg_bundle
 cg_bundle.install_parsed_qa_datasets(Registry._datasets)
@@ -29,25 +38,55 @@ from utils.trialbot.extensions import collect_garbage
 
 from utils.select_optim import select_optim
 from trialbot.utils.move_to_device import move_to_device
-from utils.trialbot.setup import setup
+from utils.trialbot.setup import setup, setup_null_argv
 from utils.seq_collector import SeqCollector
-from utils.lark.restore_cfg import restore_grammar_from_trees, export_grammar
+from utils.lark.restore_cfg import export_grammar
+from utils.cfg import restore_grammar_from_trees
 from idioms.export_conf import get_export_conf
-import lark
+import s2pda_qa
 
 
 class PolicyTraining(Updater):
     def __init__(self, bot: TrialBot):
         args, p, logger = bot.args, bot.hparams, bot.logger
-        from trialbot.data.iterators import RandomIterator
         iterator = RandomIterator(len(bot.train_set), p.batch_sz)
         logger.info(f"Using RandomIterator with batch={p.batch_sz}")
 
         models = list(bot.models)
-        optims = [select_optim(p, m.parameters())for m in models]
+        optims = [select_optim(p, m.parameters()) for m in models]
+
+        super().__init__(models, iterator, optims, args.device)
+
         self.dataset = bot.train_set
         self.translator = bot.translator
-        super().__init__(models, iterator, optims, args.device)
+        self.logger = logging.getLogger(self.__class__.__name__)
+        self.envbot: Optional[TrialBot] = None
+
+        # the quick and dirty method to allow the updater to access components and states of the trial,
+        # is to add a reference of the bot to the trainer instance,
+        # although the updater is initialized and should be theoretically managed by the bot.
+        # Its lifetime is constrained by the bot.
+        # However, adding the reference has advantages, too.
+        # By keeping the components and states all belonging to the bot, the updater could be kept stateless,
+        # which is meaningful and leads to a consistent implementation in mind.
+        self.dominated_bot = bot
+
+    def start_epoch(self):
+        super().start_epoch()
+        epoch = self.dominated_bot.state.epoch
+
+        if epoch == 1:
+            self.envbot = cold_start(self.dominated_bot)
+            return
+
+        reset(self.envbot)
+        nested_path = osp.join(self.dominated_bot.savepath, f'nested-env-ep-{epoch}')
+        self.envbot.savepath = nested_path
+        backup_handlers = logging.root.handlers[:]
+        nested_logfile = osp.join(nested_path, f'epoch-{epoch}-finetuning.log')
+        # logging.basicConfig(filename=nested_logfile, force=True)
+        self.envbot.run()
+        # logging.basicConfig(handlers=backup_handlers, force=True)
 
     def update_epoch(self):
         # batch_data: list of data (key-value pairs)
@@ -55,16 +94,15 @@ class PolicyTraining(Updater):
         if len(batch_data) == 0:
             return None
 
-        augmented_data, prob, logprob = self._run_policy_net(batch_data)
-        parser_output = self._run_parser(augmented_data)
-        parser_loss, policy_loss = self._optim_step(parser_output, prob, logprob)
+        tensor_batch, filtered_batch = self._get_tensor_batch(batch_data)
+        # logprob, prob: (B, N, A)
+        out_logprob, out_prob = self._get_policy_logits(tensor_batch)
 
-        output = {
-            "loss": parser_loss + policy_loss,
-            "parser_loss": parser_loss,
-            "policy_loss": policy_loss,
-        }
-
+        # list[B*S], (B, S), (B, S)
+        sampled_data, sampled_prob, sampled_logp = self._sample_modifications(out_logprob, out_prob, filtered_batch)
+        env_output = self._get_env_reward(sampled_data)
+        policy_loss = self._optim_step(env_output['reward'], sampled_prob, sampled_logp)
+        output = {"loss": policy_loss}
         return output
 
     def _get_batch_data(self):
@@ -73,97 +111,150 @@ class PolicyTraining(Updater):
         batch_data = []
         for i in indices:
             raw = self.dataset[i]
-            if 'sql_tree' in raw:
+            if raw.get('sql_tree') is not None:
                 batch_data.append(raw)
-        # ends of iteration will raise a StopIteration after the current batch, and then event engine will return None.
-        # an empty batch is set to return None, but raising the StopIteration exception is not required.
+
         if iterator.is_end_of_epoch:
             self.stop_epoch()
         return batch_data
 
-    def _run_policy_net(self, batch: list):
+    def _get_tensor_batch(self, batch):
         tensor_list = [self.translator.to_tensor(x) for x in batch]
-
         filtered_tensors, filtered_batch = [], []
+        # filter will be applied to tensors, but the raw data batch is required to build extension
         for tensor, example in zip(tensor_list, batch):
             if all(v is not None for v in tensor.values()):
                 filtered_tensors.append(tensor)
                 filtered_batch.append(example)
-
         tensor_batch = self.translator.batch_tensor(filtered_tensors)
+
         if self._device >= 0:
             tensor_batch = move_to_device(tensor_batch, self._device)
 
+        return tensor_batch, filtered_batch
+
+    def _get_policy_logits(self, tensor_batch):
         model: TreeActionPolicy = self._models[0]
         model.train()
         output: dict = model(tensor_batch['tree_nodes'], tensor_batch['node_pos'], tensor_batch['node_parents'])
+        # logprob, prob: (B, N, A)
         out_logprob, out_prob = model.get_logprob(output['logits'], output['node_mask'])
+        return out_logprob, out_prob
 
+    def _sample_modifications(self, out_logprob, out_prob, batch):
+        # out_logprob, out_prob: (B, N, A)
+        model: TreeActionPolicy = self._models[0]
         # sample some policies (size S) for each tree example in the batch
-        # list, list, (B, S), (B, S)
-        nodes, actions, logprobs, probs = model.decode(out_prob, out_logprob, method="topk")
+        # (B, S), (B, S), pure tensors (no backwards)
+        nodes, actions = model.decode(out_prob, out_logprob, method="topk")
 
-        mem = SeqCollector()
-        for i, data in enumerate(filtered_batch):
-            sample_iter = zip(nodes[i], actions[i], logprobs[i], probs[i])
-            # if a sampled modification is failed, the example will de facto be omitted,
-            # which may be changed to select some examples along with the original one (representing a staged grammar)
-            # to train the parser, i.e., resembling the parser training side
-            # the parser training doesn't require the existence of prob and logprob
-            reset = True
-            for node, action, prob, logprob in sample_iter:
+        sampled_data = []
+        for i, data in enumerate(batch):
+            flag = True
+            for sample_j, (node_id, action_id) in enumerate(zip(nodes[i], actions[i])):
                 new_data = deepcopy(data)
-                success = modify_tree(enrich_tree(new_data['runtime_tree']), node, action)
-                if success:
-                    mem(data=new_data, prob=prob, logprob=logprob)
-                    if reset:
-                        # only the first successful modification sampled will be saved into the future
-                        reset = False
-                        self.dataset[new_data['id']] = new_data
+                success = modify_tree(new_data['runtime_tree'], node_id.item(), action_id.item())
+                if success and flag:
+                    self.dataset[new_data['id']] = new_data
+                    flag = False
+                else:
+                    actions[i, sample_j] = 0
+                    new_data = data
+                sampled_data.append(new_data)
 
-        # list, (B * S,), (B * S,)
-        return mem['data'], mem.get_stacked_tensor('prob', dim=0), mem.get_stacked_tensor('logprob', dim=0)
+        # (B, 1)
+        batch_dim_indices = torch.arange(len(batch), device=out_prob.device).unsqueeze(-1)
+        # (B, S)
+        sampled_prob = out_prob[batch_dim_indices, nodes, actions].reshape(-1)
+        sampled_logp = out_logprob[batch_dim_indices, nodes, actions].reshape(-1)
 
-    def _run_parser(self, batch):
-        tensor_list = [self.translator.to_tensor(x) for x in batch]
-        tensor_batch = self.translator.batch_tensor(tensor_list)
+        # list[B*S], (B, S), (B, S)
+        return sampled_data, sampled_prob, sampled_logp
+
+    def _get_env_reward(self, batch):
+        translator = self.envbot.translator
+        tensor_list = [translator.to_tensor(x) for x in batch]
+        tensor_batch = translator.batch_tensor(tensor_list)
         if self._device >= 0:
             tensor_batch = move_to_device(tensor_batch, self._device)
-        model: BaseSeq2Seq = self._models[1]
-        model.train()
-        output = model(tensor_batch['source_tokens'], tensor_batch['target_tokens'])
+
+        model: Seq2PDA = self.envbot.model
+        model.eval()
+        with torch.no_grad():
+            output = model(model_function="validation",
+                           source_tokens=tensor_batch['source_tokens'],
+                           tree_nodes=tensor_batch['tree_nodes'],
+                           node_parents=tensor_batch['node_parents'],
+                           expansion_frontiers=tensor_batch['expansion_frontiers'],
+                           derivations=tensor_batch['derivations'],
+                           )
         return output
 
-    def _optim_step(self, parser_output: dict, prob, logprob):
+    def _optim_step(self, env_reward, sampled_prob, sampled_logp):
         """
-        :param parser_output: dict
-        :param prob: (B * S,)
-        :param logprob: (B * S,)
+        :param env_reward: (B * S,), the logits returned by the rule scorer for each sample
+        :param prob: (B, S)
+        :param logprob: (B, S)
         """
         for m, opt in zip(self._models, self._optims):
             m.train()
             opt.zero_grad()
 
-        parser_loss = parser_output['loss']
-        parser_loss.backward()
+        # reward: (B, S)
+        logit_reward = env_reward.reshape(*sampled_prob.size())
+        reward = torch.nn.functional.softmax(logit_reward, dim=-1)
 
-        # (B * S, len - 1, num_classes)
-        logits = parser_output['logits']
-        # (B * S, len - 1)
-        target = parser_output['target'][:, 1:].contiguous()
-        target_mask = (target != 0).long()
-        # (B * S,)
-        reward = utilsnn.masked_reducing_gather(utilsnn.logits_to_prob(logits, "bounded"), target, target_mask, 'none')
+        bounded_policy_reward = (reward + reward / (sampled_prob + 1e-20)).detach()
 
-        bounded_policy_reward = (reward + reward / (prob + 1e-20)).detach()
+        policy_loss = - (sampled_logp * bounded_policy_reward).mean() + math.log(2)
 
-        policy_loss = - (logprob * bounded_policy_reward).mean() + math.log(2)
         policy_loss.backward()
 
         for opt in self._optims:
             opt.step()
 
-        return parser_loss, policy_loss
+        return policy_loss
+
+
+def cold_start(bot: TrialBot):
+    """
+    This is called by the updater who will save the returned bot instance.
+    This function could also be a bot extension, by assigning the new bot object to bot attributes,
+    then the updater could access the nested bot from the components of the base bot.
+    This implementation will raise type warning for the expression like 'updater.bot.nested_bot',
+    and may cause temporal bugs, which is the reason we do not implement it as a bot extension here.
+    """
+    logger = bot.logger
+
+    args, p = bot.args, bot.hparams
+    sys.argv = sys.argv[:1]     # clear the argv for the running
+
+    envpath = osp.join(bot.savepath, f'env-0-cold_start')
+    os.makedirs(envpath, exist_ok=True)
+    logger.info(f'Running cold start for env model within {envpath}... {dt.now().strftime("%H:%M:%S")}')
+
+    backup_handlers = logging.root.handlers[:]
+
+    assert all(hasattr(p, a) for a in ('nested_translator', 'nested_hparamset'))
+
+    @Registry.hparamset('cold_start_overwritten')
+    def _overwritten_cold_start_params():
+        op = Registry.get_hparamset(p.nested_hparamset)
+        op.TRAINING_LIMIT = 1
+        return op
+
+    # nested_logfile = osp.join(envpath, f'cold-start-training.log')
+    # logger.info(f'Writing following logs into {nested_logfile} ')
+    # logging.basicConfig(filename=nested_logfile, force=True)
+    nested_args = {"translator": p.nested_translator,
+                   "dataset": args.dataset,
+                   "snapshot-dir": envpath,
+                   "hparamset": 'cold_start_overwritten',
+                   "device": 0}
+    nested_bot = s2pda_qa.main(setup_null_argv(**nested_args))
+    # logging.basicConfig(handlers=backup_handlers, force=True)
+
+    return nested_bot
 
 
 def collect_epoch_grammars(bot: TrialBot):
@@ -172,11 +263,18 @@ def collect_epoch_grammars(bot: TrialBot):
     if len(train_trees) == 0:
         raise ValueError("runtime tree of the entire training set not available.")
 
-    g, terminals = restore_grammar_from_trees(train_trees)
     lex_file, start, export_terminals, excluded = get_export_conf(bot.args.dataset)
     lex_in = osp.join(find_root(), 'src', 'statics', 'grammar', lex_file)
     bot.logger.debug(f"Got grammar: start={start.name}, lex_in={lex_in}")
-    g_txt = export_grammar(g, start, lex_in, terminals if export_terminals else None, excluded)
+
+    # by default, the trees are converted from lark.Trees without introducing the terminal category nodes.
+    # so when restoring the grammars, it is not needed to export the terminals, which means:
+    #       export_terminal_values = False, and treat_terminals_as_categories = False,
+    # the terminals will be None and thus will not affect the export_grammar function
+    g, terminals = restore_grammar_from_trees(train_trees, export_terminal_values=False)
+    g_txt = export_grammar(g, start, lex_in, terminals if export_terminals else None, excluded,
+                           treat_terminals_as_categories=False,)
+
     bot.state.g_txt = g_txt
     grammar_filename = osp.join(bot.savepath, f"grammar_{bot.state.epoch}.lark")
     bot.logger.info(f"Grammar saved to {grammar_filename}")
@@ -189,17 +287,13 @@ def parse_and_eval_on_dev(bot: TrialBot, interval: int = 1,
                           clear_cache_each_batch: bool = True,
                           rewrite_eval_hparams: dict = None,
                           skip_first_epochs: int = 0,
-                          on_test_data: bool = False,
-                          ):
+                          on_test_data: bool = False,):
     from trialbot.utils.move_to_device import move_to_device
-    import json
+    from copy import copy
     if bot.state.epoch % interval == 0 and bot.state.epoch > skip_first_epochs:
-        if on_test_data:
-            bot.logger.info("Running for evaluation metrics on testing ...")
-        else:
-            bot.logger.info("Running for evaluation metrics ...")
+        bot.logger.info(f"Running for evaluation metrics{' on testing' if on_test_data else ''} ...")
 
-        dataset, hparams = bot.dev_set, bot.hparams
+        dataset, hparams = bot.dev_set, copy(bot.hparams)
         rewrite_eval_hparams = rewrite_eval_hparams or dict()
         for k, v in rewrite_eval_hparams.items():
             setattr(hparams, k, v)
@@ -238,10 +332,7 @@ def parse_and_eval_on_dev(bot: TrialBot, interval: int = 1,
                     import torch.cuda
                     torch.cuda.empty_cache()
 
-        if on_test_data:
-            get_metrics(bot, prefix="Testing Metrics: ")
-        else:
-            get_metrics(bot, prefix="Evaluation Metrics: ")
+        get_metrics(bot, prefix="Testing Metrics: " if on_test_data else "Evaluation Metrics: ")
 
 
 @Registry.hparamset()
@@ -268,38 +359,11 @@ def crude_conf():
     p.action_num = 7
     p.max_children_num = 12
 
-    p.TRANSLATOR_KWARGS = {"max_node_position": p.max_children_num}
-
     # parser params
-    p.emb_sz = 256
+    p.nested_translator = 'cg_sql_pda'
+    p.nested_hparamset = 'sql_pda'
     p.src_namespace = 'sent'
-    p.tgt_namespace = 'rule_seq'
-    p.hidden_sz = 128
-    p.enc_out_dim = p.hidden_sz # by default
-    p.dec_in_dim = p.hidden_sz  # by default
-    p.dec_out_dim = p.hidden_sz  # by default
-
-    p.tied_decoder_embedding = True
-    p.proj_in_dim = p.emb_sz  # by default
-
-    p.enc_attn = "bilinear"
-    p.dec_hist_attn = "dot_product"
-    p.dec_inp_composer = 'cat_mapping'
-    p.dec_inp_comp_activation = 'mish'
-    p.proj_inp_composer = 'cat_mapping'
-    p.proj_inp_comp_activation = 'mish'
-    p.encoder = "bilstm"
-    p.num_enc_layers = 2
-    p.decoder = "lstm"
-    p.num_dec_layers = 2
-    p.dropout = .2
-    p.enc_dropout = p.dropout  # by default
-    p.dec_dropout = p.dropout  # by default
-    p.max_decoding_step = 100
-    p.scheduled_sampling = .1
-    p.decoder_init_strategy = "forward_last_parallel"
-    # p.src_emb_pretrained_file = "~/.glove/glove.6B.100d.txt.gz"
-
+    p.tgt_namespace = 'symbol'
     return p
 
 
@@ -321,17 +385,14 @@ def get_models(p, vocab: NSVocabulary):
                 use_linear=p.bilinear_linear, use_bias=p.bilinear_bias,
             )),
         ),
-        node_action_mapper=nn.Linear(p_hid_dim, p.action_num)
+        node_action_mapper=nn.Linear(p_hid_dim, p.action_num),
     )
-
-    parser_net = BaseSeq2Seq.from_param_and_vocab(p, vocab)
-
-    return policy_net, parser_net
+    return policy_net
 
 
 def main():
-    args = setup(seed=2021, hparamset='crude_conf', translator="gd")
-    bot = TrialBot(trial_name='rs2gd', get_model_func=get_models, args=args)
+    args = setup(seed=2021, hparamset='crude_conf', translator="cg_sql_pda", device=0, dataset='scholar_iid.handcrafted')
+    bot = TrialBot(trial_name='rgs_policy', get_model_func=get_models, args=args)
 
     bot.add_event_handler(Events.STARTED, print_hyperparameters, 90)
     bot.add_event_handler(Events.EPOCH_COMPLETED, get_metrics, 100)
@@ -344,11 +405,11 @@ def main():
         bot.add_event_handler(Events.ITERATION_COMPLETED, collect_garbage, 95)
         bot.add_event_handler(Events.EPOCH_COMPLETED, collect_epoch_grammars, 120)
         bot.add_event_handler(Events.EPOCH_COMPLETED, save_multiple_models_per_epoch, 100)
-        bot.add_event_handler(Events.EPOCH_COMPLETED, parse_and_eval_on_dev, 90,
-                              rewrite_eval_hparams={"batch_sz": 32})
-        bot.add_event_handler(Events.EPOCH_COMPLETED, parse_and_eval_on_dev, 80,
-                              rewrite_eval_hparams={"batch_sz": 32}, on_test_data=True)
-        bot.updater = RS2GDTraining(bot)
+        # bot.add_event_handler(Events.EPOCH_COMPLETED, parse_and_eval_on_dev, 90,
+        #                       rewrite_eval_hparams={"batch_sz": 32})
+        # bot.add_event_handler(Events.EPOCH_COMPLETED, parse_and_eval_on_dev, 80,
+        #                       rewrite_eval_hparams={"batch_sz": 32}, on_test_data=True)
+        bot.updater = PolicyTraining(bot)
 
     bot.run()
 

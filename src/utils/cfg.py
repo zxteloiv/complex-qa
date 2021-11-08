@@ -1,8 +1,10 @@
-from typing import List, Dict, Tuple, Set, Callable, TypeVar, Generator
+from typing import List, Dict, Tuple, Set, Callable, TypeVar, Generator, DefaultDict
 from collections import defaultdict
 __all__ = ['Symbol', 'NonTerminal', 'Terminal', 'T_CFG']
 from utils.itertools import powerset
 from utils.graph import dfs_walk, Graph
+from utils.tree import Tree, PreorderTraverse
+
 
 class Symbol:
     __slots__ = ('name',)
@@ -31,10 +33,35 @@ class Symbol:
 class Terminal(Symbol):
     is_terminal = True
 
+
 class NonTerminal(Symbol):
     is_terminal = False
 
+
 T_CFG = Dict[NonTerminal, List[List[Symbol]]]
+
+
+def restore_grammar_from_trees(trees: List[Tree],
+                               export_terminal_values: bool = False
+                               ) -> Tuple[T_CFG, DefaultDict[str, Set[str]]]:
+    g = defaultdict(list)
+    terminal_vals = defaultdict(set)
+    for t in trees:
+        for nt in t.iter_subtrees_topdown():
+            lhs = NonTerminal(nt.label)
+            rhs = [Terminal(c.label) if c.is_terminal else NonTerminal(c.label) for c in nt.children]
+            g[lhs].append(rhs)
+            if export_terminal_values:
+                # export the terminal values when the terminals are in fact categories, whose single child
+                # is the terminal value. this is true in real grammars to represent various terminal values
+                # by a single category token. The values may be characterized by regular expressions or
+                # wildcard characters defined in W3C EBNF standard.
+                for c in nt.children:
+                    # the only special case when there's a value under a terminal
+                    if c.is_terminal and len(c.children) == 1:
+                        terminal_vals[c.label].add(c.children[0].label)
+    return g, terminal_vals
+
 
 def simplify_grammar(g: T_CFG, start: NonTerminal = None) -> T_CFG:
     g = remove_eps_rules(g)
@@ -42,8 +69,9 @@ def simplify_grammar(g: T_CFG, start: NonTerminal = None) -> T_CFG:
     g = remove_useless_rules(g, start)
     return g
 
+
 def remove_eps_rules(g: T_CFG) -> T_CFG:
-    nullable_vars = set(nt for nt, rhs_list in g.items() if [Terminal("%%EPS%%")] in rhs_list)
+    nullable_vars = set(nt for nt, rhs_list in g.items() if [Terminal(Tree.EPS_TOK)] in rhs_list)
     while True:
         nullable_vars_size = len(nullable_vars)
         for nt, rhs_list in g.items():
@@ -61,12 +89,13 @@ def remove_eps_rules(g: T_CFG) -> T_CFG:
             for nv_subset in powerset(rhs_nv):
                 # new rules generated according to the powerset may happen to be the same, use a set for duplication
                 new_rhs = list(filter(lambda tok: tok not in nv_subset, rhs))
-                if len(new_rhs) > 0 and new_rhs != [Terminal("%%EPS%%")]:
+                if len(new_rhs) > 0 and new_rhs != [Terminal(Tree.EPS_TOK)]:
                     candidate_rhs_set.add(tuple(new_rhs))
 
         for rhs in candidate_rhs_set:
             new_g[nt].append(list(rhs))
     return new_g
+
 
 def remove_null_or_unit_rules(g: T_CFG) -> T_CFG:
     new_g = defaultdict(list)
@@ -93,6 +122,7 @@ def remove_null_or_unit_rules(g: T_CFG) -> T_CFG:
     for nt, rhs_list in new_rules.items():
         new_g[nt].extend(rhs_list)
     return new_g
+
 
 def remove_useless_rules(g: T_CFG, start: NonTerminal) -> T_CFG:
     if start is None:

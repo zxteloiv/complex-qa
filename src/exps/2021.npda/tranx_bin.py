@@ -99,6 +99,7 @@ def run_exp(args=None):
         bot.add_event_handler(Events.EPOCH_COMPLETED, get_metrics, 100)
 
     bot.run()
+    return bot
 
 
 def main():
