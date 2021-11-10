@@ -11,11 +11,11 @@ from trialbot.utils.move_to_device import move_to_device
 from trialbot.training import TrialBot, Registry, Events
 from trialbot.data import NSVocabulary
 from trialbot.training.updater import Updater
-from utils.trialbot.setup import setup
 
 if __name__ == '__main__':
     sys.path.insert(0, osp.abspath(osp.join(osp.dirname(__file__), '..', '..')))
 
+from utils.trialbot.setup import setup
 from utils.select_optim import select_optim
 from trialbot.data.iterators import RandomIterator
 import datasets.cfq
@@ -45,22 +45,22 @@ def build_tutor_objects(tgt_ns, vocab, tutor_repr):
     return gt
 
 
-def init_tailored_tutor(p, vocab, *, dataset_name: str):
-    os.makedirs(os.path.join(p.DATA_PATH, 'npda-tutors-dump'), exist_ok=True)
-    tutor_dump_name = os.path.join(p.DATA_PATH, 'npda-tutors-dump', f"tt_{dataset_name}.pkl")
-
-    if os.path.exists(tutor_dump_name):
-        logging.getLogger(__name__).info(f"Use the existing tutor dump... {tutor_dump_name}")
-        tutor_repr = pickle.load(open(tutor_dump_name, 'rb'))
-    else:
-        logging.getLogger(__name__).info(f"Build the tutor dump for the first time...")
-        tutor_repr = get_tutor_from_train_set(vocab, Registry.get_dataset(dataset_name)[0], dataset_name)
-
-        if tutor_dump_name is not None:
-            logging.getLogger(__name__).info(f"Dump the tutor information... {tutor_dump_name}")
-            pickle.dump(tutor_repr, open(tutor_dump_name, 'wb'))
-
-    return build_tutor_objects(p.tgt_ns, vocab, tutor_repr)
+# def init_tailored_tutor(p, vocab, *, dataset_name: str):
+#     os.makedirs(osp.join(p.DATA_PATH, 'npda-tutors-dump'), exist_ok=True)
+#     tutor_dump_name = osp.join(p.DATA_PATH, 'npda-tutors-dump', f"tt_{dataset_name}.pkl")
+#
+#     if osp.exists(tutor_dump_name):
+#         logging.getLogger(__name__).info(f"Use the existing tutor dump... {tutor_dump_name}")
+#         tutor_repr = pickle.load(open(tutor_dump_name, 'rb'))
+#     else:
+#         logging.getLogger(__name__).info(f"Build the tutor dump for the first time...")
+#         tutor_repr = get_tutor_from_train_set(vocab, Registry.get_dataset(dataset_name)[0], dataset_name)
+#
+#         if tutor_dump_name is not None:
+#             logging.getLogger(__name__).info(f"Dump the tutor information... {tutor_dump_name}")
+#             pickle.dump(tutor_repr, open(tutor_dump_name, 'wb'))
+#
+#     return build_tutor_objects(p.tgt_ns, vocab, tutor_repr)
 
 
 def get_tree_encoder(p, vocab):
@@ -149,7 +149,7 @@ def get_rule_scorer(p, vocab):
     return rule_scorer
 
 
-def get_model(p, vocab: NSVocabulary, *, dataset_name: str):
+def get_model(p, vocab: NSVocabulary):
     from torch import nn
     from models.neural_pda.seq2pda import Seq2PDA
     from models.neural_pda.npda import NeuralPDA
@@ -196,7 +196,7 @@ def get_model(p, vocab: NSVocabulary, *, dataset_name: str):
             nn.LayerNorm(p.hidden_sz),  # rule embedding has the hidden_size
             nn.Tanh(),
         ) if p.emb_sz != p.hidden_sz else Activation.by_name('linear')(),   # `linear` returns the identity function
-        grammar_tutor=init_tailored_tutor(p, vocab, dataset_name=dataset_name),
+        grammar_tutor=None,
         rhs_expander=StackedLSTMCell(p.emb_sz + 1, p.hidden_sz, p.num_expander_layer, dropout=p.dropout),
         rule_scorer=get_rule_scorer(p, vocab),
         pre_tree_encoder=get_tree_encoder(p, vocab),
@@ -280,58 +280,46 @@ class PDATrainingUpdater(Updater):
         return output
 
 
-def main(args=None):
+def make_trialbot(args=None):
     if args is None:
         args = setup(seed=2021)
 
-    get_model_fn = partial(get_model, dataset_name=args.dataset)
-    bot = TrialBot(trial_name="s2pda_qa", get_model_func=get_model_fn, args=args)
+    bot = TrialBot(trial_name="s2pda_qa", get_model_func=get_model, args=args)
 
     from utils.trialbot.extensions import collect_garbage, print_hyperparameters, print_models, get_metrics
-    bot.add_event_handler(Events.STARTED, print_models, 100)
-    bot.add_event_handler(Events.STARTED, print_hyperparameters, 100)
+    # bot.add_event_handler(Events.STARTED, print_models, 100)
+    # bot.add_event_handler(Events.STARTED, print_hyperparameters, 100)
+    bot.add_event_handler(Events.STARTED, update_grammar_tutor, 100)
     bot.add_event_handler(Events.EPOCH_COMPLETED, get_metrics, 100, prefix="Training Metrics: ")
     if not args.test:
         # --------------------- Training -------------------------------
         from trialbot.training.extensions import every_epoch_model_saver
         from utils.trialbot.extensions import end_with_nan_loss
         from utils.trialbot.extensions import evaluation_on_dev_every_epoch
-        bot.add_event_handler(Events.EPOCH_COMPLETED, evaluation_on_dev_every_epoch, 90, skip_first_epochs=10)
-        bot.add_event_handler(Events.EPOCH_COMPLETED, evaluation_on_dev_every_epoch, 90, skip_first_epochs=10, on_test_data=True)
-        bot.add_event_handler(Events.ITERATION_COMPLETED, end_with_nan_loss, 100)
+        bot.add_event_handler(Events.EPOCH_COMPLETED, evaluation_on_dev_every_epoch, 90, skip_first_epochs=0)
+        bot.add_event_handler(Events.EPOCH_COMPLETED, evaluation_on_dev_every_epoch, 90, skip_first_epochs=0, on_test_data=True)
         bot.add_event_handler(Events.EPOCH_COMPLETED, every_epoch_model_saver, 100)
-        bot.add_event_handler(Events.ITERATION_COMPLETED, collect_garbage, 80)
         bot.add_event_handler(Events.EPOCH_COMPLETED, collect_garbage, 80)
+        bot.add_event_handler(Events.ITERATION_COMPLETED, end_with_nan_loss, 100)
+        bot.add_event_handler(Events.ITERATION_COMPLETED, collect_garbage, 80)
 
         bot.updater = PDATrainingUpdater(bot)
 
-    elif args.debug:
-        bot.add_event_handler(Events.ITERATION_COMPLETED, prediction_analysis, 100)
-
-    bot.run()
     return bot
 
 
-def prediction_analysis(bot: TrialBot):
-    output = bot.state.output
-    if output is None:
-        return
-
-    output = bot.model.make_human_readable_output(output)
-    batch_src = output['source_surface']
-    batch_pred = output['prediction_surface']
-    batch_gold = output['target_surface']
-    batch_symbol = output['symbol_surface']
-    batch_gold_symbol = output['rhs_symbol_surface']
-
-    for src, pred, gold, p_s, g_s in zip(batch_src, batch_pred, batch_gold, batch_symbol, batch_gold_symbol):
-        print('---' * 30)
-        print("SRC:  " + " ".join(src))
-        print("PRED: " + " ".join(pred))
-        print("GOLD: " + " ".join(gold))
-        print("PRED_symbol: " + " ".join(p_s))
-        print("GOLD_symbol: " + " ".join(g_s))
+def update_grammar_tutor(bot: TrialBot):
+    args, p, vocab = bot.args, bot.hparams, bot.vocab
+    dataset_name = args.dataset
+    from models.neural_pda.seq2pda import Seq2PDA
+    s2pda: Seq2PDA = bot.model
+    logging.getLogger(__name__).info(f"Update the tutor ...")
+    tutor_repr = get_tutor_from_train_set(vocab, bot.train_set, dataset_name)
+    gt = build_tutor_objects(p.tgt_ns, vocab, tutor_repr)
+    if args.device >= 0:
+        gt = gt.cuda(args.device)
+    s2pda.npda._gt = gt
 
 
 if __name__ == '__main__':
-    main()
+    make_trialbot().run()

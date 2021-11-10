@@ -4,6 +4,7 @@ from trialbot.data.fields import SeqField
 from trialbot.data.translators import KnownFieldTranslator
 from .cg_bundle_fields import TerminalRuleSeqField, ProcessedSentField, RuleSymbolSeqField
 from .cfq_fields import TreeTraversalField, TutorBuilderField
+from .cfq_fields import PolicyValidity
 
 
 @Registry.translator('sql_s2s')
@@ -43,7 +44,8 @@ class SQLDerivations(FieldAwareTranslator):
     def __init__(self, max_derivation_symbols: int = 11):
         super().__init__(field_list=[
             ProcessedSentField(source_key='sent', renamed_key='source_tokens', add_start_end_toks=False,),
-            TreeTraversalField(tree_key='runtime_tree', namespace=TREE_NS,)
+            TreeTraversalField(tree_key='runtime_tree', namespace=TREE_NS,),
+            PolicyValidity(tree_key='runtime_tree'),
         ])
 
     def batch_tensor(self, tensors):

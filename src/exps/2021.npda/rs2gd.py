@@ -4,9 +4,9 @@ import os, os.path as osp
 import logging
 import sys
 import math
+import random
 from copy import deepcopy
 from datetime import datetime as dt
-
 import torch
 import torch.nn.functional
 import lark
@@ -21,15 +21,14 @@ from models.modules.attention_composer import get_attn_composer
 from models.neural_pda.seq2pda import Seq2PDA
 from models.neural_pda import partial_tree_encoder as partial_tree
 from models.modules.decomposed_bilinear import DecomposedBilinear
-from tree_worker import modify_tree
+from utils.tree_mod import modify_tree
 from utils.trialbot.reset import reset
-import utils.nn as utilsnn
+from utils.lark.id_tree import build_from_lark_tree
 
-from trialbot.training import TrialBot, Events, Registry, Updater, State
+from trialbot.training import TrialBot, Events, Registry, Updater
 from trialbot.data import NSVocabulary
 import datasets.comp_gen_bundle as cg_bundle
 cg_bundle.install_parsed_qa_datasets(Registry._datasets)
-import datasets.cg_bundle_translator
 
 from utils.trialbot.extensions import print_hyperparameters, get_metrics, print_models, print_snaptshot_path
 from utils.trialbot.extensions import save_multiple_models_per_epoch
@@ -39,7 +38,6 @@ from utils.trialbot.extensions import collect_garbage
 from utils.select_optim import select_optim
 from trialbot.utils.move_to_device import move_to_device
 from utils.trialbot.setup import setup, setup_null_argv
-from utils.seq_collector import SeqCollector
 from utils.lark.restore_cfg import export_grammar
 from utils.cfg import restore_grammar_from_trees
 from idioms.export_conf import get_export_conf
@@ -62,6 +60,10 @@ class PolicyTraining(Updater):
         self.logger = logging.getLogger(self.__class__.__name__)
         self.envbot: Optional[TrialBot] = None
 
+        self.accept_ratio = p.accept_ratio
+        self.decay_rate = p.accept_decay_rate
+
+
         # the quick and dirty method to allow the updater to access components and states of the trial,
         # is to add a reference of the bot to the trainer instance,
         # although the updater is initialized and should be theoretically managed by the bot.
@@ -70,23 +72,6 @@ class PolicyTraining(Updater):
         # By keeping the components and states all belonging to the bot, the updater could be kept stateless,
         # which is meaningful and leads to a consistent implementation in mind.
         self.dominated_bot = bot
-
-    def start_epoch(self):
-        super().start_epoch()
-        epoch = self.dominated_bot.state.epoch
-
-        if epoch == 1:
-            self.envbot = cold_start(self.dominated_bot)
-            return
-
-        reset(self.envbot)
-        nested_path = osp.join(self.dominated_bot.savepath, f'nested-env-ep-{epoch}')
-        self.envbot.savepath = nested_path
-        backup_handlers = logging.root.handlers[:]
-        nested_logfile = osp.join(nested_path, f'epoch-{epoch}-finetuning.log')
-        # logging.basicConfig(filename=nested_logfile, force=True)
-        self.envbot.run()
-        # logging.basicConfig(handlers=backup_handlers, force=True)
 
     def update_epoch(self):
         # batch_data: list of data (key-value pairs)
@@ -138,7 +123,7 @@ class PolicyTraining(Updater):
         model.train()
         output: dict = model(tensor_batch['tree_nodes'], tensor_batch['node_pos'], tensor_batch['node_parents'])
         # logprob, prob: (B, N, A)
-        out_logprob, out_prob = model.get_logprob(output['logits'], output['node_mask'])
+        out_logprob, out_prob = model.get_logprob(output['logits'], output['node_mask'], tensor_batch['action_mask'])
         return out_logprob, out_prob
 
     def _sample_modifications(self, out_logprob, out_prob, batch):
@@ -150,15 +135,14 @@ class PolicyTraining(Updater):
 
         sampled_data = []
         for i, data in enumerate(batch):
-            flag = True
+            flag = True     # any batch sampling will include a single candidate used in the next epoch
             for sample_j, (node_id, action_id) in enumerate(zip(nodes[i], actions[i])):
                 new_data = deepcopy(data)
                 success = modify_tree(new_data['runtime_tree'], node_id.item(), action_id.item())
-                if success and flag:
+                if success and flag and random.random() > self.accept_ratio:
                     self.dataset[new_data['id']] = new_data
                     flag = False
                 else:
-                    actions[i, sample_j] = 0
                     new_data = data
                 sampled_data.append(new_data)
 
@@ -216,45 +200,45 @@ class PolicyTraining(Updater):
         return policy_loss
 
 
+def accept_ratio_decay(bot: TrialBot):
+    epoch = bot.state.epoch
+    updater: PolicyTraining = bot.updater
+
+    if epoch <= 1:
+        logging.info(f"Using the accept_ratio {updater.accept_ratio:6.4f} for tree modifications")
+    else:
+        updater.accept_ratio *= updater.decay_rate
+        logging.info(f"Accept Ratio decayed to {updater.accept_ratio:6.4f}")
+
+
 def cold_start(bot: TrialBot):
-    """
-    This is called by the updater who will save the returned bot instance.
-    This function could also be a bot extension, by assigning the new bot object to bot attributes,
-    then the updater could access the nested bot from the components of the base bot.
-    This implementation will raise type warning for the expression like 'updater.bot.nested_bot',
-    and may cause temporal bugs, which is the reason we do not implement it as a bot extension here.
-    """
-    logger = bot.logger
-
-    args, p = bot.args, bot.hparams
-    sys.argv = sys.argv[:1]     # clear the argv for the running
-
+    args, p, logger = bot.args, bot.hparams, bot.logger
     envpath = osp.join(bot.savepath, f'env-0-cold_start')
     os.makedirs(envpath, exist_ok=True)
+
     logger.info(f'Running cold start for env model within {envpath}... {dt.now().strftime("%H:%M:%S")}')
 
     backup_handlers = logging.root.handlers[:]
-
     assert all(hasattr(p, a) for a in ('nested_translator', 'nested_hparamset'))
 
-    @Registry.hparamset('cold_start_overwritten')
-    def _overwritten_cold_start_params():
-        op = Registry.get_hparamset(p.nested_hparamset)
-        op.TRAINING_LIMIT = 1
-        return op
+    nested_args = {"translator": p.nested_translator,
+                   "dataset": args.dataset,
+                   "snapshot-dir": envpath,
+                   "hparamset": p.nested_hparamset,
+                   "device": 0}
+    nested_bot = s2pda_qa.make_trialbot(setup_null_argv(**nested_args))
+
+    # binding the same datasets
+    nested_bot.datasets = bot.datasets
 
     # nested_logfile = osp.join(envpath, f'cold-start-training.log')
     # logger.info(f'Writing following logs into {nested_logfile} ')
     # logging.basicConfig(filename=nested_logfile, force=True)
-    nested_args = {"translator": p.nested_translator,
-                   "dataset": args.dataset,
-                   "snapshot-dir": envpath,
-                   "hparamset": 'cold_start_overwritten',
-                   "device": 0}
-    nested_bot = s2pda_qa.main(setup_null_argv(**nested_args))
     # logging.basicConfig(handlers=backup_handlers, force=True)
+    nested_bot.run(p.cold_start_epoch)
 
-    return nested_bot
+    nested_bot.hparams.TRAINING_LIMIT = p.finetune_epoch
+    bot.updater.envbot = nested_bot
 
 
 def collect_epoch_grammars(bot: TrialBot):
@@ -283,65 +267,49 @@ def collect_epoch_grammars(bot: TrialBot):
     bot.state.parser = parser
 
 
-def parse_and_eval_on_dev(bot: TrialBot, interval: int = 1,
-                          clear_cache_each_batch: bool = True,
-                          rewrite_eval_hparams: dict = None,
-                          skip_first_epochs: int = 0,
-                          on_test_data: bool = False,):
-    from trialbot.utils.move_to_device import move_to_device
-    from copy import copy
-    if bot.state.epoch % interval == 0 and bot.state.epoch > skip_first_epochs:
-        bot.logger.info(f"Running for evaluation metrics{' on testing' if on_test_data else ''} ...")
+def updating_trees(parser, dataset):
+    for i, x in enumerate(dataset):
+        try:
+            t = parser.parse(x['sql'])
+            x['sql_tree'] = t
+            x['runtime_tree'] = build_from_lark_tree(t, add_eps_nodes=True)
+        except KeyboardInterrupt:
+            raise SystemExit("Received Keyboard Interupt and Exit now.")
+        except:
+            logging.warning(f'failed to parse the example {i}: {x["sent"]}')
+            x['sql_tree'] = None
+            x['runtime_tree'] = None
 
-        dataset, hparams = bot.dev_set, copy(bot.hparams)
-        rewrite_eval_hparams = rewrite_eval_hparams or dict()
-        for k, v in rewrite_eval_hparams.items():
-            setattr(hparams, k, v)
-        from trialbot.data import RandomIterator
-        dataset = bot.test_set if on_test_data else bot.dev_set
-        iterator = RandomIterator(len(dataset), hparams.batch_sz, shuffle=False, repeat=False)
-        _, parser_model = bot.models
-        device = bot.args.device
-        parser_model.eval()
-        lark_parser: lark.Lark = bot.state.parser
-        for indices in iterator:
-            raw_batch = []
-            for index in indices:
-                raw = dataset[index]
-                try:
-                    raw['runtime_tree'] = lark_parser.parse(raw['sql'])
-                except:
-                    bot.logger.warning(f'Failed to parse {dict((k, raw[k]) for k in ("sent", "sql"))}')
-                    raw['runtime_tree'] = None
-                raw_batch.append(raw)
-            tensor_list = [bot.translator.to_tensor(example) for example in raw_batch]
-            try:
-                batch = bot.translator.batch_tensor(tensor_list)
-            except:
-                batch = None
-            if batch is None or len(batch) == 0:
-                continue
-            if device >= 0:
-                batch = move_to_device(batch, device)
-            parser_model(batch['source_tokens'], batch['target_tokens'])
+        dataset[x['id']] = x
 
-            if clear_cache_each_batch:
-                import gc
-                gc.collect()
-                if bot.args.device >= 0:
-                    import torch.cuda
-                    torch.cuda.empty_cache()
 
-        get_metrics(bot, prefix="Testing Metrics: " if on_test_data else "Evaluation Metrics: ")
+def updating_dev_and_test_dataset(bot: TrialBot):
+    parser = bot.state.parser
+    logging.info(f'Updating the dataset by ')
+    updating_trees(parser, bot.dev_set)
+    updating_trees(parser, bot.test_set)
+
+
+def finetune_env_model(bot: TrialBot):
+    updater: PolicyTraining = bot.updater
+    epoch = bot.state.epoch
+    reset(updater.envbot)
+    nested_path = osp.join(bot.savepath, f'nested-env-ep-{epoch}')
+    updater.envbot.savepath = nested_path
+    backup_handlers = logging.root.handlers[:]
+    nested_logfile = osp.join(nested_path, f'epoch-{epoch}-finetuning.log')
+    # logging.basicConfig(filename=nested_logfile, force=True)
+    updater.envbot.run()
+    # logging.basicConfig(handlers=backup_handlers, force=True)
 
 
 @Registry.hparamset()
 def crude_conf():
     from trialbot.training.hparamset import HyperParamSet
     p = HyperParamSet.common_settings(find_root())
-    # p.SNAPSHOT_PATH = osp.join()
 
     p.batch_sz = 16
+    p.TRAINING_LIMIT = 100
 
     # policy net params
     p.ns_symbols = 'ns_lf'
@@ -356,12 +324,16 @@ def crude_conf():
     p.bilinear_pool = 4
     p.bilinear_linear = True
     p.bilinear_bias = True
-    p.action_num = 7
+    p.action_num = 6
     p.max_children_num = 12
+    p.accept_ratio = .6
+    p.accept_decay_rate = .7
 
     # parser params
     p.nested_translator = 'cg_sql_pda'
     p.nested_hparamset = 'sql_pda'
+    p.cold_start_epoch = 1
+    p.finetune_epoch = 1
     p.src_namespace = 'sent'
     p.tgt_namespace = 'symbol'
     return p
@@ -401,14 +373,15 @@ def main():
 
     if not args.test:   # training behaviors
         bot.add_event_handler(Events.STARTED, collect_epoch_grammars, 80)
+        bot.add_event_handler(Events.STARTED, cold_start, 80)
+
         bot.add_event_handler(Events.ITERATION_COMPLETED, end_with_nan_loss, 100)
         bot.add_event_handler(Events.ITERATION_COMPLETED, collect_garbage, 95)
+        bot.add_event_handler(Events.EPOCH_STARTED, accept_ratio_decay, 100)
         bot.add_event_handler(Events.EPOCH_COMPLETED, collect_epoch_grammars, 120)
         bot.add_event_handler(Events.EPOCH_COMPLETED, save_multiple_models_per_epoch, 100)
-        # bot.add_event_handler(Events.EPOCH_COMPLETED, parse_and_eval_on_dev, 90,
-        #                       rewrite_eval_hparams={"batch_sz": 32})
-        # bot.add_event_handler(Events.EPOCH_COMPLETED, parse_and_eval_on_dev, 80,
-        #                       rewrite_eval_hparams={"batch_sz": 32}, on_test_data=True)
+        bot.add_event_handler(Events.EPOCH_COMPLETED, updating_dev_and_test_dataset, 100)
+        bot.add_event_handler(Events.EPOCH_COMPLETED, finetune_env_model, 100)
         bot.updater = PolicyTraining(bot)
 
     bot.run()

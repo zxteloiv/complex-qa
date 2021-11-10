@@ -2,7 +2,7 @@ from typing import List, Mapping, Generator, Tuple, Optional, Any, Literal, Iter
 from itertools import product
 from collections import defaultdict
 import torch
-from trialbot.data.field import Field
+from trialbot.data.field import Field, NullableTensor
 from trialbot.data.fields.seq_field import SeqField
 import lark
 from trialbot.data import START_SYMBOL, END_SYMBOL
@@ -147,6 +147,64 @@ class TreeTraversalField(Field):
 
         output = dict(zip(self.output_keys, (tree_nodes, node_parent, frontiers, derivations, node_pos)))
         return output
+
+
+class PolicyValidity(Field):
+    def __init__(self, tree_key: str, output_key: str = 'action_mask', padding: int = 0):
+        super().__init__()
+        self.tree_key = tree_key
+        self.out_key = output_key   # (batch, n_d, action)
+        self.padding = padding
+
+    def batch_tensor_by_key(self, tensors_by_keys: Mapping[str, List[NullableTensor]]) -> Mapping[str, torch.Tensor]:
+        output = dict()
+        validity_batch_list = tensors_by_keys[self.out_key]
+        output[self.out_key] = nested_list_numbers_to_tensors(validity_batch_list, padding=self.padding)
+        return output
+
+    def generate_namespace_tokens(self, example) -> Generator[Tuple[str, str], None, None]:
+        yield from []
+
+    def to_tensor(self, example: dict) -> Mapping[str, NullableTensor]:
+        tree: Tree = example.get(self.tree_key)
+        if tree is None:
+            return {self.out_key: None}
+
+        validity_matrix = []    # list(list(int * 7))
+        id_tree = tree.assign_node_id(PreorderTraverse())
+
+        for node, parent, path in PreorderTraverse(output_parent=True, output_path=True)(id_tree):
+            node: Tree
+            parent: Tree
+            path: List[int]
+            if parent is None:
+                validity_matrix.append([0, 0, 0, 0, 0, 0])
+                continue
+
+            # action 1: DEL can be applied to any node
+            # action 2: ADD can be applied to any node
+            action_mask = [0, 0] if node.is_terminal else [1, 1]
+
+            # action 3: L_ROTATE
+            l_rot_cond = not node.is_terminal and len(node.children) > 0 and not node.children[-1].is_terminal
+            action_mask.append(1 if l_rot_cond else 0)
+
+            # action 4: R_ROTATE
+            r_rot_cond = not node.is_terminal and len(node.children) > 0 and not node.children[0].is_terminal
+            action_mask.append(1 if r_rot_cond else 0)
+
+            # action 5: L_DESCENT
+            branch_pos = path[-1]
+            l_des_cond = branch_pos > 0 and not parent.children[branch_pos - 1].is_terminal
+            action_mask.append(1 if l_des_cond else 0)
+
+            # action 6: R_DESCENT
+            r_des_cond = branch_pos + 1 < len(parent.children) and not parent.children[branch_pos + 1].is_terminal
+            action_mask.append(1 if r_des_cond else 0)
+
+            validity_matrix.append(action_mask)
+
+        return {self.out_key: validity_matrix}
 
 
 class TutorBuilderField(Field):

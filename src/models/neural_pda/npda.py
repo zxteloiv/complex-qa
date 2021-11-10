@@ -460,6 +460,8 @@ class NeuralPDA(nn.Module):
             return F.pad(t, [0, size_bound - t.size()[-1]], value=0)
 
         gold_mask = (gold_symbols != 0).long()
+        # gold_symbols, gold_mask: (batch, *, size_bound)
+        # valid_symbols, symbol_mask: (batch, *, opt_num, size_bound)
         gold_symbols, gold_mask, valid_symbols, symbol_mask = [
             _pad(t) for t in (gold_symbols, gold_mask, valid_symbols, symbol_mask)
         ]

@@ -51,7 +51,6 @@ def handle_common_args(args):
         fix_seed(args.seed)
 
 
-
 if __name__ == '__main__':
     print(setup(seed=2020))
 

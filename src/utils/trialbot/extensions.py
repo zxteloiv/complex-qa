@@ -138,7 +138,7 @@ def collect_garbage(bot: TrialBot):
         optim.zero_grad()
 
     if hasattr(bot.state, "output") and bot.state.output is not None:
-        del bot.state.output
+        bot.state.output = None
     gc.collect()
     if bot.args.device >= 0:
         import torch.cuda

@@ -11,23 +11,13 @@ def build_parent_link(t: Tree, parent=None) -> Tree:
     return t
 
 
-class NodeAction(IntEnum):
-    INTACT = auto()
-    DEL_SELF = auto()
-    ADD_PARENT = auto()
-    L_ROTATE = auto()
-    R_ROTATE = auto()
-    L_DESC = auto()
-    R_DESC = auto()
-
-
 def modify_tree(t: Tree, node_idx: int, action_id: int) -> bool:
-    actions = [intact, del_self, add_parent, left_rotate, right_rotate, left_descent, right_descent]
+    actions = [del_self, add_parent, left_rotate, right_rotate, left_descent, right_descent]
     t = build_parent_link(t)
 
     try:
         node, route = find_node_by_idx(t, node_idx)
-        if node.is_terminal:
+        if node.is_terminal and action_id not in (4, 5):
             raise ValueError(f'the terminal node {node_idx}:{node.label} shall not be modified')
         foo: Callable[[Tree, List[int]], None] = actions[action_id]
         foo(node, route)
@@ -39,10 +29,6 @@ def modify_tree(t: Tree, node_idx: int, action_id: int) -> bool:
 
     build_parent_link(t)
     return True
-
-
-def intact(node: Tree, route: List[int]) -> None:
-    return
 
 
 def find_node_by_idx(tree: Tree, idx: int) -> Tuple[Tree, List[int]]:
@@ -139,7 +125,7 @@ def left_descent(node: Tree, route: List[int]) -> None:
     pos = route[-1]
     left = get_left_sibling(node, route)
     if left.is_terminal:
-        raise ValueError("Failed to rotate on a terminal pivot")
+        raise ValueError("Failed to descend under a terminal sibling.")
     parent.children = parent.children[:pos] + parent.children[pos + 1:]
     left.children.append(node)
 
@@ -149,7 +135,7 @@ def right_descent(node: Tree, route: List[int]) -> None:
     pos = route[-1]
     right = get_right_sibling(node, route)
     if right.is_terminal:
-        raise ValueError("Failed to rotate on a terminal pivot")
+        raise ValueError("Failed to descend under a terminal sibling.")
     parent.children = parent.children[:pos] + parent.children[pos + 1:]
     right.children.insert(0, node)
 
@@ -164,7 +150,7 @@ if __name__ == '__main__':
     btok: /[bB]/
     """, keep_all_tokens=True)
     s = "aaaabb"
-    sys.path.insert(0, '../..')
+    sys.path.insert(0, '..')
     tree = build_from_lark_tree(parser.parse(s), add_eps_nodes=True).assign_node_id(PreorderTraverse())
     print(tree)
     for n, path in PreorderTraverse(output_path=True)(tree):
