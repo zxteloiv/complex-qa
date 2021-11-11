@@ -60,8 +60,8 @@ class PolicyTraining(Updater):
         self.logger = logging.getLogger(self.__class__.__name__)
         self.envbot: Optional[TrialBot] = None
 
-        self.accept_ratio = p.accept_ratio
-        self.decay_rate = p.accept_decay_rate
+        self.reject_ratio = p.reject_ratio
+        self.decay_rate = p.reject_decay_rate
 
 
         # the quick and dirty method to allow the updater to access components and states of the trial,
@@ -139,7 +139,8 @@ class PolicyTraining(Updater):
             for sample_j, (node_id, action_id) in enumerate(zip(nodes[i], actions[i])):
                 new_data = deepcopy(data)
                 success = modify_tree(new_data['runtime_tree'], node_id.item(), action_id.item())
-                if success and flag and random.random() > self.accept_ratio:
+                # only the modification with a random number greater than reject_ratio will be saved
+                if success and flag and random.random() > self.reject_ratio:
                     self.dataset[new_data['id']] = new_data
                     flag = False
                 else:
@@ -200,15 +201,17 @@ class PolicyTraining(Updater):
         return policy_loss
 
 
-def accept_ratio_decay(bot: TrialBot):
+def reject_ratio_decay(bot: TrialBot):
     epoch = bot.state.epoch
     updater: PolicyTraining = bot.updater
 
     if epoch <= 1:
-        logging.info(f"Using the accept_ratio {updater.accept_ratio:6.4f} for tree modifications")
+        logging.info(f"Using the reject_ratio {updater.reject_ratio:6.4f} for tree modifications")
     else:
-        updater.accept_ratio *= updater.decay_rate
-        logging.info(f"Accept Ratio decayed to {updater.accept_ratio:6.4f}")
+        # the reject ratio will keep decreasing during the training process,
+        # thus in a later epoch, the modifications will be less likely to get accepted.
+        updater.reject_ratio *= updater.decay_rate
+        logging.info(f"Rejection Ratio decayed to {updater.reject_ratio:6.4f}")
 
 
 def cold_start(bot: TrialBot):
@@ -285,8 +288,9 @@ def updating_trees(parser, dataset):
 
 def updating_dev_and_test_dataset(bot: TrialBot):
     parser = bot.state.parser
-    logging.info(f'Updating the dataset by ')
+    logging.info(f'Updating the dev dataset by new grammar ...')
     updating_trees(parser, bot.dev_set)
+    logging.info(f'Updating the dev dataset by new grammar ...')
     updating_trees(parser, bot.test_set)
 
 
@@ -312,7 +316,6 @@ def crude_conf():
     p.TRAINING_LIMIT = 100
 
     # policy net params
-    p.ns_symbols = 'ns_lf'
     p.node_emb_sz = 100
     p.pos_emb_sz = 50
     p.pos_enc_out = 100
@@ -326,14 +329,14 @@ def crude_conf():
     p.bilinear_bias = True
     p.action_num = 6
     p.max_children_num = 12
-    p.accept_ratio = .6
-    p.accept_decay_rate = .7
+    p.reject_ratio = .6
+    p.reject_decay_rate = .8
 
     # parser params
     p.nested_translator = 'cg_sql_pda'
     p.nested_hparamset = 'sql_pda'
-    p.cold_start_epoch = 1
-    p.finetune_epoch = 1
+    p.cold_start_epoch = 30
+    p.finetune_epoch = 4
     p.src_namespace = 'sent'
     p.tgt_namespace = 'symbol'
     return p
@@ -377,7 +380,7 @@ def main():
 
         bot.add_event_handler(Events.ITERATION_COMPLETED, end_with_nan_loss, 100)
         bot.add_event_handler(Events.ITERATION_COMPLETED, collect_garbage, 95)
-        bot.add_event_handler(Events.EPOCH_STARTED, accept_ratio_decay, 100)
+        bot.add_event_handler(Events.EPOCH_STARTED, reject_ratio_decay, 100)
         bot.add_event_handler(Events.EPOCH_COMPLETED, collect_epoch_grammars, 120)
         bot.add_event_handler(Events.EPOCH_COMPLETED, save_multiple_models_per_epoch, 100)
         bot.add_event_handler(Events.EPOCH_COMPLETED, updating_dev_and_test_dataset, 100)

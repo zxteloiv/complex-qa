@@ -17,7 +17,11 @@ class GrammarTutor(nn.Module):
             g[lhs_id] = rhs_tensor
 
         # use the parameter wrapper such that the module will be move to cuda together with the model
-        self._g = nn.Parameter(g, requires_grad=False)
+        self._g = g
+
+    def cuda(self, device = None):
+        self._g = self._g.cuda(device)
+        return super().cuda(device)
 
     def forward(self, lhs: torch.Tensor) -> torch.LongTensor:
         """

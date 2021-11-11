@@ -16,6 +16,7 @@ from utils.nn import prepare_input_mask, expand_tensor_size_at_dim
 
 from .tensor_typing_util import *
 
+
 class NeuralPDA(nn.Module):
     def __init__(self,
                  # modules
