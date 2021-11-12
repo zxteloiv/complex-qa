@@ -85,6 +85,7 @@ class PolicyTraining(Updater):
 
         # list[B*S], (B, S), (B, S)
         sampled_data, sampled_prob, sampled_logp = self._sample_modifications(out_logprob, out_prob, filtered_batch)
+        # env_output: (B * S,)
         env_output = self._get_env_reward(sampled_data)
         policy_loss = self._optim_step(env_output['reward'], sampled_prob, sampled_logp)
         output = {"loss": policy_loss}
@@ -140,7 +141,7 @@ class PolicyTraining(Updater):
                 new_data = deepcopy(data)
                 success = modify_tree(new_data['runtime_tree'], node_id.item(), action_id.item())
                 # only the modification with a random number greater than reject_ratio will be saved
-                if success and flag and random.random() > self.reject_ratio:
+                if success and flag and random.random() < self.reject_ratio:
                     self.dataset[new_data['id']] = new_data
                     flag = False
                 else:
@@ -150,8 +151,8 @@ class PolicyTraining(Updater):
         # (B, 1)
         batch_dim_indices = torch.arange(len(batch), device=out_prob.device).unsqueeze(-1)
         # (B, S)
-        sampled_prob = out_prob[batch_dim_indices, nodes, actions].reshape(-1)
-        sampled_logp = out_logprob[batch_dim_indices, nodes, actions].reshape(-1)
+        sampled_prob = out_prob[batch_dim_indices, nodes, actions]
+        sampled_logp = out_logprob[batch_dim_indices, nodes, actions]
 
         # list[B*S], (B, S), (B, S)
         return sampled_data, sampled_prob, sampled_logp
@@ -228,17 +229,25 @@ def cold_start(bot: TrialBot):
                    "dataset": args.dataset,
                    "snapshot-dir": envpath,
                    "hparamset": p.nested_hparamset,
+                   "vocab-dump": osp.join(bot.savepath, 'vocab'),
                    "device": 0}
     nested_bot = s2pda_qa.make_trialbot(setup_null_argv(**nested_args))
 
     # binding the same datasets
     nested_bot.datasets = bot.datasets
 
-    # nested_logfile = osp.join(envpath, f'cold-start-training.log')
-    # logger.info(f'Writing following logs into {nested_logfile} ')
-    # logging.basicConfig(filename=nested_logfile, force=True)
-    # logging.basicConfig(handlers=backup_handlers, force=True)
-    nested_bot.run(p.cold_start_epoch)
+    pretrained_env_path = getattr(p, 'pretrained_env_model', None)
+    if pretrained_env_path is None:
+        # nested_logfile = osp.join(envpath, f'cold-start-training.log')
+        # logger.info(f'Writing following logs into {nested_logfile} ')
+        # logging.basicConfig(filename=nested_logfile, force=True)
+        # logging.basicConfig(handlers=backup_handlers, force=True)
+        nested_bot.run(p.cold_start_epoch)
+    else:
+        logging.info(f'loading the pretrained env model from {pretrained_env_path} ...')
+        nested_bot.model.load_state_dict(torch.load(pretrained_env_path))
+        if args.device >= 0:
+            nested_bot.model.cuda(args.device)
 
     nested_bot.hparams.TRAINING_LIMIT = p.finetune_epoch
     bot.updater.envbot = nested_bot
@@ -290,7 +299,7 @@ def updating_dev_and_test_dataset(bot: TrialBot):
     parser = bot.state.parser
     logging.info(f'Updating the dev dataset by new grammar ...')
     updating_trees(parser, bot.dev_set)
-    logging.info(f'Updating the dev dataset by new grammar ...')
+    logging.info(f'Updating the test dataset by new grammar ...')
     updating_trees(parser, bot.test_set)
 
 
