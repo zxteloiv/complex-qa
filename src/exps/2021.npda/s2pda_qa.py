@@ -45,24 +45,6 @@ def build_tutor_objects(tgt_ns, vocab, tutor_repr):
     return gt
 
 
-# def init_tailored_tutor(p, vocab, *, dataset_name: str):
-#     os.makedirs(osp.join(p.DATA_PATH, 'npda-tutors-dump'), exist_ok=True)
-#     tutor_dump_name = osp.join(p.DATA_PATH, 'npda-tutors-dump', f"tt_{dataset_name}.pkl")
-#
-#     if osp.exists(tutor_dump_name):
-#         logging.getLogger(__name__).info(f"Use the existing tutor dump... {tutor_dump_name}")
-#         tutor_repr = pickle.load(open(tutor_dump_name, 'rb'))
-#     else:
-#         logging.getLogger(__name__).info(f"Build the tutor dump for the first time...")
-#         tutor_repr = get_tutor_from_train_set(vocab, Registry.get_dataset(dataset_name)[0], dataset_name)
-#
-#         if tutor_dump_name is not None:
-#             logging.getLogger(__name__).info(f"Dump the tutor information... {tutor_dump_name}")
-#             pickle.dump(tutor_repr, open(tutor_dump_name, 'wb'))
-#
-#     return build_tutor_objects(p.tgt_ns, vocab, tutor_repr)
-
-
 def get_tree_encoder(p, vocab):
     import models.neural_pda.partial_tree_encoder as partial_tree
     from models.modules.decomposed_bilinear import DecomposedBilinear
@@ -309,11 +291,11 @@ def make_trialbot(args=None):
 
 
 def update_grammar_tutor(bot: TrialBot):
-    args, p, vocab = bot.args, bot.hparams, bot.vocab
+    args, p, vocab, logger = bot.args, bot.hparams, bot.vocab, bot.logger
     dataset_name = args.dataset
     from models.neural_pda.seq2pda import Seq2PDA
     s2pda: Seq2PDA = bot.model
-    logging.getLogger(__name__).info(f"Update the tutor ...")
+    logger.info(f"Update the tutor ...")
     tutor_repr = get_tutor_from_train_set(vocab, bot.train_set, dataset_name)
     gt = build_tutor_objects(p.tgt_ns, vocab, tutor_repr)
     if args.device >= 0:

@@ -50,28 +50,17 @@ class PolicyTraining(Updater):
         iterator = RandomIterator(len(bot.train_set), p.batch_sz)
         logger.info(f"Using RandomIterator with batch={p.batch_sz}")
 
-        models = list(bot.models)
-        optims = [select_optim(p, m.parameters()) for m in models]
-
-        super().__init__(models, iterator, optims, args.device)
+        super().__init__(bot.models, iterator, select_optim(p, bot.model.parameters()), args.device)
 
         self.dataset = bot.train_set
         self.translator = bot.translator
         self.logger = logging.getLogger(self.__class__.__name__)
         self.envbot: Optional[TrialBot] = None
 
-        self.reject_ratio = p.reject_ratio
-        self.decay_rate = p.reject_decay_rate
+        self.update_dataset: bool = False
 
-
-        # the quick and dirty method to allow the updater to access components and states of the trial,
-        # is to add a reference of the bot to the trainer instance,
-        # although the updater is initialized and should be theoretically managed by the bot.
-        # Its lifetime is constrained by the bot.
-        # However, adding the reference has advantages, too.
-        # By keeping the components and states all belonging to the bot, the updater could be kept stateless,
-        # which is meaningful and leads to a consistent implementation in mind.
-        self.dominated_bot = bot
+        self.accept_modification_ratio = p.accept_modification_ratio
+        self.decay_rate = p.decay_rate
 
     def update_epoch(self):
         # batch_data: list of data (key-value pairs)
@@ -85,9 +74,12 @@ class PolicyTraining(Updater):
 
         # list[B*S], (B, S), (B, S)
         sampled_data, sampled_prob, sampled_logp = self._sample_modifications(out_logprob, out_prob, filtered_batch)
-        # env_output: (B * S,)
-        env_output = self._get_env_reward(sampled_data)
-        policy_loss = self._optim_step(env_output['reward'], sampled_prob, sampled_logp)
+        batch_sz, sample_num = sampled_prob.size()
+        # reward: (B, S)
+        reward = self._get_env_reward(sampled_data, batch_sz, sample_num)
+        policy_loss = self._optim_step(reward, sampled_prob, sampled_logp)
+        if self.update_dataset:     # a flag set to False during warming-up
+            self._update_training_set(sampled_data, sample_num, reward)
         output = {"loss": policy_loss}
         return output
 
@@ -132,20 +124,13 @@ class PolicyTraining(Updater):
         model: TreeActionPolicy = self._models[0]
         # sample some policies (size S) for each tree example in the batch
         # (B, S), (B, S), pure tensors (no backwards)
-        nodes, actions = model.decode(out_prob, out_logprob, method="topk")
+        nodes, actions = model.decode(out_prob, out_logprob, method="topk", sample_num=5)
 
         sampled_data = []
         for i, data in enumerate(batch):
-            flag = True     # any batch sampling will include a single candidate used in the next epoch
             for sample_j, (node_id, action_id) in enumerate(zip(nodes[i], actions[i])):
                 new_data = deepcopy(data)
-                success = modify_tree(new_data['runtime_tree'], node_id.item(), action_id.item())
-                # only the modification with a random number greater than reject_ratio will be saved
-                if success and flag and random.random() < self.reject_ratio:
-                    self.dataset[new_data['id']] = new_data
-                    flag = False
-                else:
-                    new_data = data
+                modify_tree(new_data['runtime_tree'], node_id.item(), action_id.item())
                 sampled_data.append(new_data)
 
         # (B, 1)
@@ -157,9 +142,9 @@ class PolicyTraining(Updater):
         # list[B*S], (B, S), (B, S)
         return sampled_data, sampled_prob, sampled_logp
 
-    def _get_env_reward(self, batch):
+    def _get_env_reward(self, sampled_batch, batch_sz: int, sample_num: int) -> torch.Tensor:
         translator = self.envbot.translator
-        tensor_list = [translator.to_tensor(x) for x in batch]
+        tensor_list = [translator.to_tensor(x) for x in sampled_batch]
         tensor_batch = translator.batch_tensor(tensor_list)
         if self._device >= 0:
             tensor_batch = move_to_device(tensor_batch, self._device)
@@ -174,45 +159,66 @@ class PolicyTraining(Updater):
                            expansion_frontiers=tensor_batch['expansion_frontiers'],
                            derivations=tensor_batch['derivations'],
                            )
-        return output
+        # reward: (B, S)
+        env_reward = output['reward']
+        logit_reward = env_reward.reshape(batch_sz, sample_num)
+        # add a high temperature to the reward computation
+        # reward = torch.nn.functional.softmax(logit_reward * sample_num, dim=-1).detach_()
+        # reward = torch.sigmoid(logit_reward).detach_()
+        # std, mean = torch.std_mean(logit_reward, dim=-1, keepdim=True, unbiased=False)
+        # reward = ((logit_reward - mean) / std).sigmoid()
+        reward = logit_reward * (logit_reward > 0)   # the rule scorer must be greater than 0
+        return reward
 
-    def _optim_step(self, env_reward, sampled_prob, sampled_logp):
+    def _update_training_set(self, sampled_batch, sample_num: int, reward):
+        # updating the training example to the new sample with the largest reward
+        # max_idx: (B,)
+        _, max_idx = torch.max(reward.detach(), dim=-1)
+        for i, data in enumerate(sampled_batch):
+            row = i // sample_num
+            col = i % sample_num
+            if col == max_idx[row].item() and random.random() < self.accept_modification_ratio:
+                self.dataset[data['id']] = data
+
+    def _optim_step(self, reward, sampled_prob, sampled_logp):
         """
-        :param env_reward: (B * S,), the logits returned by the rule scorer for each sample
-        :param prob: (B, S)
-        :param logprob: (B, S)
+        :param reward: (B, S), the env_reward
+        :param sampled_prob: (B, S)
+        :param sampled_logp: (B, S)
         """
         for m, opt in zip(self._models, self._optims):
             m.train()
             opt.zero_grad()
 
-        # reward: (B, S)
-        logit_reward = env_reward.reshape(*sampled_prob.size())
-        reward = torch.nn.functional.softmax(logit_reward, dim=-1)
-
         bounded_policy_reward = (reward + reward / (sampled_prob + 1e-20)).detach()
-
-        policy_loss = - (sampled_logp * bounded_policy_reward).mean() + math.log(2)
+        policy_loss = - (sampled_logp * bounded_policy_reward).mean()
+        self.logger.info(f"step reward: {reward.mean().item():.8f}")
 
         policy_loss.backward()
-
         for opt in self._optims:
             opt.step()
 
         return policy_loss
 
 
-def reject_ratio_decay(bot: TrialBot):
+def accept_modification_schedule(bot: TrialBot):
     epoch = bot.state.epoch
+    p = bot.hparams
     updater: PolicyTraining = bot.updater
 
-    if epoch <= 1:
-        logging.info(f"Using the reject_ratio {updater.reject_ratio:6.4f} for tree modifications")
-    else:
+    if epoch <= p.policy_warmup_epoch:
+        logging.info(f"Using the reject_ratio {updater.accept_modification_ratio:6.4f} for tree modifications")
+        return
+
+    if epoch == p.policy_warmup_epoch + 1:
+        logging.info(f"the training set will get updated along the policy net training from now on")
+        updater.update_dataset = True
+
+    if epoch > p.policy_warmup_epoch + 1:
         # the reject ratio will keep decreasing during the training process,
         # thus in a later epoch, the modifications will be less likely to get accepted.
-        updater.reject_ratio *= updater.decay_rate
-        logging.info(f"Rejection Ratio decayed to {updater.reject_ratio:6.4f}")
+        updater.accept_modification_ratio *= updater.decay_rate
+        logging.info(f"Rejection Ratio decayed to {updater.accept_modification_ratio:6.4f}")
 
 
 def cold_start(bot: TrialBot):
@@ -235,6 +241,7 @@ def cold_start(bot: TrialBot):
 
     # binding the same datasets
     nested_bot.datasets = bot.datasets
+    nested_bot.updater.dataset = bot.train_set
 
     pretrained_env_path = getattr(p, 'pretrained_env_model', None)
     if pretrained_env_path is None:
@@ -253,7 +260,11 @@ def cold_start(bot: TrialBot):
     bot.updater.envbot = nested_bot
 
 
-def collect_epoch_grammars(bot: TrialBot):
+def collect_epoch_grammars(bot: TrialBot, update_train_set: bool = False, update_runtime_parser: bool = True):
+    p = bot.hparams
+    if 0 < bot.state.epoch <= p.policy_warmup_epoch:
+        return
+
     bot.logger.info("Collecting grammar from the training trees...")
     train_trees = list(filter(None, [data['runtime_tree'] for data in bot.train_set]))
     if len(train_trees) == 0:
@@ -270,13 +281,20 @@ def collect_epoch_grammars(bot: TrialBot):
     g, terminals = restore_grammar_from_trees(train_trees, export_terminal_values=False)
     g_txt = export_grammar(g, start, lex_in, terminals if export_terminals else None, excluded,
                            treat_terminals_as_categories=False,)
-
-    bot.state.g_txt = g_txt
     grammar_filename = osp.join(bot.savepath, f"grammar_{bot.state.epoch}.lark")
+    if update_train_set:
+        grammar_filename = osp.join(bot.savepath, f"grammar_{bot.state.epoch}.upd.lark")
     bot.logger.info(f"Grammar saved to {grammar_filename}")
     print(g_txt, file=open(grammar_filename, 'w'))
-    parser = lark.Lark(bot.state.g_txt, start=start.name, keep_all_tokens=True)
-    bot.state.parser = parser
+
+    if update_runtime_parser:
+        bot.state.g_txt = g_txt
+        parser = lark.Lark(bot.state.g_txt, start=start.name, keep_all_tokens=True)
+        bot.state.parser = parser
+
+        if update_train_set:
+            logging.info(f'Updating the train dataset by new grammar ...')
+            updating_trees(parser, bot.train_set)
 
 
 def updating_trees(parser, dataset):
@@ -286,7 +304,7 @@ def updating_trees(parser, dataset):
             x['sql_tree'] = t
             x['runtime_tree'] = build_from_lark_tree(t, add_eps_nodes=True)
         except KeyboardInterrupt:
-            raise SystemExit("Received Keyboard Interupt and Exit now.")
+            raise SystemExit("Received Keyboard Interrupt and Exit now.")
         except:
             logging.warning(f'failed to parse the example {i}: {x["sent"]}')
             x['sql_tree'] = None
@@ -297,6 +315,9 @@ def updating_trees(parser, dataset):
 
 def updating_dev_and_test_dataset(bot: TrialBot):
     parser = bot.state.parser
+    p = bot.hparams
+    if bot.state.epoch <= p.policy_warmup_epoch:
+        return
     logging.info(f'Updating the dev dataset by new grammar ...')
     updating_trees(parser, bot.dev_set)
     logging.info(f'Updating the test dataset by new grammar ...')
@@ -306,6 +327,11 @@ def updating_dev_and_test_dataset(bot: TrialBot):
 def finetune_env_model(bot: TrialBot):
     updater: PolicyTraining = bot.updater
     epoch = bot.state.epoch
+    if bot.state.epoch <= bot.hparams.policy_warmup_epoch:
+        return
+
+    logging.info('Start model fine-tuning on the updated training set')
+
     reset(updater.envbot)
     nested_path = osp.join(bot.savepath, f'nested-env-ep-{epoch}')
     updater.envbot.savepath = nested_path
@@ -322,7 +348,7 @@ def crude_conf():
     p = HyperParamSet.common_settings(find_root())
 
     p.batch_sz = 16
-    p.TRAINING_LIMIT = 100
+    p.TRAINING_LIMIT = 60
 
     # policy net params
     p.node_emb_sz = 100
@@ -338,16 +364,19 @@ def crude_conf():
     p.bilinear_bias = True
     p.action_num = 6
     p.max_children_num = 12
-    p.reject_ratio = .6
-    p.reject_decay_rate = .8
+    p.accept_modification_ratio = .6
+    p.decay_rate = .8
 
     # parser params
     p.nested_translator = 'cg_sql_pda'
     p.nested_hparamset = 'sql_pda'
     p.cold_start_epoch = 30
-    p.finetune_epoch = 4
+    p.finetune_epoch = 20
     p.src_namespace = 'sent'
     p.tgt_namespace = 'symbol'
+
+    p.policy_warmup_epoch = 30
+    p.pretrained_env_model = None
     return p
 
 
@@ -379,7 +408,6 @@ def main():
     bot = TrialBot(trial_name='rgs_policy', get_model_func=get_models, args=args)
 
     bot.add_event_handler(Events.STARTED, print_hyperparameters, 90)
-    bot.add_event_handler(Events.EPOCH_COMPLETED, get_metrics, 100)
     bot.add_event_handler(Events.STARTED, print_models, 100)
     bot.add_event_handler(Events.STARTED, print_snaptshot_path, 50)
 
@@ -389,9 +417,11 @@ def main():
 
         bot.add_event_handler(Events.ITERATION_COMPLETED, end_with_nan_loss, 100)
         bot.add_event_handler(Events.ITERATION_COMPLETED, collect_garbage, 95)
-        bot.add_event_handler(Events.EPOCH_STARTED, reject_ratio_decay, 100)
-        bot.add_event_handler(Events.EPOCH_COMPLETED, collect_epoch_grammars, 120)
         bot.add_event_handler(Events.EPOCH_COMPLETED, save_multiple_models_per_epoch, 100)
+
+        bot.add_event_handler(Events.EPOCH_STARTED, accept_modification_schedule, 100)
+        bot.add_event_handler(Events.EPOCH_COMPLETED, collect_epoch_grammars, 100, update_train_set=True)
+        bot.add_event_handler(Events.EPOCH_COMPLETED, collect_epoch_grammars, 100, update_runtime_parser=False)
         bot.add_event_handler(Events.EPOCH_COMPLETED, updating_dev_and_test_dataset, 100)
         bot.add_event_handler(Events.EPOCH_COMPLETED, finetune_env_model, 100)
         bot.updater = PolicyTraining(bot)
