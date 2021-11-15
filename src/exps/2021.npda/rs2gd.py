@@ -192,7 +192,7 @@ class PolicyTraining(Updater):
 
         bounded_policy_reward = (reward + reward / (sampled_prob + 1e-20)).detach()
         policy_loss = - (sampled_logp * bounded_policy_reward).mean()
-        self.logger.info(f"step reward: {reward.mean().item():.8f}")
+        self.logger.info(f"step reward: {reward.mean().item():.4f}")
 
         policy_loss.backward()
         for opt in self._optims:
@@ -207,7 +207,7 @@ def accept_modification_schedule(bot: TrialBot):
     updater: PolicyTraining = bot.updater
 
     if epoch <= p.policy_warmup_epoch:
-        logging.info(f"Using the reject_ratio {updater.accept_modification_ratio:6.4f} for tree modifications")
+        logging.info(f"Using the accept ratio {updater.accept_modification_ratio:6.4f} for tree modifications")
         return
 
     if epoch == p.policy_warmup_epoch + 1:
@@ -215,10 +215,10 @@ def accept_modification_schedule(bot: TrialBot):
         updater.update_dataset = True
 
     if epoch > p.policy_warmup_epoch + 1:
-        # the reject ratio will keep decreasing during the training process,
+        # the accept ratio will keep decreasing during the training process,
         # thus in a later epoch, the modifications will be less likely to get accepted.
         updater.accept_modification_ratio *= updater.decay_rate
-        logging.info(f"Rejection Ratio decayed to {updater.accept_modification_ratio:6.4f}")
+        logging.info(f"Accept Ratio decayed to {updater.accept_modification_ratio:6.4f}")
 
 
 def cold_start(bot: TrialBot):
@@ -332,7 +332,7 @@ def finetune_env_model(bot: TrialBot):
 
     logging.info('Start model fine-tuning on the updated training set')
 
-    reset(updater.envbot)
+    reset(updater.envbot, reset_optimizer=True)
     nested_path = osp.join(bot.savepath, f'nested-env-ep-{epoch}')
     updater.envbot.savepath = nested_path
     backup_handlers = logging.root.handlers[:]
