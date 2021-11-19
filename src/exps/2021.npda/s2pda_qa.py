@@ -262,24 +262,30 @@ class PDATrainingUpdater(Updater):
         return output
 
 
-def make_trialbot(args=None):
+def make_trialbot(args=None, print_details: bool = False, epoch_eval: bool = False,
+                  train_metric_pref: str = 'Training Metrics: ',
+                  ):
     if args is None:
         args = setup(seed=2021)
 
     bot = TrialBot(trial_name="s2pda_qa", get_model_func=get_model, args=args)
 
     from utils.trialbot.extensions import collect_garbage, print_hyperparameters, print_models, get_metrics
-    # bot.add_event_handler(Events.STARTED, print_models, 100)
-    # bot.add_event_handler(Events.STARTED, print_hyperparameters, 100)
+    if print_details:
+        bot.add_event_handler(Events.STARTED, print_models, 100)
+        bot.add_event_handler(Events.STARTED, print_hyperparameters, 100)
+
     bot.add_event_handler(Events.STARTED, update_grammar_tutor, 100)
-    bot.add_event_handler(Events.EPOCH_COMPLETED, get_metrics, 100, prefix="Training Metrics: ")
+    bot.add_event_handler(Events.EPOCH_COMPLETED, get_metrics, 100, prefix=train_metric_pref)
     if not args.test:
         # --------------------- Training -------------------------------
         from trialbot.training.extensions import every_epoch_model_saver
         from utils.trialbot.extensions import end_with_nan_loss
-        from utils.trialbot.extensions import evaluation_on_dev_every_epoch
-        bot.add_event_handler(Events.EPOCH_COMPLETED, evaluation_on_dev_every_epoch, 90, skip_first_epochs=0)
-        bot.add_event_handler(Events.EPOCH_COMPLETED, evaluation_on_dev_every_epoch, 90, skip_first_epochs=0, on_test_data=True)
+        if epoch_eval:
+            from utils.trialbot.extensions import evaluation_on_dev_every_epoch
+            bot.add_event_handler(Events.EPOCH_COMPLETED, evaluation_on_dev_every_epoch, 90, skip_first_epochs=0)
+            bot.add_event_handler(Events.EPOCH_COMPLETED, evaluation_on_dev_every_epoch, 90, skip_first_epochs=0, on_test_data=True)
+
         bot.add_event_handler(Events.EPOCH_COMPLETED, every_epoch_model_saver, 100)
         bot.add_event_handler(Events.EPOCH_COMPLETED, collect_garbage, 80)
         bot.add_event_handler(Events.ITERATION_COMPLETED, end_with_nan_loss, 100)
@@ -304,4 +310,4 @@ def update_grammar_tutor(bot: TrialBot):
 
 
 if __name__ == '__main__':
-    make_trialbot().run()
+    make_trialbot(print_details=True, epoch_eval=True).run()

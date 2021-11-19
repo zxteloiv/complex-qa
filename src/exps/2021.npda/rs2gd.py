@@ -15,6 +15,7 @@ from trialbot.data.iterators import RandomIterator
 sys.path.insert(0, osp.abspath(osp.join(osp.dirname(__file__), '..', '..')))
 
 from allennlp.modules.seq2seq_encoders import LstmSeq2SeqEncoder
+from allennlp.training.metrics.perplexity import Average
 from models.neural_pda.tree_action_policy import TreeActionPolicy
 from models.base_s2s.stacked_encoder import StackedEncoder
 from models.modules.attention_composer import get_attn_composer
@@ -56,11 +57,17 @@ class PolicyTraining(Updater):
         self.translator = bot.translator
         self.logger = logging.getLogger(self.__class__.__name__)
         self.envbot: Optional[TrialBot] = None
+        self.parserbot: Optional[TrialBot] = None
 
         self.update_dataset: bool = False
 
         self.accept_modification_ratio = p.accept_modification_ratio
         self.decay_rate = p.decay_rate
+        self.reward_metric = Average()
+
+    def get_metric(self, reset=False):
+        reward = self.reward_metric.get_metric(reset)
+        return {"Reward": reward}
 
     def update_epoch(self):
         # batch_data: list of data (key-value pairs)
@@ -77,6 +84,7 @@ class PolicyTraining(Updater):
         batch_sz, sample_num = sampled_prob.size()
         # reward: (B, S)
         reward = self._get_env_reward(sampled_data, batch_sz, sample_num)
+        self.reward_metric(reward.mean())
         policy_loss = self._optim_step(reward, sampled_prob, sampled_logp)
         if self.update_dataset:     # a flag set to False during warming-up
             self._update_training_set(sampled_data, sample_num, reward)
@@ -192,7 +200,6 @@ class PolicyTraining(Updater):
 
         bounded_policy_reward = (reward + reward / (sampled_prob + 1e-20)).detach()
         policy_loss = - (sampled_logp * bounded_policy_reward).mean()
-        self.logger.info(f"step reward: {reward.mean().item():.4f}")
 
         policy_loss.backward()
         for opt in self._optims:
@@ -223,41 +230,31 @@ def accept_modification_schedule(bot: TrialBot):
 
 def cold_start(bot: TrialBot):
     args, p, logger = bot.args, bot.hparams, bot.logger
-    envpath = osp.join(bot.savepath, f'env-0-cold_start')
-    os.makedirs(envpath, exist_ok=True)
-
-    logger.info(f'Running cold start for env model within {envpath}... {dt.now().strftime("%H:%M:%S")}')
-
-    backup_handlers = logging.root.handlers[:]
     assert all(hasattr(p, a) for a in ('nested_translator', 'nested_hparamset'))
+    nested_args = {"translator": p.nested_translator, "dataset": args.dataset, "hparamset": p.nested_hparamset,
+                   "vocab-dump": osp.join(bot.savepath, 'vocab'), "device": 0}
 
-    nested_args = {"translator": p.nested_translator,
-                   "dataset": args.dataset,
-                   "snapshot-dir": envpath,
-                   "hparamset": p.nested_hparamset,
-                   "vocab-dump": osp.join(bot.savepath, 'vocab'),
-                   "device": 0}
-    nested_bot = s2pda_qa.make_trialbot(setup_null_argv(**nested_args))
+    # init the bot which is responsible for dispatching rewards, and bind the same dataset of the policy bot
+    envpath = osp.join(bot.savepath, f'env-0-cold_start')
+    logger.info(f'Running cold start for env model within {envpath}... {dt.now().strftime("%H:%M:%S")}')
+    nested_args['snapshot-dir'] = envpath
+    envbot = s2pda_qa.make_trialbot(setup_null_argv(**nested_args), train_metric_pref='Env Metrics: ')
+    envbot.datasets = tuple([bot.dev_set, bot.dev_set, bot.test_set])
+    envbot.updater = s2pda_qa.PDATrainingUpdater(envbot)
+    envbot.run(p.cold_start_epoch)
+    envbot.hparams.TRAINING_LIMIT = p.finetune_epoch
+    bot.updater.envbot = envbot
 
-    # binding the same datasets
-    nested_bot.datasets = bot.datasets
-    nested_bot.updater.dataset = bot.train_set
-
-    pretrained_env_path = getattr(p, 'pretrained_env_model', None)
-    if pretrained_env_path is None:
-        # nested_logfile = osp.join(envpath, f'cold-start-training.log')
-        # logger.info(f'Writing following logs into {nested_logfile} ')
-        # logging.basicConfig(filename=nested_logfile, force=True)
-        # logging.basicConfig(handlers=backup_handlers, force=True)
-        nested_bot.run(p.cold_start_epoch)
-    else:
-        logging.info(f'loading the pretrained env model from {pretrained_env_path} ...')
-        nested_bot.model.load_state_dict(torch.load(pretrained_env_path))
-        if args.device >= 0:
-            nested_bot.model.cuda(args.device)
-
-    nested_bot.hparams.TRAINING_LIMIT = p.finetune_epoch
-    bot.updater.envbot = nested_bot
+    # init the bot for common parsing, and bind the same dataset of the policy bot
+    parserpath = osp.join(bot.savepath, f'parser-0-cold_start')
+    logger.info(f'Running cold start for parser model within {parserpath}... {dt.now().strftime("%H:%M:%S")}')
+    nested_args['snapshot-dir'] = parserpath
+    parserbot = s2pda_qa.make_trialbot(setup_null_argv(**nested_args), epoch_eval=True)
+    parserbot.datasets = bot.datasets
+    parserbot.updater = s2pda_qa.PDATrainingUpdater(parserbot)
+    parserbot.run(p.cold_start_epoch)
+    parserbot.hparams.TRAINING_LIMIT = p.finetune_epoch
+    bot.updater.parserbot = parserbot
 
 
 def collect_epoch_grammars(bot: TrialBot, update_train_set: bool = False, update_runtime_parser: bool = True):
@@ -330,16 +327,15 @@ def finetune_env_model(bot: TrialBot):
     if bot.state.epoch <= bot.hparams.policy_warmup_epoch:
         return
 
-    logging.info('Start model fine-tuning on the updated training set')
+    logging.info('Start model fine-tuning on the updated set')
 
     reset(updater.envbot, reset_optimizer=True)
-    nested_path = osp.join(bot.savepath, f'nested-env-ep-{epoch}')
-    updater.envbot.savepath = nested_path
-    backup_handlers = logging.root.handlers[:]
-    nested_logfile = osp.join(nested_path, f'epoch-{epoch}-finetuning.log')
-    # logging.basicConfig(filename=nested_logfile, force=True)
+    updater.envbot.savepath = osp.join(bot.savepath, f'env-{epoch}-ft')
     updater.envbot.run()
-    # logging.basicConfig(handlers=backup_handlers, force=True)
+
+    reset(updater.parserbot, reset_optimizer=True)
+    updater.parserbot.savepath = osp.join(bot.savepath, f'parser-{epoch}-ft')
+    updater.parserbot.run()
 
 
 @Registry.hparamset()
@@ -348,7 +344,7 @@ def crude_conf():
     p = HyperParamSet.common_settings(find_root())
 
     p.batch_sz = 16
-    p.TRAINING_LIMIT = 60
+    p.TRAINING_LIMIT = 50
 
     # policy net params
     p.node_emb_sz = 100
