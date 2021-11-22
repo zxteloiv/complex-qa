@@ -118,3 +118,18 @@ def sql_pda():
     return p
 
 
+@Registry.hparamset()
+def sql_pda_big():
+    p = sql_pda()
+    p.overall_dim = 384
+    p.enc_sz = p.overall_dim
+    p.emb_sz = p.overall_dim
+    p.hidden_sz = p.overall_dim
+    p.TRAINING_LIMIT = 300
+    return p
+
+@Registry.hparamset()
+def sql_pda_long():
+    p = sql_pda()
+    p.TRAINING_LIMIT = 300
+    return p
