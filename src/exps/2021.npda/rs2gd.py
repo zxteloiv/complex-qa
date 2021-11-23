@@ -365,7 +365,7 @@ def crude_conf():
 
     # parser params
     p.nested_translator = 'cg_sql_pda'
-    p.nested_hparamset = 'sql_pda'
+    p.nested_hparamset = 'sch_pda'
     p.cold_start_epoch = 30
     p.finetune_epoch = 20
     p.src_namespace = 'sent'
