@@ -40,22 +40,11 @@ def restore_grammar_from_trees(trees: List[TREE]) -> Tuple[cfg.T_CFG, dict]:
 
 
 def export_grammar(g: cfg.T_CFG,
-                   start: cfg.NonTerminal,
                    lex_in: Optional[str] = None,
                    export_terminal_vals: Optional[dict] = None,
                    excluded_terminals=None,
                    treat_terminals_as_categories: bool = False,
-                   remove_eps: bool = True,
-                   remove_useless: bool = True,
-                   remove_unit_rules: bool = False,
                    ) -> str:
-    if remove_eps:
-        g = cfg.remove_eps_rules(g)
-    if remove_useless:
-        g = cfg.remove_useless_rules(g, start)
-    if remove_unit_rules:
-        g = cfg.remove_null_or_unit_rules(g)
-
     grammar_text = io.StringIO()
     if lex_in is not None and osp.isfile(lex_in):
         print(open(lex_in).read(), file=grammar_text)

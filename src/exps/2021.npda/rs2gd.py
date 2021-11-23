@@ -14,6 +14,7 @@ from trialbot.utils.root_finder import find_root
 from trialbot.data.iterators import RandomIterator
 sys.path.insert(0, osp.abspath(osp.join(osp.dirname(__file__), '..', '..')))
 
+from collections import defaultdict
 from allennlp.modules.seq2seq_encoders import LstmSeq2SeqEncoder
 from allennlp.training.metrics.perplexity import Average
 from models.neural_pda.tree_action_policy import TreeActionPolicy
@@ -40,7 +41,7 @@ from utils.select_optim import select_optim
 from trialbot.utils.move_to_device import move_to_device
 from utils.trialbot.setup import setup, setup_null_argv
 from utils.lark.restore_cfg import export_grammar
-from utils.cfg import restore_grammar_from_trees
+from utils.cfg import restore_grammar_from_trees, T_CFG, simplify_grammar
 from idioms.export_conf import get_export_conf
 import s2pda_qa
 
@@ -276,7 +277,10 @@ def collect_epoch_grammars(bot: TrialBot, update_train_set: bool = False, update
     #       export_terminal_values = False, and treat_terminals_as_categories = False,
     # the terminals will be None and thus will not affect the export_grammar function
     g, terminals = restore_grammar_from_trees(train_trees, export_terminal_values=False)
-    g_txt = export_grammar(g, start, lex_in, terminals if export_terminals else None, excluded,
+    g = simplify_grammar(g, start)
+    if bot.state.epoch > 0:
+        g = prioritize_new_grammar_rules(bot.state.g, g)
+    g_txt = export_grammar(g, lex_in, terminals if export_terminals else None, excluded,
                            treat_terminals_as_categories=False,)
     grammar_filename = osp.join(bot.savepath, f"grammar_{bot.state.epoch}.lark")
     if update_train_set:
@@ -285,13 +289,31 @@ def collect_epoch_grammars(bot: TrialBot, update_train_set: bool = False, update
     print(g_txt, file=open(grammar_filename, 'w'))
 
     if update_runtime_parser:
-        bot.state.g_txt = g_txt
-        parser = lark.Lark(bot.state.g_txt, start=start.name, keep_all_tokens=True)
+        bot.state.g = g
+        parser = lark.Lark(g_txt, start=start.name, keep_all_tokens=True)
         bot.state.parser = parser
 
         if update_train_set:
             logging.info(f'Updating the train dataset by new grammar ...')
             updating_trees(parser, bot.train_set)
+
+
+def prioritize_new_grammar_rules(old_g: T_CFG, new_g: T_CFG):
+    prioritized_g = defaultdict(list)
+
+    for lhs, rhs_list in new_g.items():
+        old_rhs_list = old_g.get(lhs)
+        if old_rhs_list is None:
+            prioritized_g[lhs] = rhs_list
+            continue
+
+        old_rules = [rhs for rhs in rhs_list if rhs in old_rhs_list]
+        new_rules = [rhs for rhs in rhs_list if rhs not in old_rhs_list]
+
+        prioritized_g[lhs].extend(new_rules)
+        prioritized_g[lhs].extend(old_rules)
+
+    return prioritized_g
 
 
 def updating_trees(parser, dataset):

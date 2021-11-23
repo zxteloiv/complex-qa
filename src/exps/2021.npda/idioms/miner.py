@@ -83,13 +83,14 @@ class GreedyIdiomMiner:
                          remove_eps: bool = True,
                          remove_useless: bool = True,):
         g, terminal_vals = restore_grammar(self.stat_by_iter[k][0]['rule_dist'], self.collector)
+        g = cfg.simplify_grammar(g, start)
 
         # we do not remove the unit rules since the extraction algorithm will remove them during itertaions
-        g_txt = export_grammar(g, start,
+        g_txt = export_grammar(g,
                                join(find_root(), 'src', 'statics', 'grammar', lex_in),
                                terminal_vals if export_terminals else None,
-                               excluded_terminals, remove_eps, remove_useless,
-                               remove_unit_rules=False)
+                               excluded_terminals,
+                               )
 
         name_pref = self.name
         if not remove_eps:

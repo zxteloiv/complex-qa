@@ -63,10 +63,17 @@ def restore_grammar_from_trees(trees: List[Tree],
     return g, terminal_vals
 
 
-def simplify_grammar(g: T_CFG, start: NonTerminal = None) -> T_CFG:
-    g = remove_eps_rules(g)
-    g = remove_null_or_unit_rules(g)
-    g = remove_useless_rules(g, start)
+def simplify_grammar(g: T_CFG, start: NonTerminal = None,
+                     remove_eps: bool = True,
+                     remove_unit_rules: bool = False,
+                     remove_useless: bool = True,
+                     ) -> T_CFG:
+    if remove_eps:
+        g = remove_eps_rules(g)
+    if remove_unit_rules:
+        g = remove_null_or_unit_rules(g)
+    if remove_useless:
+        g = remove_useless_rules(g, start)
     return g
 
 
