@@ -70,7 +70,7 @@ def cfq_pda():
 @Registry.hparamset()
 def sql_pda():
     p = HyperParamSet.common_settings(find_root())
-    p.TRAINING_LIMIT = 100
+    p.TRAINING_LIMIT = 300
     p.OPTIM = "adabelief"
     p.batch_sz = 16
     p.WEIGHT_DECAY = 1e-6
@@ -119,36 +119,9 @@ def sql_pda():
 
 
 @Registry.hparamset()
-def sql_pda_big():
+def sch_pda():
     p = sql_pda()
-    p.overall_dim = 384
-    p.enc_sz = p.overall_dim
-    p.emb_sz = p.overall_dim
-    p.hidden_sz = p.overall_dim
-    p.TRAINING_LIMIT = 300
+    p.enc_sz = 384
+    p.emb_sz = p.hidden_sz = 256
+    p.num_enc_layers = 2
     return p
-
-@Registry.hparamset()
-def sql_pda_long():
-    p = sql_pda()
-    p.TRAINING_LIMIT = 300
-    return p
-
-
-from trialbot.utils.grid_search_helper import import_grid_search_parameters
-import_grid_search_parameters(
-    # grid_conf={
-    #     "TRAINING_LIMIT": [300],
-    #     "enc_sz": [128, 256, 384],    # (enc384, emb256=hid256) ~> (384, 384, 384) >> all others
-    #     "emb_sz": [128, 256, 384],
-    #     "hidden_sz": [128, 256, 384],
-    # },
-    grid_conf={
-        "TRAINING_LIMIT": [300],
-        "num_enc_layers": [1, 3],
-        "enc_sz": [128, 256, 384],
-        "emb_sz": [256],
-        "hidden_sz": [256],
-    },
-    base_param_fn=sql_pda,
-)
