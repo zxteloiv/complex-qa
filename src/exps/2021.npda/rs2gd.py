@@ -416,6 +416,7 @@ def main():
         bot.add_event_handler(Events.EPOCH_COMPLETED, save_multiple_models_per_epoch, 100)
 
         bot.add_event_handler(Events.EPOCH_STARTED, accept_modification_schedule, 100)
+        bot.add_event_handler(Events.EPOCH_COMPLETED, get_metrics, 100, prefix="Reward Metrics: ")
         bot.add_event_handler(Events.EPOCH_COMPLETED, collect_epoch_grammars, 100, update_train_set=True)
         bot.add_event_handler(Events.EPOCH_COMPLETED, collect_epoch_grammars, 100, update_runtime_parser=False)
         bot.add_event_handler(Events.EPOCH_COMPLETED, updating_dev_and_test_dataset, 100)
