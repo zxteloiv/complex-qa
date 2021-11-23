@@ -133,3 +133,22 @@ def sql_pda_long():
     p = sql_pda()
     p.TRAINING_LIMIT = 300
     return p
+
+
+from trialbot.utils.grid_search_helper import import_grid_search_parameters
+import_grid_search_parameters(
+    # grid_conf={
+    #     "TRAINING_LIMIT": [300],
+    #     "enc_sz": [128, 256, 384],    # (enc384, emb256=hid256) ~> (384, 384, 384) >> all others
+    #     "emb_sz": [128, 256, 384],
+    #     "hidden_sz": [128, 256, 384],
+    # },
+    grid_conf={
+        "TRAINING_LIMIT": [300],
+        "num_enc_layers": [1, 3],
+        "enc_sz": [128, 256, 384],
+        "emb_sz": [256],
+        "hidden_sz": [256],
+    },
+    base_param_fn=sql_pda,
+)
