@@ -7,6 +7,7 @@ import math
 import random
 from copy import deepcopy
 from datetime import datetime as dt
+import json
 import torch
 import torch.nn.functional
 import lark
@@ -438,7 +439,11 @@ def main():
         bot.add_event_handler(Events.EPOCH_COMPLETED, save_multiple_models_per_epoch, 100)
 
         bot.add_event_handler(Events.EPOCH_STARTED, accept_modification_schedule, 100)
-        bot.add_event_handler(Events.EPOCH_COMPLETED, get_metrics, 100, prefix="Reward Metrics: ")
+
+        @bot.attach_extension(Events.EPOCH_COMPLETED)
+        def get_updater_metrics(bot: TrialBot, prefix="Reward Metrics: "):
+            bot.logger.info(prefix + json.dumps(bot.updater.get_metric(reset=True)))
+
         bot.add_event_handler(Events.EPOCH_COMPLETED, collect_epoch_grammars, 100, update_train_set=True)
         bot.add_event_handler(Events.EPOCH_COMPLETED, collect_epoch_grammars, 100, update_runtime_parser=False)
         bot.add_event_handler(Events.EPOCH_COMPLETED, updating_dev_and_test_dataset, 100)
