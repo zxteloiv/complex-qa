@@ -215,19 +215,13 @@ def accept_modification_schedule(bot: TrialBot):
     p = bot.hparams
     updater: PolicyTraining = bot.updater
 
-    if epoch <= p.policy_warmup_epoch:
-        logging.info(f"Using the accept ratio {updater.accept_modification_ratio:6.4f} for tree modifications")
-        return
-
-    if epoch == p.policy_warmup_epoch + 1:
-        logging.info(f"the training set will get updated along the policy net training from now on")
+    if epoch % p.policy_warmup_interval == 0:
         updater.update_dataset = True
-
-    if epoch > p.policy_warmup_epoch + 1:
-        # the accept ratio will keep decreasing during the training process,
-        # thus in a later epoch, the modifications will be less likely to get accepted.
         updater.accept_modification_ratio *= updater.decay_rate
-        logging.info(f"Accept Ratio decayed to {updater.accept_modification_ratio:6.4f}")
+        bot.logger.info(f"In the critical epoch, accept Ratio decayed to {updater.accept_modification_ratio:6.4f}")
+    else:
+        updater.update_dataset = False
+        bot.logger.info("This is a warmup epoch")
 
 
 def cold_start(bot: TrialBot):
@@ -261,7 +255,7 @@ def cold_start(bot: TrialBot):
 
 def collect_epoch_grammars(bot: TrialBot, update_train_set: bool = False, update_runtime_parser: bool = True):
     p = bot.hparams
-    if 0 < bot.state.epoch <= p.policy_warmup_epoch:
+    if not (bot.updater.update_dataset or bot.state.epoch == 0):
         return
 
     bot.logger.info("Collecting grammar from the training trees...")
@@ -336,7 +330,7 @@ def updating_trees(parser, dataset):
 def updating_dev_and_test_dataset(bot: TrialBot):
     parser = bot.state.parser
     p = bot.hparams
-    if bot.state.epoch <= p.policy_warmup_epoch:
+    if not bot.updater.update_dataset:
         return
     logging.info(f'Updating the dev dataset by new grammar ...')
     updating_trees(parser, bot.dev_set)
@@ -347,7 +341,7 @@ def updating_dev_and_test_dataset(bot: TrialBot):
 def finetune_env_model(bot: TrialBot):
     updater: PolicyTraining = bot.updater
     epoch = bot.state.epoch
-    if bot.state.epoch <= bot.hparams.policy_warmup_epoch:
+    if not updater.update_dataset:
         return
 
     logging.info('Start model fine-tuning on the updated set')
@@ -367,7 +361,7 @@ def crude_conf():
     p = HyperParamSet.common_settings(find_root())
 
     p.batch_sz = 16
-    p.TRAINING_LIMIT = 50
+    p.TRAINING_LIMIT = 400
 
     # policy net params
     p.node_emb_sz = 100
@@ -383,7 +377,7 @@ def crude_conf():
     p.bilinear_bias = True
     p.action_num = 6
     p.max_children_num = 12
-    p.accept_modification_ratio = .6
+    p.accept_modification_ratio = .75
     p.decay_rate = .8
 
     # parser params
@@ -394,8 +388,7 @@ def crude_conf():
     p.src_namespace = 'sent'
     p.tgt_namespace = 'symbol'
 
-    p.policy_warmup_epoch = 30
-    p.pretrained_env_model = None
+    p.policy_warmup_interval = 20
     return p
 
 
