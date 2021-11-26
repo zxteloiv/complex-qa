@@ -388,7 +388,7 @@ def crude_conf():
     p.src_namespace = 'sent'
     p.tgt_namespace = 'symbol'
 
-    p.policy_warmup_interval = 20
+    p.policy_warmup_interval = 30
     return p
 
 
