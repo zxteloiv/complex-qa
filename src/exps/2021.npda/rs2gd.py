@@ -215,13 +215,19 @@ def accept_modification_schedule(bot: TrialBot):
     p = bot.hparams
     updater: PolicyTraining = bot.updater
 
-    if epoch % p.policy_warmup_interval == 0:
+    if epoch < p.policy_warmup_epoch:
+        updater.update_dataset = False
+        bot.logger.info("This is a warmup epoch")
+
+    # at the policy_warmup_epoch (say, the 30th epoch), the grammar will get updated for the first time
+    elif (epoch - p.policy_warmup_epoch) % p.policy_finetune_epoch == 0:
         updater.update_dataset = True
         updater.accept_modification_ratio *= updater.decay_rate
         bot.logger.info(f"In the critical epoch, accept Ratio decayed to {updater.accept_modification_ratio:6.4f}")
+
     else:
         updater.update_dataset = False
-        bot.logger.info("This is a warmup epoch")
+        bot.logger.info("This is a policy fine-tuning epoch")
 
 
 def cold_start(bot: TrialBot):
@@ -254,7 +260,6 @@ def cold_start(bot: TrialBot):
 
 
 def collect_epoch_grammars(bot: TrialBot, update_train_set: bool = False, update_runtime_parser: bool = True):
-    p = bot.hparams
     if not (bot.updater.update_dataset or bot.state.epoch == 0):
         return
 
@@ -361,7 +366,6 @@ def crude_conf():
     p = HyperParamSet.common_settings(find_root())
 
     p.batch_sz = 16
-    p.TRAINING_LIMIT = 400
 
     # policy net params
     p.node_emb_sz = 100
@@ -388,7 +392,13 @@ def crude_conf():
     p.src_namespace = 'sent'
     p.tgt_namespace = 'symbol'
 
-    p.policy_warmup_interval = 30
+    p.policy_warmup_epoch = 30
+    p.policy_finetune_epoch = 20
+
+    # aiming for 20 turns of grammar modification: 30 warmup + 20 finetuning epoch / mod turns * 20 mod turns
+    p.grammar_modification_turns = 20
+
+    p.TRAINING_LIMIT = p.policy_warmup_epoch + p.policy_finetune_epoch * p.grammar_modification_turns
     return p
 
 
