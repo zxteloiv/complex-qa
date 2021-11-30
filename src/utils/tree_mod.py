@@ -12,12 +12,12 @@ def build_parent_link(t: Tree, parent=None) -> Tree:
 
 
 def modify_tree(t: Tree, node_idx: int, action_id: int) -> bool:
-    actions = [del_self, add_parent, left_rotate, right_rotate, left_descent, right_descent]
+    actions = [del_self, add_parent, left_rotate, right_rotate, left_descent, right_descent, left_ascent, right_ascent]
     t = build_parent_link(t)
 
     try:
         node, route = find_node_by_idx(t, node_idx)
-        if node.is_terminal and action_id not in (4, 5):
+        if node.is_terminal and action_id not in (4, 5, 6, 7):
             raise ValueError(f'the terminal node {node_idx}:{node.label} shall not be modified')
         foo: Callable[[Tree, List[int]], None] = actions[action_id]
         foo(node, route)
@@ -140,6 +140,31 @@ def right_descent(node: Tree, route: List[int]) -> None:
     right.children.insert(0, node)
 
 
+def left_ascent(node: Tree, route: List[int]) -> None:
+    parent = get_parent(node)
+    grandparent = get_parent(parent)
+    pos = route[-1]
+    if pos > 0:
+        raise ValueError("Failed to left ascend a non-leftmost node")
+    parent_pos = route[-2]
+
+    parent.children = parent.children[pos + 1:]
+    grandparent.children.insert(parent_pos, node)
+
+
+def right_ascent(node: Tree, route: List[int]) -> None:
+    parent = get_parent(node)
+    grandparent = get_parent(parent)
+    pos = route[-1]
+    if pos < len(parent.children) - 1:
+        raise ValueError("Failed to right ascend a non-rightmost node")
+
+    parent_pos = route[-2]
+
+    parent.children = parent.children[:-1]
+    grandparent.children.insert(parent_pos + 1, node)
+
+
 if __name__ == '__main__':
     import lark, sys
     from utils.lark.id_tree import build_from_lark_tree
@@ -150,28 +175,29 @@ if __name__ == '__main__':
     btok: /[bB]/
     """, keep_all_tokens=True)
     s = "aaaabb"
-    sys.path.insert(0, '..')
     tree = build_from_lark_tree(parser.parse(s), add_eps_nodes=True).assign_node_id(PreorderTraverse())
     print(tree)
-    for n, path in PreorderTraverse(output_path=True)(tree):
-        print('    ' * len(path), (n.node_id, n.label))
-
-
     for n in PreorderTraverse()(tree):
         print(n.node_id, ":", n.label, '-->', ' '.join(c.immediate_str() for c in n.children))
 
-    node, route = find_node_by_idx(tree, 4)
-    print(node.immediate_str(), route)
+    for n, path in PreorderTraverse(output_path=True)(tree):
+        print('    ' * len(path), (n.node_id, n.label))
 
     # del_self(node, route)
     # add_parent(node, route)
-    left_rotate(node, route)
+    # left_rotate(node, route)
     # right_rotate(node, route)
     # left_descent(node, route)
     # right_descent(node, route)
+    left_ascent(*find_node_by_idx(tree, 3))
+    # right_ascent(*find_node_by_idx(tree, 7))
 
     build_parent_link(tree)
     print(tree)
 
-    for n in PreorderTraverse()(tree):
-        print(n.node_id, ":", n.label, '-->', ' '.join(c.immediate_str() for c in n.children))
+    for n, path in PreorderTraverse(output_path=True)(tree):
+        print('    ' * len(path), (n.node_id, n.label))
+
+    node, route = find_node_by_idx(tree, 13)
+    print(node.immediate_str(), route)
+

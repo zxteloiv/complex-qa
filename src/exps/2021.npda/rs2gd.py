@@ -386,7 +386,7 @@ def crude_conf():
     p.bilinear_pool = 4
     p.bilinear_linear = True
     p.bilinear_bias = True
-    p.action_num = 6
+    p.action_num = 8
     p.max_children_num = 12
     p.mod_acc_ratio = 1.
     p.decay_rate = 1.
