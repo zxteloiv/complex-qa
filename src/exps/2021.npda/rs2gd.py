@@ -86,10 +86,14 @@ class PolicyTraining(Updater):
         batch_sz, sample_num = sampled_prob.size()
         # reward: (B, S)
         reward = self._get_env_reward(sampled_data, batch_sz, sample_num)
+
         self.reward_metric(reward.mean())
         policy_loss = self._optim_step(reward, sampled_prob, sampled_logp)
         if self.update_dataset:     # a flag set to False during warming-up
-            self._update_training_set(sampled_data, sample_num, reward)
+            # base_reward: (B, S)
+            base_reward = self._get_env_reward(filtered_batch, batch_sz, 1)
+            self._update_training_set(sampled_data, sample_num, reward, base_reward)
+
         output = {"loss": policy_loss}
         return output
 
@@ -134,7 +138,7 @@ class PolicyTraining(Updater):
         model: TreeActionPolicy = self._models[0]
         # sample some policies (size S) for each tree example in the batch
         # (B, S), (B, S), pure tensors (no backwards)
-        nodes, actions = model.decode(out_prob, out_logprob, method="topk", sample_num=5)
+        nodes, actions = model.decode(out_prob, out_logprob, method="topk", sample_num=3)
 
         sampled_data = []
         for i, data in enumerate(batch):
@@ -178,16 +182,17 @@ class PolicyTraining(Updater):
         # std, mean = torch.std_mean(logit_reward, dim=-1, keepdim=True, unbiased=False)
         # reward = ((logit_reward - mean) / std).sigmoid()
         reward = logit_reward * (logit_reward > 0)   # the rule scorer must be greater than 0
-        return reward
+        return reward.detach()
 
-    def _update_training_set(self, sampled_batch, sample_num: int, reward):
+    def _update_training_set(self, sampled_batch, sample_num: int, reward: torch.Tensor, base_reward: torch.Tensor):
         # updating the training example to the new sample with the largest reward
+        update_mask = reward > base_reward
         # max_idx: (B,)
-        _, max_idx = torch.max(reward.detach(), dim=-1)
+        _, max_idx = torch.max(reward, dim=-1)
         for i, data in enumerate(sampled_batch):
             row = i // sample_num
             col = i % sample_num
-            if col == max_idx[row].item() and random.random() < self.accept_modification_ratio:
+            if col == max_idx[row].item() and update_mask[row, col].item() and random.random() < self.accept_modification_ratio:
                 self.dataset[data['id']] = data
 
     def _optim_step(self, reward, sampled_prob, sampled_logp):
@@ -381,16 +386,17 @@ def crude_conf():
     p.bilinear_bias = True
     p.action_num = 6
     p.max_children_num = 12
-    p.accept_modification_ratio = .75
-    p.decay_rate = .8
+    p.accept_modification_ratio = .8
+    p.decay_rate = .95
 
     # parser params
     p.nested_translator = 'cg_sql_pda'
     p.nested_hparamset = 'sch_pda'
-    p.cold_start_epoch = 30
-    p.finetune_epoch = 20
     p.src_namespace = 'sent'
     p.tgt_namespace = 'symbol'
+
+    p.cold_start_epoch = 30
+    p.finetune_epoch = 20
 
     p.policy_warmup_epoch = 30
     p.policy_finetune_epoch = 20
