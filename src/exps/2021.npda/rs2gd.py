@@ -4,7 +4,7 @@ import os, os.path as osp
 import logging
 import sys
 import math
-import random
+from random import random
 from copy import deepcopy
 from datetime import datetime as dt
 import json
@@ -63,7 +63,7 @@ class PolicyTraining(Updater):
 
         self.update_dataset: bool = False
 
-        self.accept_modification_ratio = p.accept_modification_ratio
+        self.mod_acc_ratio = p.mod_acc_ratio
         self.decay_rate = p.decay_rate
         self.reward_metric = Average()
 
@@ -192,8 +192,10 @@ class PolicyTraining(Updater):
         for i, data in enumerate(sampled_batch):
             row = i // sample_num
             col = i % sample_num
-            if col == max_idx[row].item() and update_mask[row, col].item() and random.random() < self.accept_modification_ratio:
-                self.dataset[data['id']] = data
+            if col == max_idx[row].item():
+                logging.debug(f'the updating mask at row {row} is {update_mask[row].tolist()}')
+                if update_mask[row, col].item() and random() < self.mod_acc_ratio:
+                    self.dataset[data['id']] = data
 
     def _optim_step(self, reward, sampled_prob, sampled_logp):
         """
@@ -227,8 +229,8 @@ def accept_modification_schedule(bot: TrialBot):
     # at the policy_warmup_epoch (say, the 30th epoch), the grammar will get updated for the first time
     elif (epoch - p.policy_warmup_epoch) % p.policy_finetune_epoch == 0:
         updater.update_dataset = True
-        updater.accept_modification_ratio *= updater.decay_rate
-        bot.logger.info(f"In the critical epoch, accept Ratio decayed to {updater.accept_modification_ratio:6.4f}")
+        updater.mod_acc_ratio *= updater.decay_rate
+        bot.logger.info(f"In the critical epoch, accept Ratio decayed to {updater.mod_acc_ratio:6.4f}")
 
     else:
         updater.update_dataset = False
@@ -386,8 +388,8 @@ def crude_conf():
     p.bilinear_bias = True
     p.action_num = 6
     p.max_children_num = 12
-    p.accept_modification_ratio = .8
-    p.decay_rate = .95
+    p.mod_acc_ratio = 1.
+    p.decay_rate = 1.
 
     # parser params
     p.nested_translator = 'cg_sql_pda'
