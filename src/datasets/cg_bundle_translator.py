@@ -41,11 +41,11 @@ TREE_NS = 'symbol'
 
 @Registry.translator('cg_sql_pda')
 class SQLDerivations(FieldAwareTranslator):
-    def __init__(self, max_derivation_symbols: int = 11):
+    def __init__(self, use_reversible_actions: bool = True):
         super().__init__(field_list=[
             ProcessedSentField(source_key='sent', renamed_key='source_tokens', add_start_end_toks=False,),
             TreeTraversalField(tree_key='runtime_tree', namespace=TREE_NS,),
-            PolicyValidity(tree_key='runtime_tree'),
+            PolicyValidity(tree_key='runtime_tree', use_reversible_actions=use_reversible_actions),
         ])
 
     def batch_tensor(self, tensors):

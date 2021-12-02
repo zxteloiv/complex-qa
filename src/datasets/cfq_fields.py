@@ -150,11 +150,16 @@ class TreeTraversalField(Field):
 
 
 class PolicyValidity(Field):
-    def __init__(self, tree_key: str, output_key: str = 'action_mask', padding: int = 0):
+    def __init__(self, tree_key: str,
+                 output_key: str = 'action_mask',
+                 padding: int = 0,
+                 use_reversible_actions: bool = True,
+                 ):
         super().__init__()
         self.tree_key = tree_key
         self.out_key = output_key   # (batch, n_d, action)
         self.padding = padding
+        self.use_reversible_actions = use_reversible_actions
 
     def batch_tensor_by_key(self, tensors_by_keys: Mapping[str, List[NullableTensor]]) -> Mapping[str, torch.Tensor]:
         output = dict()
@@ -178,7 +183,10 @@ class PolicyValidity(Field):
             parent: Tree
             path: List[int]
             if parent is None:
-                validity_matrix.append([0, 0, 0, 0, 0, 0, 0, 0])
+                if self.use_reversible_actions:
+                    validity_matrix.append([0, 0, 0, 0, 0, 0, 0, 0])
+                else:
+                    validity_matrix.append([0, 0, 0, 0, 0, 0])
                 continue
 
             # action 1: DEL can be applied to any node
@@ -202,13 +210,14 @@ class PolicyValidity(Field):
             r_des_cond = branch_pos + 1 < len(parent.children) and not parent.children[branch_pos + 1].is_terminal
             action_mask.append(1 if r_des_cond else 0)
 
-            # action 7: L_ASCENT
-            l_asc_cond = branch_pos == 0 and len(path) >= 2
-            action_mask.append(1 if l_asc_cond else 0)
+            if self.use_reversible_actions:
+                # action 7: L_ASCENT
+                l_asc_cond = branch_pos == 0 and len(path) >= 2
+                action_mask.append(1 if l_asc_cond else 0)
 
-            # action 8: R_ASCENT
-            r_asc_cond = branch_pos + 1 == len(parent.children) and len(path) >= 2
-            action_mask.append(1 if r_asc_cond else 0)
+                # action 8: R_ASCENT
+                r_asc_cond = branch_pos + 1 == len(parent.children) and len(path) >= 2
+                action_mask.append(1 if r_asc_cond else 0)
 
             validity_matrix.append(action_mask)
 

@@ -386,10 +386,13 @@ def crude_conf():
     p.bilinear_pool = 4
     p.bilinear_linear = True
     p.bilinear_bias = True
-    p.action_num = 8
     p.max_children_num = 12
     p.mod_acc_ratio = 1.
     p.decay_rate = 1.
+
+    # use or not the reversible actions
+    p.TRANSLATOR_KWARGS = {"use_reversible_actions": True}
+    p.action_num = 8
 
     # parser params
     p.nested_translator = 'cg_sql_pda'
@@ -397,6 +400,7 @@ def crude_conf():
     p.src_namespace = 'sent'
     p.tgt_namespace = 'symbol'
 
+    # training epoch conf
     p.cold_start_epoch = 30
     p.finetune_epoch = 20
 
@@ -407,6 +411,14 @@ def crude_conf():
     p.grammar_modification_turns = 20
 
     p.TRAINING_LIMIT = p.policy_warmup_epoch + p.policy_finetune_epoch * p.grammar_modification_turns
+    return p
+
+
+@Registry.hparamset()
+def non_reversible_actions():
+    p = crude_conf()
+    p.TRANSLATOR_KWARGS = {"use_reversible_actions": False}
+    p.action_num = 6
     return p
 
 
