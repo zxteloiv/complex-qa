@@ -6,6 +6,7 @@ from ..modules.variational_dropout import VariationalDropout
 from ..modules.decomposed_bilinear import DecomposedBilinear
 import math
 
+
 class TopDownTreeEncoder(nn.Module):
     def forward(self, tree_embedding, node_connection, node_mask, tree_hx=None) -> Tuple[torch.Tensor, Any]:
         """
@@ -15,6 +16,7 @@ class TopDownTreeEncoder(nn.Module):
         :return: (batch, node_num, hidden_sz)
         """
         raise NotImplementedError
+
 
 class TopDownLSTMEncoder(TopDownTreeEncoder):
     def __init__(self, input_sz: int, hidden_sz: int, transition_matrix_rank: int = 0, dropout=0.,
@@ -136,6 +138,7 @@ class TopDownLSTMEncoder(TopDownTreeEncoder):
         """:return: (hid, hid)"""
         return torch.matmul(self.hid_trans_z.t(), self.hid_trans_z)
 
+
 class TopDownBilinearLSTMEncoder(TopDownTreeEncoder):
     def __init__(self,
                  input_sz: int,
@@ -212,6 +215,7 @@ class TopDownBilinearLSTMEncoder(TopDownTreeEncoder):
         tree_h = torch.stack(tree_hs, dim=1)
         return tree_h, (tree_hs, tree_cs, node_mask)
 
+
 class SingleStepTreeEncoder(nn.Module):
     def forward(self, tree_embedding, node_connection, node_mask) -> torch.Tensor:
         """
@@ -222,12 +226,14 @@ class SingleStepTreeEncoder(nn.Module):
         """
         raise NotImplementedError
 
+
 class ReZeroEncoder(TopDownTreeEncoder):
-    def __init__(self, num_layers: int, layer_encoder: SingleStepTreeEncoder):
+    def __init__(self, num_layers: int, layer_encoder: SingleStepTreeEncoder, activation=None):
         super().__init__()
         self._layer_enc = layer_encoder
         self.num_layers = num_layers
         self.alpha = nn.Parameter(torch.zeros(num_layers))
+        self.activation = activation
 
     def forward(self, tree_embedding, node_connection, node_mask, tree_hx=None) -> Tuple[torch.Tensor, Any]:
         """
@@ -239,9 +245,12 @@ class ReZeroEncoder(TopDownTreeEncoder):
         layer_hid = tree_embedding
         for depth in range(self.num_layers):
             new_hid = self._layer_enc(layer_hid, node_connection, node_mask)
+            if self.activation is not None:
+                new_hid = self.activation(new_hid)
             layer_hid = layer_hid + new_hid * self.alpha[depth]
 
         return layer_hid, None
+
 
 class SingleStepBilinear(SingleStepTreeEncoder):
     def __init__(self, mod: DecomposedBilinear):
@@ -253,6 +262,7 @@ class SingleStepBilinear(SingleStepTreeEncoder):
         batch_index = torch.arange(batch, dtype=torch.long, device=tree_embedding.device)
         parent_hid = tree_embedding[batch_index.unsqueeze(-1), node_connection]
         return self.mod(tree_embedding, parent_hid)
+
 
 class SingleStepDotProd(SingleStepTreeEncoder):
     def forward(self, tree_embedding, node_connection, node_mask) -> torch.Tensor:
@@ -275,6 +285,7 @@ class SingleStepDotProd(SingleStepTreeEncoder):
         # h: (batch, hid)
         h = (w_h * parent_h + w_x * tree_embedding)
         return h
+
 
 if __name__ == '__main__':
     enc = TopDownLSTMEncoder(300, 128, 64)

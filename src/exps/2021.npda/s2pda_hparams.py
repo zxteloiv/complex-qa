@@ -105,6 +105,7 @@ def sql_pda():
 
     p.tree_encoder = 're_zero_bilinear'
     p.num_re0_layer = 6
+    p.re0_activation = "tanh"
 
     p.bilinear_rank = 1
     p.bilinear_pool = 8

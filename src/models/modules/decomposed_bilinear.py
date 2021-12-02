@@ -2,6 +2,7 @@ from typing import Optional
 import torch
 from torch import nn
 
+
 class DecomposedBilinear(nn.Module):
     """
     In general, the module is an approximation to the real bilinear operation with lower parameters,

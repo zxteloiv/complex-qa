@@ -48,6 +48,7 @@ def build_tutor_objects(tgt_ns, vocab, tutor_repr):
 def get_tree_encoder(p, vocab):
     import models.neural_pda.partial_tree_encoder as partial_tree
     from models.modules.decomposed_bilinear import DecomposedBilinear
+    from allennlp.nn.activations import Activation
 
     # embedding will be transformed into hid size with lhs_symbol_mapper,
     # thus tree encoder input will be hid_sz by default
@@ -77,7 +78,11 @@ def get_tree_encoder(p, vocab):
         else:
             raise NotImplementedError
 
-        tree_encoder = partial_tree.ReZeroEncoder(num_layers=p.num_re0_layer, layer_encoder=layer_encoder)
+        tree_encoder = partial_tree.ReZeroEncoder(
+            num_layers=p.num_re0_layer,
+            layer_encoder=layer_encoder,
+            activation=Activation.by_name(getattr(p, 're0_activation', 'linear'))(),
+        )
 
     else:
         raise NotImplementedError
