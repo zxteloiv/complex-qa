@@ -173,7 +173,7 @@ def get_model(p, vocab: NSVocabulary):
     emb_src = nn.Embedding(vocab.get_vocab_size(p.src_ns), embedding_dim=p.enc_sz)
 
     emb_s = nn.Embedding(vocab.get_vocab_size(p.tgt_ns), p.emb_sz)
-    nn.init.kaiming_uniform_(emb_s.weight)
+    nn.init.kaiming_normal_(emb_s.weight)
 
     npda = NeuralPDA(
         symbol_embedding=emb_s,
