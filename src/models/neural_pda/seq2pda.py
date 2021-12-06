@@ -52,10 +52,15 @@ class Seq2PDA(nn.Module):
 
     def get_metric(self, reset=False):
         topo_loss = self.topo_loss.get_metric(reset)
-        repr_loss = self.repr_loss.get_metric(reset)
         count = self.count_metric
         err = self.err.get_metric(reset)
-        output = {"Loss": topo_loss, "ReprLoss": repr_loss, "ERR": err, "COUNT": count}
+
+        if self.loss_lambda > 0:
+            repr_loss = self.repr_loss.get_metric(reset)
+            output = {"Loss": topo_loss, "ReprLoss": repr_loss, "ERR": err, "COUNT": count}
+        else:
+            output = {"Loss": topo_loss, "ERR": err, "COUNT": count}
+
         if reset:
             self.count_metric = 0
         return output
@@ -117,17 +122,19 @@ class Seq2PDA(nn.Module):
         # topo_loss = ((nll * tree_mask).sum(-1) / (tree_mask.sum(-1) + 1e-15)).mean()
 
         # --------------- 2. the representation regularization --------------
-        batch_sz, node_num = choice.size()
-        device = choice.device
-        batch_dim_indices = torch.arange(batch_sz, device=device).reshape(-1, 1, 1)
-        node_dim_indices = torch.arange(node_num, device=device).reshape(1, -1, 1)
-        # chose_repr: (batch, n_d, hid)
-        # tree_repr: (batch, hid)
-        chosen_repr = opt_repr[batch_dim_indices, node_dim_indices, choice.unsqueeze(-1)].squeeze(-2)
-        tree_repr = (tree_mask.unsqueeze(-1) * chosen_repr).sum(dim=1)
+        repr_loss = 0
+        if self.loss_lambda > 0:
+            batch_sz, node_num = choice.size()
+            device = choice.device
+            batch_dim_indices = torch.arange(batch_sz, device=device).reshape(-1, 1, 1)
+            node_dim_indices = torch.arange(node_num, device=device).reshape(1, -1, 1)
+            # chose_repr: (batch, n_d, hid)
+            # tree_repr: (batch, hid)
+            chosen_repr = opt_repr[batch_dim_indices, node_dim_indices, choice.unsqueeze(-1)].squeeze(-2)
+            tree_repr = (tree_mask.unsqueeze(-1) * chosen_repr).sum(dim=1)
 
-        # MSE loss as a regularization for the encoder output and rule repr
-        repr_loss = ((self.enc_attn_mapping(enc_last_repr) - tree_repr) ** 2).sum(-1).sqrt().mean()
+            # MSE loss as a regularization for the encoder output and rule repr
+            repr_loss = ((self.enc_attn_mapping(enc_last_repr) - tree_repr) ** 2).sum(-1).sqrt().mean()
 
         # ------------- 3. error metric computation -------------
         # *_err: (batch,)
