@@ -131,7 +131,7 @@ class NeuralPDA(nn.Module):
         # opt_repr: (batch, n_d, opt_num, hid)
         opt_prob, opt_repr = self._get_topological_choice_distribution(tree_nodes, tree_hid_att, query_context)
 
-        return opt_prob
+        return opt_prob, opt_repr
 
     def get_grammar(self, nodes):
         # tree_grammar: (batch, n_d, opt_num, 4, max_seq)

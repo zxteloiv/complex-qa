@@ -6,7 +6,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from models.base_s2s.stacked_encoder import StackedEncoder
 from allennlp.training.metrics.perplexity import Average
-from utils.nn import prepare_input_mask
+from utils.nn import prepare_input_mask, get_final_encoder_states
 from .npda import NeuralPDA
 from utils.text_tool import make_human_readable_text
 from .batched_stack import TensorBatchStack
@@ -29,6 +29,7 @@ class Seq2PDA(nn.Module):
                  src_ns: str,
                  tgt_ns: str,
                  vocab,
+                 repr_loss_lambda: float = .2,
                  ):
         super().__init__()
         self.encoder = encoder
@@ -38,6 +39,7 @@ class Seq2PDA(nn.Module):
         self.npda = npda
 
         self.topo_loss = Average()
+        self.repr_loss = Average()
         self.count_metric = 0
         self.err = Average()
         self.tok_pad = 0
@@ -46,11 +48,14 @@ class Seq2PDA(nn.Module):
         self.logger = logging.getLogger(self.__class__.__name__)
         self.vocab: NSVocabulary = vocab
 
+        self.loss_lambda = repr_loss_lambda
+
     def get_metric(self, reset=False):
         topo_loss = self.topo_loss.get_metric(reset)
+        repr_loss = self.repr_loss.get_metric(reset)
         count = self.count_metric
         err = self.err.get_metric(reset)
-        output = {"Loss": topo_loss, "ERR": err, "COUNT": count}
+        output = {"Loss": topo_loss, "ReprLoss": repr_loss, "ERR": err, "COUNT": count}
         if reset:
             self.count_metric = 0
         return output
@@ -81,16 +86,19 @@ class Seq2PDA(nn.Module):
                                    *args,
                                    **kwargs,
                                    ):
-        enc_attn_fn = self._encode_source(source_tokens)
+        # enc_attn_fn: (*, hid) -> (*, enc_out_dim)
+        # enc_last_repr: (batch, enc_out_dim)
+        enc_attn_fn, enc_last_repr = self._encode_source(source_tokens)
         self.npda.init_automata(source_tokens.size()[0], source_tokens.device, enc_attn_fn)
 
         # ================
         # opt_prob: (batch, n_d, opt_num)
+        # opt_repr: (batch, n_d, opt_num, hid)
         # tree_grammar: (batch, n_d, opt_num, 4, max_seq)
-        opt_prob = self.npda(model_function="parallel",
-                             tree_nodes=tree_nodes,
-                             node_parents=node_parents,
-                             expansion_frontiers=expansion_frontiers)
+        opt_prob, opt_repr = self.npda(model_function="parallel",
+                                       tree_nodes=tree_nodes,
+                                       node_parents=node_parents,
+                                       expansion_frontiers=expansion_frontiers)
         tree_grammar = self.npda.get_grammar(tree_nodes)
 
         # --------------- 1. training the topological choice --------------
@@ -108,6 +116,19 @@ class Seq2PDA(nn.Module):
         # topo_loss = (nll * tree_mask).sum() / (10 * source_tokens.size()[0])
         # topo_loss = ((nll * tree_mask).sum(-1) / (tree_mask.sum(-1) + 1e-15)).mean()
 
+        # --------------- 2. the representation regularization --------------
+        batch_sz, node_num = choice.size()
+        device = choice.device
+        batch_dim_indices = torch.arange(batch_sz, device=device).reshape(-1, 1, 1)
+        node_dim_indices = torch.arange(node_num, device=device).reshape(1, -1, 1)
+        # chose_repr: (batch, n_d, hid)
+        # tree_repr: (batch, hid)
+        chosen_repr = opt_repr[batch_dim_indices, node_dim_indices, choice.unsqueeze(-1)].squeeze(-2)
+        tree_repr = (tree_mask.unsqueeze(-1) * chosen_repr).sum(dim=1)
+
+        # MSE loss as a regularization for the encoder output and rule repr
+        repr_loss = ((self.enc_attn_mapping(enc_last_repr) - tree_repr) ** 2).sum(-1).sqrt().mean()
+
         # ------------- 3. error metric computation -------------
         # *_err: (batch,)
         topo_pos_err = ((opt_prob.argmax(dim=-1) != choice) * tree_mask)
@@ -117,8 +138,10 @@ class Seq2PDA(nn.Module):
         self.count_metric += (choice_validity > 0).sum().item()
 
         # ================
-        output = {"loss": topo_loss}
+        loss = topo_loss + self.loss_lambda * repr_loss
+        output = {"loss": loss}
         self.topo_loss(topo_loss)
+        self.repr_loss(repr_loss)
         self.npda.reset_automata()
         return output
 
@@ -126,13 +149,14 @@ class Seq2PDA(nn.Module):
         source_tokens, source_mask = prepare_input_mask(source_tokens, padding_val=self.tok_pad)
         source = self.src_embedder(source_tokens)
         source_hidden, _ = self.encoder(source, source_mask)
+        last_repr = get_final_encoder_states(source_hidden, source_mask, self.encoder.is_bidirectional())
 
         def _enc_attn_fn(out):
             context = self.enc_attn_net(out, source_hidden, source_mask)
             context = self.enc_attn_mapping(context)
             return context
 
-        return _enc_attn_fn
+        return _enc_attn_fn, last_repr
 
     def _forward_validation(self,
                             source_tokens: LT,  # (batch, src_len)
@@ -143,7 +167,7 @@ class Seq2PDA(nn.Module):
                             *args,
                             **kwargs,
                             ):
-        enc_attn_fn = self._encode_source(source_tokens)
+        enc_attn_fn, enc_last_repr = self._encode_source(source_tokens)
         self.npda.init_automata(source_tokens.size()[0], source_tokens.device, enc_attn_fn)
         # rule_mask: (batch, n_d)
         # rule_logit: (batch, n_d), the score dimension 1 is squeezed by default in the rule scorer
@@ -171,7 +195,7 @@ class Seq2PDA(nn.Module):
                           target_tokens,  # (batch, max_tgt_len)
                           ):
         batch_sz, device = source_tokens.size()[0], source_tokens.device
-        enc_attn_fn = self._encode_source(source_tokens)
+        enc_attn_fn, enc_last_repr = self._encode_source(source_tokens)
         _, max_derivation_num, max_rule_size = derivations.size()
         self.npda.init_automata(batch_sz, device, enc_attn_fn, max_derivation_step=max_derivation_num)
 

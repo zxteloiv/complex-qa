@@ -225,6 +225,7 @@ def get_model(p, vocab: NSVocabulary):
         src_ns=p.src_ns,
         tgt_ns=p.tgt_ns,
         vocab=vocab,
+        repr_loss_lambda=getattr(p, 'repr_loss_lambda', 0.)
     )
 
     return model
