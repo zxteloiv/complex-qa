@@ -171,10 +171,10 @@ def get_model(p, vocab: NSVocabulary):
 
     encoder = StackedEncoder([enc_cls(floor) for floor in range(p.num_enc_layers)], input_dropout=0.)
     emb_src = nn.Embedding(vocab.get_vocab_size(p.src_ns), embedding_dim=p.enc_sz)
-    nn.init.kaiming_normal_(emb_src.weight)
-
     emb_s = nn.Embedding(vocab.get_vocab_size(p.tgt_ns), p.emb_sz)
-    nn.init.kaiming_normal_(emb_s.weight)
+    if getattr(p, 'init_embedding_by_kaiming_normal', False):
+        nn.init.kaiming_normal_(emb_src.weight)
+        nn.init.kaiming_normal_(emb_s.weight)
 
     npda = NeuralPDA(
         symbol_embedding=emb_s,

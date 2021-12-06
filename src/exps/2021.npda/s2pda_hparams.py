@@ -116,6 +116,8 @@ def sql_pda():
 
     # ----------- end of tree settings -------------
     p.rule_scorer = "add_inner_product"  # heuristic, mlp, (triple|concat|add_inner_product)
+    p.init_embedding_by_kaiming_normal = True
+
     return p
 
 
