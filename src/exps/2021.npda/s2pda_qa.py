@@ -188,8 +188,8 @@ def get_model(p, vocab: NSVocabulary):
         grammar_tutor=None,
         rhs_expander=StackedLSTMCell(p.emb_sz + 1, p.hidden_sz, p.num_expander_layer, dropout=p.dropout),
         rule_scorer=get_rule_scorer(p, vocab),
-        pre_tree_encoder=get_tree_encoder(p, vocab),
-        pre_tree_self_attn=UnpackedInputsSequential(
+        tree_encoder=get_tree_encoder(p, vocab),
+        tree_self_attn=UnpackedInputsSequential(
             get_wrapped_attention(p.tree_self_attn, p.hidden_sz, p.hidden_sz,
                                   num_heads=p.num_heads,
                                   use_linear=p.attn_use_linear,

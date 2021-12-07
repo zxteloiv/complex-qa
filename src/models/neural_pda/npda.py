@@ -26,8 +26,8 @@ class NeuralPDA(nn.Module):
                  grammar_tutor,
                  rhs_expander: StackedRNNCell,
 
-                 pre_tree_encoder: TopDownTreeEncoder,
-                 pre_tree_self_attn: nn.Module,
+                 tree_encoder: TopDownTreeEncoder,
+                 tree_self_attn: nn.Module,
                  residual_norm_after_self_attn: nn.Module,
 
                  rule_scorer: RuleScorer,
@@ -43,8 +43,8 @@ class NeuralPDA(nn.Module):
         self._embedder = symbol_embedding
         self._lhs_symbol_mapper = lhs_symbol_mapper
 
-        self._pre_tree_encoder = pre_tree_encoder
-        self._pre_tree_self_attn = pre_tree_self_attn
+        self._tree_encoder = tree_encoder
+        self._tree_self_attn = tree_self_attn
         self._rule_scorer = rule_scorer
         self._residual_norm = residual_norm_after_self_attn
 
@@ -129,36 +129,10 @@ class NeuralPDA(nn.Module):
 
         # opt_prob: (batch, n_d, opt_num)
         # opt_repr: (batch, n_d, opt_num, hid)
-        opt_prob, opt_repr = self._get_topological_choice_distribution(tree_nodes, tree_hid_att, query_context)
+        opt_repr, opt_mask = self._get_complete_derivation_repr(tree_nodes)
+        opt_prob = self._get_choice_distribution(tree_hid_att, query_context, opt_repr, opt_mask)
 
         return opt_prob, opt_repr
-
-    def get_grammar(self, nodes):
-        # tree_grammar: (batch, n_d, opt_num, 4, max_seq)
-        tree_grammar = self._gt(nodes)
-        return tree_grammar
-
-    def _encode_full_tree(self, tree_nodes, node_parents, expansion_frontiers):
-        _, tree_mask = prepare_input_mask(tree_nodes)
-
-        # nodes_emb: (batch, n_d, emb)
-        # tree_hid: (batch, n_d, hid)
-        nodes_emb = self._embedder(tree_nodes)
-        tree_hid, _ = self._pre_tree_encoder(nodes_emb, node_parents, tree_mask)
-
-        batch, n_d = tree_nodes.size()
-        attn_mask = tree_mask.new_zeros((batch, n_d, n_d))
-        attn_mask[torch.arange(batch, device=tree_mask.device).reshape(-1, 1, 1),
-                  torch.arange(n_d, device=tree_mask.device).reshape(1, -1, 1),
-                  expansion_frontiers] = 1
-        # the root has the id equal to the padding and must be excluded from attention targets except for itself.
-        attn_mask[:, 1:, 0] = 0
-        tree_hid_att = self._pre_tree_self_attn(tree_hid, tree_hid, tree_mask, attn_mask)
-        if self._residual_norm is not None:
-            tree_hid_att = tree_hid_att + tree_hid
-            tree_hid_att = self._residual_norm(tree_hid_att)
-
-        return tree_hid_att
 
     def _forward_validation(self,
                             tree_nodes,  # (batch, n_d), the tree nodes = #lhs = num_derivations
@@ -178,6 +152,39 @@ class NeuralPDA(nn.Module):
         # rule_logit: (batch, n_d), the score dimension 1 is squeezed by default in the rule scorer
         rule_logit = self._rule_scorer(rule_repr, query_context, tree_hid_att)
         return rule_logit, rule_mask
+
+    def _encode_full_tree(self, tree_nodes, node_parents, expansion_frontiers):
+        _, tree_mask = prepare_input_mask(tree_nodes)
+
+        # nodes_emb: (batch, n_d, emb)
+        # tree_hid: (batch, n_d, hid)
+        nodes_emb = self._embedder(tree_nodes)
+        tree_hid, _ = self._tree_encoder(nodes_emb, node_parents, tree_mask)
+
+        batch, n_d = tree_nodes.size()
+        attn_mask = tree_mask.new_zeros((batch, n_d, n_d))
+        attn_mask[torch.arange(batch, device=tree_mask.device).reshape(-1, 1, 1),
+                  torch.arange(n_d, device=tree_mask.device).reshape(1, -1, 1),
+                  expansion_frontiers] = 1
+        # the root has the id equal to the padding and must be excluded from attention targets except for itself.
+        attn_mask[:, 1:, 0] = 0
+        tree_hid_att = self._tree_self_attn(tree_hid, tree_hid, tree_mask, attn_mask)
+        if self._residual_norm is not None:
+            tree_hid_att = tree_hid_att + tree_hid
+            tree_hid_att = self._residual_norm(tree_hid_att)
+
+        return tree_hid_att
+
+    def _get_complete_derivation_repr(self, lhs):
+        # full_grammar_repr: (V, opt_num, hid)
+        # full_grammar_mask: (V, opt_num)
+        full_grammar_repr, full_grammar_mask = self._encode_full_grammar()
+
+        # opt_repr: (batch, *, opt_num, hid)
+        # opt_mask: (batch, *, opt_num)
+        opt_repr = full_grammar_repr[lhs]
+        opt_mask = full_grammar_mask[lhs]
+        return opt_repr, opt_mask
 
     def _get_derivation_repr(self, tree_nodes, derivations):
         batch_sz, num_symbols, max_rhs_len = derivations.size()
@@ -222,118 +229,24 @@ class NeuralPDA(nn.Module):
         rule_mask = derivations_mask.sum(-1) > 0
         return rule_repr, rule_mask
 
-    def _forward_derivation_step(self):
-        """
-        :param step_symbols: (batch, max_seq), Optional, the gold symbol used,
-        the corresponding mask is not given and should be referred to the grammar_guide,
-        even though the step_symbol is inconsistent with the grammar, which is hardly possible.
-
-        :return: Tuple of 6 objects
-        lhs, lhs_mask: (batch,) ;
-        grammar_guide: (batch, opt_num, 4, max_seq) ;
-        opts_logp: (batch, opt_num) ;
-        topo_preds: Tuple[(batch, max_seq) * 4] ;
-        exact_token_p: [(batch, max_seq, V)]
-        """
-        # lhs_idx, lhs, lhs_mask: (batch,)
-        # tree_state: (batch, hidden)
-        tree_state = self._encode_partial_tree()    # tree encoding must precede the lhs popping
-        lhs_idx, lhs, lhs_mask = self._select_node()
-
-        # grammar_guide: (batch, opt_num, 4, max_seq)
-        grammar_guide = self._gt(lhs)
-
-        # attention computation and compose the context vector with the symbol hidden states
-        # query_context: (batch, *, attention_out)
-        query_context = self._query_attn_fn(tree_state)
-
-        # opt_prob: (batch, opt_num)
-        # opt_repr: (batch, opt_num, hid)
-        opt_prob, opt_repr = self._get_topological_choice_distribution(lhs, tree_state, query_context)
-
-        # best_choice: (batch,)
-        best_choice = opt_prob.argmax(dim=-1)
-        chosen_symbols, _, _ = self.retrieve_the_chosen_structure(best_choice, grammar_guide)
-
-        return lhs_idx, lhs_mask, grammar_guide, opt_prob
-
-    def _encode_partial_tree(self) -> FT:
-        # node_val: (batch, node_num, node_val_dim)
-        # node_parent, node_mask: (batch, node_num)
-        node_val, node_parent, node_mask = self._partial_tree.dump_partial_tree()
-        node_val = node_val.squeeze(-1)
-
-        # node_emb: (batch, node_num, emb_sz)
-        node_emb = self._embedder(node_val)
-
-        # tree_hidden: (batch, node_num, hidden_sz)
-        tree_hidden, tree_hx = self._pre_tree_encoder(node_emb, node_parent, node_mask, self._tree_hx)
-        self._tree_hx = tree_hx
-
-        batch_index = torch.arange(self._stack.max_batch_size, device=node_val.device).long()
-        # leaf_mask should be consistent with node_mask
-        # top_item: (batch, 2)
-        # top_pos: (batch,)
-        top_item, top_mask = self._stack.top()
-        top_pos = top_item[:, 0] * top_mask
-
-        # encode all leaves, all the current node except for those who had been others' parent nodes.
-        # attn_mask: (batch, node_num)
-        attn_mask = node_mask
-        # if node_mask.size()[-1] > 1:
-        # # stack nodes & mask: (batch, max_stack_num, 2) & (batch, max_stack_num)
-        # stack_nodes, stack_mask = self._stack.dump()
-        # stack_pos = stack_nodes[:, :, 0] * stack_mask
-        # attn_mask[batch_index.unsqueeze(-1), stack_pos] = 0
-        attn_mask[batch_index.unsqueeze(-1), node_parent] = 0
-        attn_mask[batch_index, top_pos] = 1 # the node itself must be involved into self-attention
-        tree_hid_att = self._pre_tree_self_attn(tree_hidden, tree_hidden, attn_mask)
-        if self._residual_norm is not None:
-            tree_hid_att = tree_hid_att + tree_hidden
-            tree_hid_att = self._residual_norm(tree_hid_att)
-
-        # tree_state: (batch, hid)
-        tree_state = tree_hid_att[batch_index, top_pos]
-        return tree_state
-
-    def _select_node(self) -> Tuple[LT, LT, LT]:
-        node, success = self._stack.pop()
-        node: LT
-        success: LT
-        node_idx = node[:, 0]
-        node_val = node[:, 1]
-        return node_idx, node_val, success
-
-    def _get_topological_choice_distribution(self, lhs, tree_state, query_context):
+    def _get_choice_distribution(self, tree_state, query_context, opt_repr, opt_mask):
         """
         get the topological choice distribution for the current derivation, conditioning on the given LHS and Tree States
-        :param lhs: (batch, *)
         :param tree_state: (batch, *, hid_dim)
         :param query_context: (batch, *, attention_dim)
-        :return: tuple of 2:
-                (batch, *, opt_num) choice probabilities,
-                (batch, *, opt_num, hid) compositional representation of each rule option
+        :param opt_repr: (batch, *, opt_num, hid)
+        :param opt_mask: (batch, *, opt_num)
+        :return: opt_prob, (batch, *, opt_num) choice distribution
         """
-
-        # full_grammar_repr: (V, opt_num, hid)
-        # full_grammar_mask: (V, opt_num)
-        full_grammar_repr, full_grammar_mask = self._get_full_grammar_repr()
-
-        # opt_repr: (batch, *, opt_num, hid)
-        # opt_mask: (batch, *, opt_num)
-        opt_repr = full_grammar_repr[lhs]
-        opt_mask = full_grammar_mask[lhs]
-
         # opt_logit, opt_prob: (batch, *, opt_num)
-        opt_num = opt_mask.size()[-1]
+        opt_num = opt_repr.size()[-2]
         exp_qc = expand_tensor_size_at_dim(query_context, opt_num, dim=-2)
         exp_ts = expand_tensor_size_at_dim(tree_state, opt_num, dim=-2)
         opt_logit = self._rule_scorer(opt_repr, exp_qc, exp_ts)
         opt_prob = masked_softmax(opt_logit, opt_mask.bool())
+        return opt_prob
 
-        return opt_prob, opt_repr
-
-    def _get_full_grammar_repr(self):
+    def _encode_full_grammar(self):
         (
             valid_symbols,      # valid_symbols: (V, opt_num, max_seq)
             parental_growth,    # p_growth: (V, opt_num, max_seq)
@@ -384,6 +297,90 @@ class NeuralPDA(nn.Module):
         opt_mask = symbol_mask.sum(-1) > 0
         return opt_repr, opt_mask
 
+    def _forward_derivation_step(self):
+        """
+        :param step_symbols: (batch, max_seq), Optional, the gold symbol used,
+        the corresponding mask is not given and should be referred to the grammar_guide,
+        even though the step_symbol is inconsistent with the grammar, which is hardly possible.
+
+        :return: Tuple of 6 objects
+        lhs, lhs_mask: (batch,) ;
+        grammar_guide: (batch, opt_num, 4, max_seq) ;
+        opts_logp: (batch, opt_num) ;
+        topo_preds: Tuple[(batch, max_seq) * 4] ;
+        exact_token_p: [(batch, max_seq, V)]
+        """
+        # lhs_idx, lhs, lhs_mask: (batch,)
+        # tree_state: (batch, hidden)
+        tree_state = self._encode_partial_tree()    # tree encoding must precede the lhs popping
+        lhs_idx, lhs, lhs_mask = self._select_node()
+
+        # grammar_guide: (batch, opt_num, 4, max_seq)
+        grammar_guide = self._gt(lhs)
+
+        # attention computation and compose the context vector with the symbol hidden states
+        # query_context: (batch, *, attention_out)
+        query_context = self._query_attn_fn(tree_state)
+
+        # opt_prob: (batch, opt_num)
+        # opt_repr: (batch, opt_num, hid)
+        # opt_mask: (batch, opt_num)
+        opt_repr, opt_mask = self._get_complete_derivation_repr(lhs)
+        opt_prob = self._get_choice_distribution(tree_state, query_context, opt_repr, opt_mask)
+
+        # best_choice: (batch,)
+        best_choice = opt_prob.argmax(dim=-1)
+        chosen_symbols, _, _ = self.retrieve_the_chosen_structure(best_choice, grammar_guide)
+
+        return lhs_idx, lhs_mask, grammar_guide, opt_prob
+
+    def _encode_partial_tree(self) -> FT:
+        # node_val: (batch, node_num, node_val_dim)
+        # node_parent, node_mask: (batch, node_num)
+        node_val, node_parent, node_mask = self._partial_tree.dump_partial_tree()
+        node_val = node_val.squeeze(-1)
+
+        # node_emb: (batch, node_num, emb_sz)
+        node_emb = self._embedder(node_val)
+
+        # tree_hidden: (batch, node_num, hidden_sz)
+        tree_hidden, tree_hx = self._tree_encoder(node_emb, node_parent, node_mask, self._tree_hx)
+        self._tree_hx = tree_hx
+
+        batch_index = torch.arange(self._stack.max_batch_size, device=node_val.device).long()
+        # leaf_mask should be consistent with node_mask
+        # top_item: (batch, 2)
+        # top_pos: (batch,)
+        top_item, top_mask = self._stack.top()
+        top_pos = top_item[:, 0] * top_mask
+
+        # encode all leaves, all the current node except for those who had been others' parent nodes.
+        # attn_mask: (batch, node_num)
+        attn_mask = node_mask
+        # if node_mask.size()[-1] > 1:
+        # # stack nodes & mask: (batch, max_stack_num, 2) & (batch, max_stack_num)
+        # stack_nodes, stack_mask = self._stack.dump()
+        # stack_pos = stack_nodes[:, :, 0] * stack_mask
+        # attn_mask[batch_index.unsqueeze(-1), stack_pos] = 0
+        attn_mask[batch_index.unsqueeze(-1), node_parent] = 0
+        attn_mask[batch_index, top_pos] = 1 # the node itself must be involved into self-attention
+        tree_hid_att = self._tree_self_attn(tree_hidden, tree_hidden, attn_mask)
+        if self._residual_norm is not None:
+            tree_hid_att = tree_hid_att + tree_hidden
+            tree_hid_att = self._residual_norm(tree_hid_att)
+
+        # tree_state: (batch, hid)
+        tree_state = tree_hid_att[batch_index, top_pos]
+        return tree_state
+
+    def _select_node(self) -> Tuple[LT, LT, LT]:
+        node, success = self._stack.pop()
+        node: LT
+        success: LT
+        node_idx = node[:, 0]
+        node_val = node[:, 1]
+        return node_idx, node_val, success
+
     def update_pda_with_predictions(self, parent_idx: LT, symbol: LT, p_growth: LT, symbol_mask: LT, lhs_mask: NullOrLT):
         """
         Iterate the symbols backwards and push them onto the stack based on topological information.
@@ -407,6 +404,11 @@ class NeuralPDA(nn.Module):
             node_idx, succ = self._partial_tree.add_new_node_edge(step_symbol, parent_idx, push_mask)
             stack_item = torch.cat([node_idx.unsqueeze(-1), step_symbol], dim=-1)
             self._stack.push(stack_item, (push_mask * succ).long())
+
+    def get_grammar(self, nodes):
+        # tree_grammar: (batch, n_d, opt_num, 4, max_seq)
+        tree_grammar = self._gt(nodes)
+        return tree_grammar
 
     @staticmethod
     def retrieve_the_chosen_structure(choice, grammar_guide) -> T3L:
