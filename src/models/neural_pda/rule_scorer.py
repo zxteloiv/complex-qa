@@ -100,10 +100,11 @@ class ConcatInnerProductScorer(RuleScorer):
 
 
 class AddInnerProductScorer(RuleScorer):
-    def __init__(self, hidden_sz: int, use_layer_norm: bool = True, positive: bool = True):
+    def __init__(self, hidden_sz: int, use_layer_norm: bool = True, positive: bool = True, use_gated_add: bool = False):
         super().__init__()
         self.layer_norm = nn.LayerNorm(hidden_sz) if use_layer_norm else None
         self.positive = positive
+        self.gate = nn.Parameter(torch.zeros(hidden_sz)) if use_gated_add else None
 
     def forward(self, rule_option: FT, query_context: FT, tree_state: FT) -> FT:
         """
@@ -115,7 +116,11 @@ class AddInnerProductScorer(RuleScorer):
         """
         if self.positive:
             # state: (batch, opt_num, hid)
-            state = query_context + tree_state
+            if self.gate is None:
+                state = query_context + tree_state
+            else:
+                gating = torch.sigmoid(self.gate)
+                state = query_context * gating + tree_state * (1 - gating)
         else:
             state = tree_state
 
