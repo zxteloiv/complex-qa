@@ -119,6 +119,8 @@ def get_rule_scorer(p, vocab):
             nn.Tanh(),
         ))
     elif p.rule_scorer == "add_inner_product":
+        rule_scorer = AddInnerProductScorer(p.hidden_sz)
+    elif p.rule_scorer == "gated_add_inner_product":
         rule_scorer = AddInnerProductScorer(p.hidden_sz, use_gated_add=True)
     else:
         rule_scorer = MLPScorerWrapper(MultiInputsSequential(
