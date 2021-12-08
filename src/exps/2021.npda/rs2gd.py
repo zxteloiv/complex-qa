@@ -16,6 +16,7 @@ from trialbot.data.iterators import RandomIterator
 sys.path.insert(0, osp.abspath(osp.join(osp.dirname(__file__), '..', '..')))
 
 from collections import defaultdict
+from collections import Counter
 from allennlp.modules.seq2seq_encoders import LstmSeq2SeqEncoder
 from allennlp.training.metrics.perplexity import Average
 from models.neural_pda.tree_action_policy import TreeActionPolicy
@@ -284,9 +285,17 @@ def collect_epoch_grammars(bot: TrialBot, update_train_set: bool = False, update
     #       export_terminal_values = False, and treat_terminals_as_categories = False,
     # the terminals will be None and thus will not affect the export_grammar function
     g, terminals = restore_grammar_from_trees(train_trees, export_terminal_values=False)
-    g = simplify_grammar(g, start)
-    if bot.state.epoch > 0:
+    priority = bot.hparams.rule_priority
+    if priority == "pfr":
+        g_comp = prioritize_frequent_grammar_rules(g)
+        g = simplify_grammar(g_comp, start)
+        check_priorities(g_comp, g)
+    elif priority == "pnr" and bot.state.epoch > 0:
         g = prioritize_new_grammar_rules(bot.state.g, g)
+        g = simplify_grammar(g, start)
+    else:
+        g = simplify_grammar(g, start)
+
     g_txt = export_grammar(g, lex_in, terminals if export_terminals else None, excluded,
                            treat_terminals_as_categories=False,)
     grammar_filename = osp.join(bot.savepath, f"grammar_{bot.state.epoch}.lark")
@@ -303,6 +312,42 @@ def collect_epoch_grammars(bot: TrialBot, update_train_set: bool = False, update
         if update_train_set:
             logging.info(f'Updating the train dataset by new grammar ...')
             updating_trees(parser, bot.train_set)
+
+
+def prioritize_frequent_grammar_rules(g_occurrences: T_CFG):
+    new_g = defaultdict(list)
+    for nt, rhs_list in g_occurrences.items():
+        counts = Counter(rhs_list)
+        new_g[nt] = [rhs for rhs, _ in counts.most_common(len(counts))]
+    return new_g
+
+
+def check_priorities(old_g: T_CFG, new_g: T_CFG):
+    def ordered_pairs(length: int):
+        for i in range(length):
+            for j in range(i + 1, length):
+                yield i, j
+
+    for nt, new_rhs_list in new_g.items():
+        old_rhs_list = old_g.get(nt)
+        if old_rhs_list is None:
+            continue
+
+        order_has_been_changed = False
+
+        for i, j in ordered_pairs(len(new_rhs_list)):
+            preceding_rule, succeeding_rule = new_rhs_list[i], new_rhs_list[j]
+            if preceding_rule in old_rhs_list and succeeding_rule in old_rhs_list:
+                old_i = old_rhs_list.index(preceding_rule)
+                old_j = old_rhs_list.index(succeeding_rule)
+                if old_i >= old_j:
+                    order_has_been_changed = True
+                    break
+
+        if order_has_been_changed:
+            logging.warning(f"RHS order changed for {nt}:\n"
+                            f"old_order: {old_rhs_list}\n"
+                            f"new_order: {new_rhs_list}")
 
 
 def prioritize_new_grammar_rules(old_g: T_CFG, new_g: T_CFG):
@@ -394,6 +439,8 @@ def crude_conf():
     p.TRANSLATOR_KWARGS = {"use_reversible_actions": True}
     p.action_num = 8
 
+    p.rule_priority = "pnr"     # default, pnr, pfr
+
     # parser params
     p.nested_translator = 'cg_sql_pda'
     p.nested_hparamset = 'sch_pda'
@@ -411,6 +458,13 @@ def crude_conf():
     p.grammar_modification_turns = 20
 
     p.TRAINING_LIMIT = p.policy_warmup_epoch + p.policy_finetune_epoch * p.grammar_modification_turns
+    return p
+
+
+@Registry.hparamset()
+def rgs_pfr():
+    p = crude_conf()
+    p.rule_priority = 'pfr'
     return p
 
 

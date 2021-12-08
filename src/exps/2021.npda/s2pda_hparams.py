@@ -115,7 +115,7 @@ def sql_pda():
     p.use_attn_residual_norm = True
 
     # ----------- end of tree settings -------------
-    p.rule_scorer = "add_inner_product"  # heuristic, mlp, (triple|concat|add_inner_product)
+    p.rule_scorer = "add_inner_product"  # heuristic, mlp, (triple|concat|add_inner_product|gated_add_inner_product)
     p.init_embedding_by_kaiming_normal = True
     p.repr_loss_lambda = 0
 

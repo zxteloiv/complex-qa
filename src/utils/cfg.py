@@ -49,7 +49,7 @@ def restore_grammar_from_trees(trees: List[Tree],
     for t in trees:
         for nt in t.iter_subtrees_topdown():
             lhs = NonTerminal(nt.label)
-            rhs = [Terminal(c.label) if c.is_terminal else NonTerminal(c.label) for c in nt.children]
+            rhs = tuple((Terminal if c.is_terminal else NonTerminal)(c.label) for c in nt.children)
             g[lhs].append(rhs)
             if export_terminal_values:
                 # export the terminal values when the terminals are in fact categories, whose single child
