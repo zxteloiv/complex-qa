@@ -66,7 +66,7 @@ class TreeActionPolicy(torch.nn.Module):
 
         return output
 
-    def get_logprob(self, node_logits: torch.Tensor, node_mask: torch.ByteTensor, action_validity: torch.Tensor):
+    def get_logprob(self, node_logits: torch.Tensor, node_mask: torch.Tensor, action_validity: torch.Tensor):
         """
         :param node_logits: (B, N, A)
         :param node_mask: (B, N)
@@ -74,10 +74,14 @@ class TreeActionPolicy(torch.nn.Module):
         :return:
         """
         # (B, N, 1)
-        node_log_mask = (node_mask.unsqueeze(-1) + utilsallen.tiny_value_of_dtype(node_logits.dtype)).log()
-        action_log_mask = (action_validity + utilsallen.tiny_value_of_dtype(node_logits.dtype)).log()
+        # node_log_mask = (node_mask.unsqueeze(-1) + utilsallen.tiny_value_of_dtype(node_logits.dtype)).log()
+        # action_log_mask = (action_validity + utilsallen.tiny_value_of_dtype(node_logits.dtype)).log()
         # (B, N, A)
-        masked_logits = node_logits + node_log_mask + action_log_mask
+        # masked_logits = node_logits + node_log_mask + action_log_mask
+
+        # (B, N, A)
+        mask = (node_mask.unsqueeze(-1) * action_validity).bool()
+        masked_logits = node_logits.masked_fill(~mask, utilsallen.min_value_of_dtype(node_logits.dtype))
 
         # (B, N * A)
         masked_logits_rs = masked_logits.reshape(node_logits.size()[0], -1)
@@ -102,7 +106,7 @@ class TreeActionPolicy(torch.nn.Module):
 
         # (B, S)
         if method == "max":
-            _, indices = torch.max(flat_prob, dim=-1)
+            _, indices = torch.max(flat_prob, dim=-1, keepdim=True)
         elif method == "topk":
             _, indices = torch.topk(flat_prob, sample_num, largest=True, dim=-1, sorted=True)
         elif method == 'multinomial':
