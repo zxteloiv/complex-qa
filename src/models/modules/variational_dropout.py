@@ -1,6 +1,7 @@
 import torch
 from torch import nn
 
+
 class VariationalDropout(nn.Module):
     """
     A Dropout derived from the Variational Inference perspective.

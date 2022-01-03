@@ -1,10 +1,10 @@
 from typing import List, Optional, Union
 import torch
 import torch.nn
-from models.modules.torch_rnn_wrapper import TorchRNNWrapper as HSWrapper, RNNType
-from utils.nn import filter_cat
+from models.modules.torch_rnn_wrapper import TorchRNNWrapper as HSWrapper
 from models.interfaces.unified_rnn import UnifiedRNN
 from ..modules.variational_dropout import VariationalDropout
+
 
 class StackedRNNCell(torch.nn.Module):
     def __init__(self, rnns: List[UnifiedRNN], dropout: float = 0.):
@@ -62,12 +62,14 @@ class StackedLSTMCell(StackedRNNCell):
             for floor in range(n_layers)
         ], dropout)
 
+
 class StackedGRUCell(StackedRNNCell):
     def __init__(self, input_dim, hidden_dim, n_layers, dropout = 0.):
         super().__init__([
             HSWrapper(torch.nn.GRUCell(input_dim if floor == 0 else hidden_dim, hidden_dim))
             for floor in range(n_layers)
         ], dropout)
+
 
 if __name__ == '__main__':
     batch, dim, L = 5, 10, 2

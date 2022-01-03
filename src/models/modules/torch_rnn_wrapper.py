@@ -2,10 +2,10 @@ from typing import List, Optional, Callable, Tuple, Any
 import torch.nn
 
 from models.modules.independent_rnn import IndRNNCell
-from utils.nn import filter_cat
 from ..interfaces.unified_rnn import UnifiedRNN
-
 from enum import Enum
+
+
 class RNNType(Enum):
     VanillaRNN = torch.nn.RNNCell
     LSTM = torch.nn.LSTMCell
