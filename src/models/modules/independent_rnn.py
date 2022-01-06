@@ -1,8 +1,10 @@
-from typing import List, Mapping, Dict, Optional, Tuple, Union, Callable, Sequence
+from typing import Optional
 import torch.nn
 import torch.nn.modules
+from ..interfaces.unified_rnn import UnifiedRNN
 
-class IndRNNCell(torch.nn.Module):
+
+class IndRNNCell(UnifiedRNN):
     """
     An independent recurrent unit. From a CVPR2018 paper (https://arxiv.org/abs/1803.04831).
 
@@ -32,6 +34,12 @@ class IndRNNCell(torch.nn.Module):
         b = torch.randn(hidden_size)
         self.bias = torch.nn.Parameter(b) if bias else 0
 
+    def get_input_dim(self):
+        return self.inputs_size
+
+    def get_output_dim(self):
+        return self.hidden_size
+
     def forward(self, inputs: torch.Tensor, hidden: Optional[torch.Tensor] = None) -> torch.Tensor:
         """
 
@@ -50,4 +58,10 @@ class IndRNNCell(torch.nn.Module):
         raw = Wx + uh + self.bias
 
         return self.activation(raw)
+
+    def get_output_state(self, hidden):
+        return hidden
+
+    def init_hidden_states(self, forward_out):
+        return forward_out, forward_out
 

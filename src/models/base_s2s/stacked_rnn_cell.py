@@ -1,26 +1,33 @@
-from typing import List, Optional, Union
+from typing import List, Optional, Union, Any
 import torch
 import torch.nn
 from models.modules.torch_rnn_wrapper import TorchRNNWrapper as HSWrapper
-from models.interfaces.unified_rnn import UnifiedRNN
+from models.interfaces.unified_rnn import UnifiedRNN, RNNStack
 from ..modules.variational_dropout import VariationalDropout
 
 
-class StackedRNNCell(torch.nn.Module):
+class StackedRNNCell(RNNStack):
     def __init__(self, rnns: List[UnifiedRNN], dropout: float = 0.):
         super(StackedRNNCell, self).__init__()
         self._input_dropouts = [VariationalDropout(dropout, on_the_fly=False) for _ in range(len(rnns) - 1)]
-        self._hidden_dropouts = [VariationalDropout(dropout, on_the_fly=False) for _ in range(len(rnns))]
-        for rnn, vd in zip(rnns, self._hidden_dropouts):
-            rnn.set_hx_dropout_fn(vd)
         self.layer_rnns = torch.nn.ModuleList(rnns)
 
     def get_layer_num(self):
         return len(self.layer_rnns)
 
+    def get_input_dim(self):
+        return self.layer_rnns[0].get_input_dim()
+
+    def get_output_dim(self):
+        return self.layer_rnns[-1].get_output_dim()
+
     def reset(self):
-        for m in self._input_dropouts + self._hidden_dropouts:
+        for m in self._input_dropouts:
             m.reset()
+
+        for m in self.layer_rnns.modules():
+            if isinstance(m, VariationalDropout):
+                m.reset()
 
     def forward(self, inputs, hidden):
         last_layer_output = inputs
@@ -37,6 +44,15 @@ class StackedRNNCell(torch.nn.Module):
     def get_output_state(self, hidden):
         last_hidden = hidden[-1]
         return self.layer_rnns[-1].get_output_state(last_hidden)
+
+    def get_layered_output_state(self, hidden: List[Any]) -> List[torch.Tensor]:
+        assert len(hidden) == len(self.layer_rnns), "hidden must contains the same number of layers as the RNNStack"
+        layered_output = []
+        for layer_hx, rnn in zip(hidden, self.layer_rnns):
+            rnn: UnifiedRNN
+            layered_output.append(rnn.get_output_state(layer_hx))
+
+        return layered_output
 
     def merge_hidden_list(self, hidden_list, weight):
         # hidden_list: [hidden_1, ..., hidden_T] along timestep
@@ -56,7 +72,7 @@ class StackedRNNCell(torch.nn.Module):
 
 
 class StackedLSTMCell(StackedRNNCell):
-    def __init__(self, input_dim, hidden_dim, n_layers, dropout = 0.):
+    def __init__(self, input_dim, hidden_dim, n_layers, dropout=0.):
         super().__init__([
             HSWrapper(torch.nn.LSTMCell(input_dim if floor == 0 else hidden_dim, hidden_dim))
             for floor in range(n_layers)
@@ -64,7 +80,7 @@ class StackedLSTMCell(StackedRNNCell):
 
 
 class StackedGRUCell(StackedRNNCell):
-    def __init__(self, input_dim, hidden_dim, n_layers, dropout = 0.):
+    def __init__(self, input_dim, hidden_dim, n_layers, dropout=0.):
         super().__init__([
             HSWrapper(torch.nn.GRUCell(input_dim if floor == 0 else hidden_dim, hidden_dim))
             for floor in range(n_layers)

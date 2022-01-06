@@ -2,12 +2,12 @@ from trialbot.training import Registry
 from trialbot.data.translator import FieldAwareTranslator
 from trialbot.data.fields import SeqField
 from trialbot.data.translators import KnownFieldTranslator
-from .cg_bundle_fields import TerminalRuleSeqField, ProcessedSentField, RuleSymbolSeqField
+from .cg_bundle_fields import TerminalRuleSeqField, ProcessedSentField
 from .cfq_fields import TreeTraversalField, TutorBuilderField
 from .cfq_fields import PolicyValidity
 
 
-@Registry.translator('sql_s2s')
+@Registry.translator('s2s')
 class SQLSeq(FieldAwareTranslator):
     def __init__(self):
         super().__init__(field_list=[
@@ -17,22 +17,12 @@ class SQLSeq(FieldAwareTranslator):
 
 
 @Registry.translator('tranx')
-class TranXTranslator(FieldAwareTranslator):
-    def __init__(self):
-        super().__init__(field_list=[
-            ProcessedSentField(source_key='sent', renamed_key='source_tokens', add_start_end_toks=False, ),
-            TerminalRuleSeqField(no_terminal_rule=False,
-                                 source_key='sql_tree', renamed_key="target_tokens", namespace="rule_seq", ),
-        ])
-
-
-@Registry.translator('tranx_no_terminal')
 class NoTermTranXTranslator(FieldAwareTranslator):
     def __init__(self):
         super().__init__(field_list=[
             ProcessedSentField(source_key='sent', renamed_key='source_tokens', add_start_end_toks=False,),
-            TerminalRuleSeqField(no_terminal_rule=True,
-                                 source_key='sql_tree', renamed_key="target_tokens", namespace="rule_seq",),
+            TerminalRuleSeqField(no_preterminals=True,
+                                 source_key='sql_tree', renamed_key="target_tokens", namespace="rule_seq", ),
         ])
 
 

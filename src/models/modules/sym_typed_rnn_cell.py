@@ -5,6 +5,8 @@ from torch import nn
 import math
 
 from ..interfaces.unified_rnn import UnifiedRNN
+from .variational_dropout import VariationalDropout
+
 
 class SymTypedRNNCell(UnifiedRNN):
     def forward(self, inputs, hidden: Optional[torch.Tensor]) -> Tuple[Any, torch.Tensor]:
@@ -32,16 +34,19 @@ class SymTypedRNNCell(UnifiedRNN):
         out = self._activation(out)
         return out, out
 
+    def get_input_dim(self):
+        return self.input_dim
+
+    def get_output_dim(self):
+        return self.output_dim
+
     def get_output_state(self, hidden) -> torch.Tensor:
         return hidden
-
-    def set_hx_dropout_fn(self, hx_dropout_fn):
-        self._hx_dropout_fn = hx_dropout_fn
 
     def init_hidden_states(self, forward_out) -> Tuple[Any, torch.Tensor]:
         return forward_out, forward_out
 
-    def __init__(self, input_dim, output_dim, nonlinearity: str = "tanh"):
+    def __init__(self, input_dim, output_dim, nonlinearity: str = "tanh", h_dropout: VariationalDropout = None):
         super().__init__()
         self.input_dim = input_dim
         self.output_dim = output_dim
@@ -50,7 +55,7 @@ class SymTypedRNNCell(UnifiedRNN):
 
         self._sym_h_weight = nn.Parameter(torch.empty(output_dim, output_dim, dtype=torch.float))
 
-        self._hx_dropout_fn = None
+        self._hx_dropout_fn = h_dropout
 
         if nonlinearity.lower() not in ('tanh', 'sigmoid', 'linear'):
             nonlinearity = 'leaky_relu'

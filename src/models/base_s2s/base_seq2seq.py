@@ -6,8 +6,8 @@ import torch
 from trialbot.data.ns_vocabulary import NSVocabulary
 from ..interfaces.attention import Attention as IAttn, VectorContextComposer as AttnComposer
 from ..modules.variational_dropout import VariationalDropout
+from ..interfaces.unified_rnn import RNNStack, EncoderRNNStack
 from .stacked_rnn_cell import StackedRNNCell
-from .stacked_encoder import StackedEncoder
 from utils.nn import filter_cat, prepare_input_mask, seq_cross_ent
 from utils.nn import aggregate_layered_state, assign_stacked_states
 from utils.seq_collector import SeqCollector
@@ -19,8 +19,8 @@ class BaseSeq2Seq(torch.nn.Module):
     def __init__(self,
                  # modules
                  vocab: NSVocabulary,
-                 encoder: StackedEncoder,
-                 decoder: StackedRNNCell,
+                 encoder: EncoderRNNStack,
+                 decoder: RNNStack,
                  word_projection: torch.nn.Module,
                  source_embedding: torch.nn.Embedding,
                  target_embedding: torch.nn.Embedding,
@@ -56,7 +56,7 @@ class BaseSeq2Seq(torch.nn.Module):
 
         self._scheduled_sampling_ratio = scheduled_sampling_ratio
         self._encoder = encoder
-        self._decoder: StackedRNNCell = decoder
+        self._decoder = decoder
         self._src_embedding = source_embedding
         self._tgt_embedding = target_embedding
         self._enc_dec_trans = enc_dec_transformer
@@ -153,9 +153,9 @@ class BaseSeq2Seq(torch.nn.Module):
         return output_dict
 
     def _reset_variational_dropouts(self):
-        self._decoder.reset()
-        self._tgt_emb_dropout.reset()
-        self._proj_inp_dropout.reset()
+        for m in self.modules():
+            if isinstance(m, VariationalDropout):
+                m.reset()
 
     def _encode(self, source: torch.LongTensor, source_mask: torch.LongTensor):
         # source: (batch, max_input_length), source sequence token ids
@@ -326,6 +326,8 @@ class BaseSeq2Seq(torch.nn.Module):
         Build the seq2seq model with hyper-parameters.
         Since S2S is widely used and can be implemented task-agnostic,
         the builder for trialbot is provided as default.
+        Because we want a flat configuration file and use it only with the BaseSeq2Seq model,
+        the model is responsible for providing definitions.
 
         p.emb_sz = 256
         p.src_namespace = 'ns_q'
@@ -358,7 +360,6 @@ class BaseSeq2Seq(torch.nn.Module):
         from trialbot.data import START_SYMBOL, END_SYMBOL
         from torch import nn
         from models.base_s2s.stacked_rnn_cell import StackedRNNCell
-        from models.base_s2s.stacked_encoder import StackedEncoder
         from ..modules.attention_wrapper import get_wrapped_attention
         from ..modules.attention_composer import get_attn_composer
 
@@ -378,7 +379,8 @@ class BaseSeq2Seq(torch.nn.Module):
         else:
             target_embedding = nn.Embedding(num_embeddings=vocab.get_vocab_size(p.tgt_namespace), embedding_dim=emb_sz)
 
-        encoder = StackedEncoder.get_encoder(p)
+        # encoder = StackedEncoder.get_encoder(p)
+        encoder = cls.get_encoder(p)
         enc_out_dim = encoder.get_output_dim()
         dec_in_dim = getattr(p, 'dec_in_dim', p.hidden_sz)
         dec_out_dim = getattr(p, 'dec_out_dim', p.hidden_sz)
@@ -424,11 +426,8 @@ class BaseSeq2Seq(torch.nn.Module):
 
         enc_dropout = getattr(p, 'enc_dropout', getattr(p, 'dropout', 0.))
         dec_dropout = getattr(p, 'dec_dropout', getattr(p, 'dropout', 0.))
-        rnn_cls = cls.get_decoder_type(p.decoder)
-        decoder = StackedRNNCell([
-            rnn_cls(dec_in_dim if floor == 0 else dec_out_dim, dec_out_dim)
-            for floor in range(p.num_dec_layers)
-        ], dec_dropout)
+        decoder = cls.get_stacked_rnn(p.decoder, dec_in_dim, dec_out_dim, p.num_dec_layers,
+                                      dec_dropout, dec_dropout)
 
         word_proj = nn.Linear(proj_in_dim, vocab.get_vocab_size(p.tgt_namespace))
         if p.tied_decoder_embedding:
@@ -463,24 +462,67 @@ class BaseSeq2Seq(torch.nn.Module):
         return model
 
     @staticmethod
-    def get_decoder_type(decoder: str):
-        from models.modules.torch_rnn_wrapper import RNNType
+    def get_encoder(p) -> EncoderRNNStack:
+
+        use_cell_based_encoder = getattr(p, 'use_cell_based_encoder', False)
+        if not use_cell_based_encoder:
+            from .stacked_encoder import StackedEncoder
+            return StackedEncoder.get_encoder(p)
+
+        else:
+            dropout = getattr(p, 'enc_dropout', getattr(p, 'dropout', 0.))
+            hid_sz = getattr(p, 'enc_out_dim', p.hidden_sz)
+            stacked_cell = BaseSeq2Seq.get_stacked_rnn(p.encoder, p.emb_sz, hid_sz, p.num_enc_layers,
+                                                       dropout, dropout)
+            from .stacked_cell_encoder import StackedCellEncoder
+            return StackedCellEncoder(stacked_cell)
+
+    @staticmethod
+    def get_stacked_rnn(cell_type: str, inp_sz: int, hid_sz: int, num_layers: int,
+                        h_dropout: float, v_dropout: float,
+                        onlstm_chunk_sz: int = 10,
+                        ) -> RNNStack:
+        from .stacked_rnn_cell import StackedRNNCell
         from ..modules.torch_rnn_wrapper import TorchRNNWrapper as RNNWrapper
-        cell_type = decoder
+        from ..modules.variational_dropout import VariationalDropout
+
+        def _get_cell_in(floor):
+            return inp_sz if floor == 0 else hid_sz
+
+        def _get_h_vd(d):
+            return VariationalDropout(d, on_the_fly=False) if d > 0 else None
+
+        rnns = cls = None
         if cell_type == 'typed_rnn':
             from ..modules.sym_typed_rnn_cell import SymTypedRNNCell
-            return SymTypedRNNCell
+            rnns = [
+                SymTypedRNNCell(_get_cell_in(floor), hid_sz, "tanh", _get_h_vd(h_dropout))
+                for floor in range(num_layers)
+            ]
 
-        if cell_type == "lstm":
+        elif cell_type == 'onlstm':
+            from ..onlstm.onlstm import ONLSTMCell
+            rnns = [
+                ONLSTMCell(_get_cell_in(floor), hid_sz, onlstm_chunk_sz, _get_h_vd(h_dropout))
+                for floor in range(num_layers)
+            ]
+
+        elif cell_type == 'ind_rnn':
+            from ..modules.independent_rnn import IndRNNCell
+            rnns = [IndRNNCell(_get_cell_in(floor), hid_sz) for floor in range(num_layers)]
+
+        elif cell_type == "lstm":
             cls = torch.nn.LSTMCell
         elif cell_type == "gru":
             cls = torch.nn.GRUCell
-        elif cell_type == "ind_rnn":
-            cls = RNNType.IndRNN.value
         elif cell_type == "rnn":
             cls = torch.nn.RNNCell
         else:
             raise ValueError(f"RNN type of {cell_type} not found.")
 
-        constructor = lambda in_dim, out_dim: RNNWrapper(cls(in_dim, out_dim))
-        return constructor
+        if rnns is None:
+            rnns = [RNNWrapper(cls(_get_cell_in(floor), hid_sz), _get_h_vd(h_dropout))
+                    for floor in range(num_layers)]
+
+        stacked_cell = StackedRNNCell(rnns, v_dropout)
+        return stacked_cell

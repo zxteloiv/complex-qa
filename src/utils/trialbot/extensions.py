@@ -158,3 +158,11 @@ def get_metrics(bot: TrialBot, prefix: str = ""):
 
 def print_snaptshot_path(bot: TrialBot):
     bot.logger.info("Snapshot Dir: " + bot.savepath)
+
+
+def reset_variational_dropout(bot: TrialBot):
+    from models.modules.variational_dropout import VariationalDropout
+    for model in bot.models:
+        for m in model.modules():
+            if isinstance(m, VariationalDropout):
+                m.reset()

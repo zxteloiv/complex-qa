@@ -1,10 +1,11 @@
 from typing import Optional
 import torch.nn
 from models.modules.variational_dropout import VariationalDropout
+from ..interfaces.unified_rnn import EncoderRNNStack
 from models.modules.container import SelectArgsById, UnpackedInputsSequential
 
 
-class StackedEncoder(torch.nn.Module):
+class StackedEncoder(EncoderRNNStack):
     """
     Stacked Encoder over a token sequence. The encoder could be either based on RNN or Transformer.
     The Encoder must not be used with any initial hidden states
@@ -16,6 +17,7 @@ class StackedEncoder(torch.nn.Module):
     But the stacked rnn cells do not support bidirectional forward by default.
     The allennlp.modules.seq2seq_encoders.PytorchSeq2SeqWrapper is also useful.
     """
+
     def __init__(self, encs,
                  input_size: Optional = None,
                  output_size: Optional = None,
@@ -33,6 +35,7 @@ class StackedEncoder(torch.nn.Module):
     def forward(self,
                 inputs: torch.Tensor,
                 mask: Optional[torch.LongTensor],
+                hx=None,  # not supported at present
                 ):
         last_output = inputs
         layered_output = []
@@ -105,7 +108,7 @@ class StackedEncoder(torch.nn.Module):
         elif p.encoder == "aug_lstm":
             enc_cls = lambda floor: AugmentedLstmSeq2SeqEncoder(p.emb_sz if floor == 0 else hid_sz, hid_sz,
                                                                 recurrent_dropout_probability=dropout,
-                                                                use_highway=True,)
+                                                                use_highway=True, )
         elif p.encoder == "aug_bilstm":
             enc_cls = lambda floor: StackedBidirectionalLstmSeq2SeqEncoder(
                 p.emb_sz if floor == 0 else hid_sz, hid_sz, num_layers=1,
@@ -120,4 +123,3 @@ class StackedEncoder(torch.nn.Module):
                                  output_size=hid_sz,
                                  input_dropout=dropout)
         return encoder
-

@@ -145,10 +145,10 @@ class ProcessedSentField(SeqField):
 
 class TerminalRuleSeqField(SeqField):
     """Convert the sql into sequence of derivations guided by some grammar tree"""
-    def __init__(self, keywords: dict = None, no_terminal_rule: bool = False, *args, **kwargs):
+    def __init__(self, keywords: dict = None, no_preterminals: bool = False, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.keywords = keywords or {}
-        self.no_terminal_rules = no_terminal_rule
+        self.no_preterminals = no_preterminals
 
     def _get_rule_str(self, node: Union[_Tree, _Token]):
         if isinstance(node, _Tree):
@@ -157,7 +157,7 @@ class TerminalRuleSeqField(SeqField):
             for tok in children:
                 if isinstance(tok, _Tree):
                     rule.append(tok.data)
-                elif self.no_terminal_rules:
+                elif self.no_preterminals:
                     rule.append(tok.value)
                 elif tok.type in self.keywords:
                     rule.append(self.keywords[tok.type])
@@ -178,7 +178,7 @@ class TerminalRuleSeqField(SeqField):
             yield node
             if isinstance(node, _Tree):
                 for n in reversed(node.children):
-                    if isinstance(n, _Token) and (self.no_terminal_rules or n.type in self.keywords):
+                    if isinstance(n, _Token) and (self.no_preterminals or n.type in self.keywords):
                         continue
                     stack.append(n)
 
