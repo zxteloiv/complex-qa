@@ -23,6 +23,7 @@ def scholar_onlstm2seq():
     p = scholar()
     p.use_cell_based_encoder = True
     p.encoder = 'onlstm'
+    p.enc_dec_trans_forced = True
     return p
 
 
@@ -31,6 +32,7 @@ def scholar_seq2onlstm():
     p = scholar()
     p.use_cell_based_encoder = True
     p.decoder = 'onlstm'
+    p.enc_dec_trans_forced = True
     return p
 
 
@@ -40,6 +42,7 @@ def scholar_onlstm2onlstm():
     p.use_cell_based_encoder = True
     p.encoder = 'onlstm'
     p.decoder = 'onlstm'
+    p.enc_dec_trans_forced = False
     return p
 
 
@@ -61,8 +64,8 @@ def scholar():
     p.scheduled_sampling = .1
     p.decoder_init_strategy = "forward_last_parallel"
     p.tied_decoder_embedding = False
-    p.num_enc_layers = 1
-    p.num_dec_layers = 1
+    p.num_enc_layers = 3
+    p.num_dec_layers = 3
     p.emb_sz = 100
 
     p.use_cell_based_encoder = False
@@ -76,7 +79,7 @@ def scholar():
 
     p.enc_dec_trans_usage = 'consistent'
     p.enc_dec_trans_act = 'tanh'
-    p.enc_dec_trans_forced = True
+    p.enc_dec_trans_forced = False
 
     p.proj_in_dim = p.emb_sz
 
