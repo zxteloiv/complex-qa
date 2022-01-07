@@ -9,7 +9,8 @@ from ..modules.variational_dropout import VariationalDropout
 class StackedRNNCell(RNNStack):
     def __init__(self, rnns: List[UnifiedRNN], dropout: float = 0.):
         super(StackedRNNCell, self).__init__()
-        self._input_dropouts = [VariationalDropout(dropout, on_the_fly=False) for _ in range(len(rnns) - 1)]
+        self._input_dropouts = torch.nn.ModuleList([VariationalDropout(dropout, on_the_fly=False)
+                                                    for _ in range(len(rnns) - 1)])
         self.layer_rnns = torch.nn.ModuleList(rnns)
 
     def get_layer_num(self):
