@@ -76,6 +76,7 @@ def scholar():
 
     p.enc_dec_trans_usage = 'consistent'
     p.enc_dec_trans_act = 'tanh'
+    p.enc_dec_trans_forced = True
 
     p.proj_in_dim = p.emb_sz
 

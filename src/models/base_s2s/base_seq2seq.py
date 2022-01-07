@@ -1,8 +1,7 @@
 from typing import Union, Optional, Tuple, Dict, Any, Literal
-
-import allennlp.nn
 import numpy as np
 import torch
+from torch import nn
 from trialbot.data.ns_vocabulary import NSVocabulary
 from ..interfaces.attention import Attention as IAttn, VectorContextComposer as AttnComposer
 from ..modules.variational_dropout import VariationalDropout
@@ -344,6 +343,7 @@ class BaseSeq2Seq(torch.nn.Module):
         p.proj_inp_comp_activation = 'mish'
         p.enc_dec_trans_act = 'linear'
         p.enc_dec_trans_usage = 'consistent'
+        p.enc_dec_trans_forced = True
         p.encoder = "bilstm"
         p.num_enc_layers = 2
         p.decoder = "lstm"
@@ -358,61 +358,24 @@ class BaseSeq2Seq(torch.nn.Module):
         p.src_emb_pretrained_file = "~/.glove/glove.6B.100d.txt.gz"
         """
         from trialbot.data import START_SYMBOL, END_SYMBOL
-        from torch import nn
-        from models.base_s2s.stacked_rnn_cell import StackedRNNCell
         from ..modules.attention_wrapper import get_wrapped_attention
         from ..modules.attention_composer import get_attn_composer
 
         emb_sz = p.emb_sz
-        src_pretrain_file = getattr(p, 'src_emb_pretrained_file', None)
-        if src_pretrain_file is None:
-            source_embedding = nn.Embedding(num_embeddings=vocab.get_vocab_size(p.src_namespace), embedding_dim=emb_sz)
-        else:
-            from allennlp.modules.token_embedders import Embedding
-            source_embedding = Embedding(embedding_dim=emb_sz,
-                                         num_embeddings=vocab.get_vocab_size(p.src_namespace),
-                                         vocab_namespace=p.src_namespace,
-                                         pretrained_file=src_pretrain_file,
-                                         vocab=vocab)
-        if p.src_namespace == p.tgt_namespace:
-            target_embedding = source_embedding
-        else:
-            target_embedding = nn.Embedding(num_embeddings=vocab.get_vocab_size(p.tgt_namespace), embedding_dim=emb_sz)
+        source_embedding, target_embedding = cls._get_embeddings(p, vocab)
 
-        # encoder = StackedEncoder.get_encoder(p)
         encoder = cls.get_encoder(p)
         enc_out_dim = encoder.get_output_dim()
         dec_in_dim = getattr(p, 'dec_in_dim', p.hidden_sz)
         dec_out_dim = getattr(p, 'dec_out_dim', p.hidden_sz)
         proj_in_dim = getattr(p, 'proj_in_dim', p.hidden_sz)
 
-        # expecting the dimensions matchs between the decoder and encoder, otherwise a transformer is introduced.
-        usage_for_dec_init = not (p.decoder_init_strategy.startswith('zero')
-                                  or (encoder.is_bidirectional() and dec_out_dim * 2 == enc_out_dim)
-                                  or (not encoder.is_bidirectional() and dec_out_dim == enc_out_dim))
-        # expecting the encoder output and decoder output matches when attention
-        usage_for_attn = (p.enc_attn == 'dot_product' and enc_out_dim != dec_out_dim)
-        forced_consistent = getattr(p, 'enc_dec_trans_usage', 'consistent') == 'consistent'
-        # consistent will not work if all the dimensions match
-        enc_dec_transformer = None
-        if usage_for_attn or usage_for_dec_init:
-            enc_dec_transformer = nn.Sequential(
-                nn.Linear(enc_out_dim, dec_out_dim),
-                allennlp.nn.Activation.by_name(getattr(p, 'enc_dec_trans_act', 'linear'))(),
-            )
-
-        if forced_consistent and enc_dec_transformer is not None:
-            enc_dec_trans_usage = "consistent"  # the output will be transformed immediately and never in the future
-        elif usage_for_dec_init:
-            enc_dec_trans_usage = "dec_init"    # the output will be only transformed when initializing the decoder
-        elif usage_for_attn:
-            enc_dec_trans_usage = "attn"    # the output will be only transformed when computing attentions
-        else:
-            enc_dec_trans_usage = ""    # no need at all
+        trans_module, _usages = cls._get_transformation_module(p, encoder.is_bidirectional(), enc_out_dim, dec_out_dim)
+        trans_usage_string = cls._get_trans_usage_string(p, trans_module, _usages)
 
         # Initialize attentions. And compute the dimension requirements for all attention modules
         # the encoder attention size depends on the transformation usage
-        enc_attn_sz = dec_out_dim if usage_for_attn else enc_out_dim
+        enc_attn_sz = dec_out_dim if trans_usage_string in ('consistent', 'attn') else enc_out_dim
         enc_attn = get_wrapped_attention(p.enc_attn, dec_out_dim, enc_attn_sz)
         # dec output attend over previous dec outputs, thus attn_context dimension == dec_output_dim
         dec_hist_attn = get_wrapped_attention(p.dec_hist_attn, dec_out_dim, dec_out_dim)
@@ -445,7 +408,7 @@ class BaseSeq2Seq(torch.nn.Module):
             dec_hist_attn=dec_hist_attn,
             dec_inp_attn_comp=dec_inp_composer,
             proj_inp_attn_comp=proj_inp_composer,
-            enc_dec_transformer=enc_dec_transformer,
+            enc_dec_transformer=trans_module,
             source_namespace=p.src_namespace,
             target_namespace=p.tgt_namespace,
             start_symbol=START_SYMBOL,
@@ -453,13 +416,72 @@ class BaseSeq2Seq(torch.nn.Module):
             padding_index=0,
             max_decoding_step=p.max_decoding_step,
             decoder_init_strategy=p.decoder_init_strategy,
-            enc_dec_transform_usage=enc_dec_trans_usage,
+            enc_dec_transform_usage=trans_usage_string,
             scheduled_sampling_ratio=p.scheduled_sampling,
             enc_dropout=enc_dropout,
             dec_dropout=dec_dropout,
             training_average=getattr(p, "training_average", "batch"),
         )
         return model
+
+    @staticmethod
+    def _get_embeddings(p, vocab):
+        emb_sz = p.emb_sz
+        src_pretrain_file = getattr(p, 'src_emb_pretrained_file', None)
+        if src_pretrain_file is None:
+            source_embedding = nn.Embedding(num_embeddings=vocab.get_vocab_size(p.src_namespace), embedding_dim=emb_sz)
+        else:
+            from allennlp.modules.token_embedders import Embedding
+            source_embedding = Embedding(embedding_dim=emb_sz,
+                                         num_embeddings=vocab.get_vocab_size(p.src_namespace),
+                                         vocab_namespace=p.src_namespace,
+                                         pretrained_file=src_pretrain_file,
+                                         vocab=vocab)
+        if p.src_namespace == p.tgt_namespace:
+            target_embedding = source_embedding
+        else:
+            target_embedding = nn.Embedding(num_embeddings=vocab.get_vocab_size(p.tgt_namespace), embedding_dim=emb_sz)
+
+        return source_embedding, target_embedding
+
+    @staticmethod
+    def _get_transformation_module(p, enc_is_bidirectional: bool, enc_out_dim: int, dec_out_dim: int):
+        import allennlp.nn
+        # autodetect for the necessity of the transformation module
+        # expecting the dimensions matchs between the decoder and encoder, otherwise a transformer is introduced.
+        trans_for_dec_init = not (p.decoder_init_strategy.startswith('zero')
+                                  or (enc_is_bidirectional and dec_out_dim * 2 == enc_out_dim)
+                                  or (not enc_is_bidirectional and dec_out_dim == enc_out_dim))
+        # expecting the encoder output and decoder output matches when attention is dot-product,
+        # other attention types will transform the output dimension on their own.
+        trans_for_attn = (p.enc_attn == 'dot_product' and enc_out_dim != dec_out_dim)
+        # the transformer is configured to be
+        forced_transformer: bool = getattr(p, 'enc_dec_trans_forced', False)
+        enc_dec_transformer = None
+        if trans_for_attn or trans_for_dec_init or forced_transformer:
+            enc_dec_transformer = nn.Sequential(
+                nn.Linear(enc_out_dim, dec_out_dim),
+                allennlp.nn.Activation.by_name(getattr(p, 'enc_dec_trans_act', 'linear'))(),
+            )
+        return enc_dec_transformer, (trans_for_dec_init, trans_for_attn)
+
+    @staticmethod
+    def _get_trans_usage_string(p, trans_module, usage):
+        used_by_dec_init, used_by_attn = usage
+        # when transformer is present, check if the consistent transformation is preferred.
+        # if it is so, a mere dec-init or attn usage will get overwritten
+        # consistent will not work if the transformer is unavailable
+        preferred_consistent: bool = getattr(p, 'enc_dec_trans_usage', 'consistent').lower() == 'consistent'
+        if preferred_consistent and trans_module is not None:
+            enc_dec_trans_usage = "consistent"  # the output will be transformed immediately and never in the future
+        elif used_by_dec_init:
+            enc_dec_trans_usage = "dec_init"    # the output will be only transformed when initializing the decoder
+        elif used_by_attn:
+            enc_dec_trans_usage = "attn"    # the output will be only transformed when computing attentions
+        else:
+            enc_dec_trans_usage = ""    # no need at all
+
+        return enc_dec_trans_usage
 
     @staticmethod
     def get_encoder(p) -> EncoderRNNStack:
