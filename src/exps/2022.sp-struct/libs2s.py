@@ -14,6 +14,20 @@ def get_updater(bot: TrialBot):
     iterator = RandomIterator(len(bot.train_set), p.batch_sz)
     logger.info(f"Using RandomIterator: on volume={len(bot.train_set)} with batch={p.batch_sz}")
 
+    lr_scheduler_kwargs = getattr(p, 'lr_scheduler_kwargs', None)
+    if lr_scheduler_kwargs is not None:
+        from allennlp.training.learning_rate_schedulers import NoamLR
+        lr_scheduler = NoamLR(optimizer=optim, **lr_scheduler_kwargs)
+        bot.scheduler = lr_scheduler
+        logger.info(f'the scheduler enabled: {lr_scheduler}')
+
+        def _sched_step(bot: TrialBot):
+            bot.scheduler.step_batch()
+            if bot.state.iteration % 100 == 0:
+                logger.info(f"update lr to {bot.scheduler.get_values()}")
+
+        bot.add_event_handler(Events.ITERATION_COMPLETED, _sched_step, 100)
+
     from trialbot.training.updaters.training_updater import TrainingUpdater
     updater = TrainingUpdater(bot.train_set, bot.translator, model, iterator, optim, args.device, args.dry_run)
     return updater

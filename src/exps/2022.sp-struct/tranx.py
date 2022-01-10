@@ -19,7 +19,7 @@ def main():
 
 
 @Registry.hparamset()
-def scholar_base1():
+def scholar_base1_v3():
     p = scholar()
     p.num_enc_layers = 1
     p.num_dec_layers = 1
@@ -29,6 +29,15 @@ def scholar_base1():
     p.encoder = 'bilstm'
     p.decoder = "lstm"
     p.enc_out_dim = p.hidden_sz
+    # p.lr_scheduler_kwargs = {'model_size': 400, 'warmup_steps': 50}
+    p.src_emb_pretrained_file = "~/.glove/glove.6B.100d.txt.gz"
+    return p
+
+
+@Registry.hparamset()
+def scholar_base1_v4():
+    p = scholar_base1_v3()
+    p.lr_scheduler_kwargs = {'model_size': 400, 'warmup_steps': 50}
     return p
 
 
