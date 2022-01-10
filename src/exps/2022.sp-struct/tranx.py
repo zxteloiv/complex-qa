@@ -19,43 +19,6 @@ def main():
 
 
 @Registry.hparamset()
-def scholar_base1_v3():
-    p = scholar()
-    p.num_enc_layers = 1
-    p.num_dec_layers = 1
-    p.use_cell_based_encoder = False
-    # cell-based encoders: typed_rnn, ind_rnn, onlstm, lstm, gru, rnn; see models.base_s2s.base_seq2seq.py file
-    # seq-based encoders: lstm, transformer, bilstm, aug_lstm, aug_bilstm; see models.base_s2s.stacked_encoder.py file
-    p.encoder = 'bilstm'
-    p.decoder = "lstm"
-    p.enc_out_dim = p.hidden_sz
-    # p.lr_scheduler_kwargs = {'model_size': 400, 'warmup_steps': 50}
-    p.src_emb_pretrained_file = "~/.glove/glove.6B.100d.txt.gz"
-    return p
-
-
-@Registry.hparamset()
-def scholar_base1_v4():
-    p = scholar_base1_v3()
-    p.lr_scheduler_kwargs = {'model_size': 400, 'warmup_steps': 50}
-    return p
-
-
-@Registry.hparamset()
-def scholar_base2():
-    p = scholar()
-    p.num_enc_layers = 1
-    p.num_dec_layers = 1
-    p.use_cell_based_encoder = True
-    # cell-based encoders: typed_rnn, ind_rnn, onlstm, lstm, gru, rnn; see models.base_s2s.base_seq2seq.py file
-    # seq-based encoders: lstm, transformer, bilstm, aug_lstm, aug_bilstm; see models.base_s2s.stacked_encoder.py file
-    p.encoder = 'lstm'
-    p.decoder = "lstm"
-    p.enc_out_dim = p.hidden_sz * 2
-    return p
-
-
-@Registry.hparamset()
 def scholar_onlstm2seq():
     p = scholar()
     p.use_cell_based_encoder = True
@@ -92,6 +55,9 @@ def scholar():
     p.ADAM_BETAS = (0.9, 0.999)
     p.batch_sz = 16
 
+    p.lr_scheduler_kwargs = {'model_size': 400, 'warmup_steps': 50}
+    p.src_emb_pretrained_file = "~/.glove/glove.6B.100d.txt.gz"
+
     p.hidden_sz = 300
     p.src_namespace = 'sent'
     p.tgt_namespace = 'rule_seq'
@@ -101,11 +67,11 @@ def scholar():
     p.scheduled_sampling = .1
     p.decoder_init_strategy = "forward_last_parallel"
     p.tied_decoder_embedding = False
-    p.num_enc_layers = 3
-    p.num_dec_layers = 3
+    p.num_enc_layers = 1
+    p.num_dec_layers = 1
     p.emb_sz = 100
 
-    p.use_cell_based_encoder = False
+    p.use_cell_based_encoder = True
     # cell-based encoders: typed_rnn, ind_rnn, onlstm, lstm, gru, rnn; see models.base_s2s.base_seq2seq.py file
     # seq-based encoders: lstm, transformer, bilstm, aug_lstm, aug_bilstm; see models.base_s2s.stacked_encoder.py file
     p.encoder = 'lstm'
