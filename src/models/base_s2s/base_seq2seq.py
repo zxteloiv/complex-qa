@@ -431,12 +431,16 @@ class BaseSeq2Seq(torch.nn.Module):
         emb_sz = p.emb_sz
         src_pretrain_file = getattr(p, 'src_emb_pretrained_file', None)
         if src_pretrain_file is None:
-            source_embedding = nn.Embedding(num_embeddings=vocab.get_vocab_size(p.src_namespace), embedding_dim=emb_sz)
+            source_embedding = nn.Embedding(num_embeddings=vocab.get_vocab_size(p.src_namespace),
+                                            embedding_dim=emb_sz,
+                                            padding_idx=0,
+                                            )
         else:
             from allennlp.modules.token_embedders import Embedding
             source_embedding = Embedding(embedding_dim=emb_sz,
                                          num_embeddings=vocab.get_vocab_size(p.src_namespace),
                                          vocab_namespace=p.src_namespace,
+                                         padding_index=0,
                                          pretrained_file=src_pretrain_file,
                                          vocab=vocab)
         if p.src_namespace == p.tgt_namespace:
