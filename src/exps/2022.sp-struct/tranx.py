@@ -74,6 +74,8 @@ def scholar():
     p.use_cell_based_encoder = True
     # cell-based encoders: typed_rnn, ind_rnn, onlstm, lstm, gru, rnn; see models.base_s2s.base_seq2seq.py file
     # seq-based encoders: lstm, transformer, bilstm, aug_lstm, aug_bilstm; see models.base_s2s.stacked_encoder.py file
+    p.cell_encoder_is_bidirectional = True     # any cell-based RNN encoder above could be bidirectional
+
     p.encoder = 'lstm'
     p.enc_out_dim = p.hidden_sz
     p.dec_in_dim = p.hidden_sz

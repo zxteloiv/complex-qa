@@ -344,7 +344,9 @@ class BaseSeq2Seq(torch.nn.Module):
         p.enc_dec_trans_act = 'linear'
         p.enc_dec_trans_usage = 'consistent'
         p.enc_dec_trans_forced = True
+        p.use_cell_based_encoder = False
         p.encoder = "bilstm"
+        p.cell_encoder_is_bidirectional = False
         p.num_enc_layers = 2
         p.decoder = "lstm"
         p.num_dec_layers = 2
@@ -494,10 +496,11 @@ class BaseSeq2Seq(torch.nn.Module):
         else:
             dropout = getattr(p, 'enc_dropout', getattr(p, 'dropout', 0.))
             hid_sz = getattr(p, 'enc_out_dim', p.hidden_sz)
-            stacked_cell = BaseSeq2Seq.get_stacked_rnn(p.encoder, p.emb_sz, hid_sz, p.num_enc_layers,
-                                                       dropout, dropout)
+            bid_cell = getattr(p, 'cell_encoder_is_bidirectional', False)
+            stacked_cell = BaseSeq2Seq.get_stacked_rnn(p.encoder, p.emb_sz, hid_sz, p.num_enc_layers, dropout, dropout)
+            back_cell = BaseSeq2Seq.get_stacked_rnn(p.encoder, p.emb_sz, hid_sz, p.num_enc_layers, dropout, dropout)
             from .stacked_cell_encoder import StackedCellEncoder
-            return StackedCellEncoder(stacked_cell)
+            return StackedCellEncoder(stacked_cell, backward_stacked_cell=None if not bid_cell else back_cell)
 
     @staticmethod
     def get_stacked_rnn(cell_type: str, inp_sz: int, hid_sz: int, num_layers: int,
