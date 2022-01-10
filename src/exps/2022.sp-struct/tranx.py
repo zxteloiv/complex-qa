@@ -19,6 +19,34 @@ def main():
 
 
 @Registry.hparamset()
+def scholar_base1():
+    p = scholar()
+    p.num_enc_layers = 1
+    p.num_dec_layers = 1
+    p.use_cell_based_encoder = False
+    # cell-based encoders: typed_rnn, ind_rnn, onlstm, lstm, gru, rnn; see models.base_s2s.base_seq2seq.py file
+    # seq-based encoders: lstm, transformer, bilstm, aug_lstm, aug_bilstm; see models.base_s2s.stacked_encoder.py file
+    p.encoder = 'bilstm'
+    p.decoder = "lstm"
+    p.enc_out_dim = p.hidden_sz
+    return p
+
+
+@Registry.hparamset()
+def scholar_base2():
+    p = scholar()
+    p.num_enc_layers = 1
+    p.num_dec_layers = 1
+    p.use_cell_based_encoder = True
+    # cell-based encoders: typed_rnn, ind_rnn, onlstm, lstm, gru, rnn; see models.base_s2s.base_seq2seq.py file
+    # seq-based encoders: lstm, transformer, bilstm, aug_lstm, aug_bilstm; see models.base_s2s.stacked_encoder.py file
+    p.encoder = 'lstm'
+    p.decoder = "lstm"
+    p.enc_out_dim = p.hidden_sz * 2
+    return p
+
+
+@Registry.hparamset()
 def scholar_onlstm2seq():
     p = scholar()
     p.use_cell_based_encoder = True
