@@ -80,7 +80,7 @@ def scholar():
     p.enc_out_dim = p.hidden_sz
     p.dec_in_dim = p.hidden_sz
     p.dec_out_dim = p.hidden_sz
-    p.enc_attn = "bilinear"
+    p.enc_attn = "dot_product"
 
     p.enc_dec_trans_usage = 'consistent'
     p.enc_dec_trans_act = 'tanh'

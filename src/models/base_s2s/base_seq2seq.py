@@ -1,12 +1,11 @@
-from typing import Union, Optional, Tuple, Dict, Any, Literal
+from typing import Union, Optional, Tuple, Dict, Any, Literal, List
 import numpy as np
 import torch
 from torch import nn
 from trialbot.data.ns_vocabulary import NSVocabulary
 from ..interfaces.attention import Attention as IAttn, VectorContextComposer as AttnComposer
 from ..modules.variational_dropout import VariationalDropout
-from ..interfaces.unified_rnn import RNNStack, EncoderRNNStack
-from .stacked_rnn_cell import StackedRNNCell
+from ..interfaces.unified_rnn import RNNStack, EncoderRNNStack, UnifiedRNN
 from utils.nn import filter_cat, prepare_input_mask, seq_cross_ent
 from utils.nn import aggregate_layered_state, assign_stacked_states
 from utils.seq_collector import SeqCollector
@@ -362,6 +361,7 @@ class BaseSeq2Seq(torch.nn.Module):
         from trialbot.data import START_SYMBOL, END_SYMBOL
         from ..modules.attention_wrapper import get_wrapped_attention
         from ..modules.attention_composer import get_attn_composer
+        from .stacked_rnn_cell import StackedRNNCell
 
         emb_sz = p.emb_sz
         source_embedding, target_embedding = cls._get_embeddings(p, vocab)
@@ -391,8 +391,8 @@ class BaseSeq2Seq(torch.nn.Module):
 
         enc_dropout = getattr(p, 'enc_dropout', getattr(p, 'dropout', 0.))
         dec_dropout = getattr(p, 'dec_dropout', getattr(p, 'dropout', 0.))
-        decoder = cls.get_stacked_rnn(p.decoder, dec_in_dim, dec_out_dim, p.num_dec_layers,
-                                      dec_dropout, dec_dropout)
+        rnns = cls.get_stacked_rnns(p.decoder, dec_in_dim, dec_out_dim, p.num_dec_layers, dec_dropout)
+        decoder = StackedRNNCell(rnns, dec_dropout)
 
         word_proj = nn.Linear(proj_in_dim, vocab.get_vocab_size(p.tgt_namespace))
         if p.tied_decoder_embedding:
@@ -492,49 +492,43 @@ class BaseSeq2Seq(torch.nn.Module):
     @staticmethod
     def get_encoder(p) -> EncoderRNNStack:
 
+        from .stacked_encoder import StackedEncoder
         use_cell_based_encoder = getattr(p, 'use_cell_based_encoder', False)
         if not use_cell_based_encoder:
-            from .stacked_encoder import StackedEncoder
             return StackedEncoder.get_encoder(p)
 
         else:
             dropout = getattr(p, 'enc_dropout', getattr(p, 'dropout', 0.))
             hid_sz = getattr(p, 'enc_out_dim', p.hidden_sz)
+            rnns = BaseSeq2Seq.get_stacked_rnns(p.encoder, p.emb_sz, hid_sz, p.num_enc_layers, dropout)
+            from .cell_encoder import CellEncoder
             bid_cell = getattr(p, 'cell_encoder_is_bidirectional', False)
-            stacked_cell = BaseSeq2Seq.get_stacked_rnn(p.encoder, p.emb_sz, hid_sz, p.num_enc_layers, dropout, dropout)
-            back_cell = BaseSeq2Seq.get_stacked_rnn(p.encoder, p.emb_sz, hid_sz, p.num_enc_layers, dropout, dropout)
-            from .stacked_cell_encoder import StackedCellEncoder
-            return StackedCellEncoder(stacked_cell, backward_stacked_cell=None if not bid_cell else back_cell)
+            b_rnns = BaseSeq2Seq.get_stacked_rnns(p.encoder, p.emb_sz, hid_sz, p.num_enc_layers, dropout)
+
+            return StackedEncoder([CellEncoder(rnn, brnn) if bid_cell else CellEncoder(rnn)
+                                   for rnn, brnn in zip(rnns, b_rnns)],
+                                  input_dropout=dropout)
 
     @staticmethod
-    def get_stacked_rnn(cell_type: str, inp_sz: int, hid_sz: int, num_layers: int,
-                        h_dropout: float, v_dropout: float,
-                        onlstm_chunk_sz: int = 10,
-                        ) -> RNNStack:
-        from .stacked_rnn_cell import StackedRNNCell
+    def get_stacked_rnns(cell_type: str, inp_sz: int, hid_sz: int, num_layers: int,
+                         h_dropout: float, onlstm_chunk_sz: int = 10,
+                         ) -> List[UnifiedRNN]:
         from ..modules.torch_rnn_wrapper import TorchRNNWrapper as RNNWrapper
         from ..modules.variational_dropout import VariationalDropout
 
-        def _get_cell_in(floor):
-            return inp_sz if floor == 0 else hid_sz
-
-        def _get_h_vd(d):
-            return VariationalDropout(d, on_the_fly=False) if d > 0 else None
+        def _get_cell_in(floor): return inp_sz if floor == 0 else hid_sz
+        def _get_h_vd(d): return VariationalDropout(d, on_the_fly=False) if d > 0 else None
 
         rnns = cls = None
         if cell_type == 'typed_rnn':
             from ..modules.sym_typed_rnn_cell import SymTypedRNNCell
-            rnns = [
-                SymTypedRNNCell(_get_cell_in(floor), hid_sz, "tanh", _get_h_vd(h_dropout))
-                for floor in range(num_layers)
-            ]
+            rnns = [SymTypedRNNCell(_get_cell_in(floor), hid_sz, "tanh", _get_h_vd(h_dropout))
+                    for floor in range(num_layers)]
 
         elif cell_type == 'onlstm':
             from ..onlstm.onlstm import ONLSTMCell
-            rnns = [
-                ONLSTMCell(_get_cell_in(floor), hid_sz, onlstm_chunk_sz, _get_h_vd(h_dropout))
-                for floor in range(num_layers)
-            ]
+            rnns = [ONLSTMCell(_get_cell_in(floor), hid_sz, onlstm_chunk_sz, _get_h_vd(h_dropout))
+                    for floor in range(num_layers)]
 
         elif cell_type == 'ind_rnn':
             from ..modules.independent_rnn import IndRNNCell
@@ -553,5 +547,4 @@ class BaseSeq2Seq(torch.nn.Module):
             rnns = [RNNWrapper(cls(_get_cell_in(floor), hid_sz), _get_h_vd(h_dropout))
                     for floor in range(num_layers)]
 
-        stacked_cell = StackedRNNCell(rnns, v_dropout)
-        return stacked_cell
+        return rnns

@@ -43,7 +43,7 @@ class StackedEncoder(EncoderRNNStack):
             if i > 0:
                 last_output = self.input_dropout(last_output)
 
-            last_output = enc(last_output, mask)
+            last_output = enc(last_output, mask, None)
             layered_output.append(last_output)
 
         enc_output = layered_output[-1]
