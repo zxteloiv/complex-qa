@@ -290,7 +290,7 @@ class BaseSeq2Seq(torch.nn.Module):
         step_enc_context = enc_attn_fn(cell_out)
         step_dec_context = dec_hist_attn_fn(cell_out)
         step_context = filter_cat([step_enc_context, step_dec_context], dim=-1)
-        proj_inp = self._proj_inp_attn_comp(cell_out, step_context)
+        proj_inp = self._proj_inp_attn_comp(step_context, cell_out)
         return proj_inp
 
     def _get_step_projection(self, proj_input):

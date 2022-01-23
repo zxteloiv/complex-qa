@@ -99,6 +99,29 @@ def scholar():
 
 
 @Registry.hparamset()
+def sch_var1():
+    # check if the original lstm could achieve similar SOTA
+    p = scholar()
+    p.encoder = 'lstm'
+    p.decoder = 'lstm'
+    p.use_cell_based_encoder = False
+    return p
+
+
+@Registry.hparamset()
+def sch_var2():
+    # check if the onlstm is better without attention
+    p = scholar()
+    p.encoder = 'onlstm'
+    p.decoder = 'onlstm'
+    p.enc_attn = 'none'
+    p.dec_hist_attn = 'none'
+    p.dec_inp_composer = 'none'
+    p.proj_inp_composer = 'none'
+    return p
+
+
+@Registry.hparamset()
 def atis():
     p = scholar()
     p.batch_sz = 32

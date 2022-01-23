@@ -66,7 +66,7 @@ def add_depth_features_to_single_position(inputs: torch.Tensor, timestep: float)
 
 def filter_cat(iterable, dim):
     items = [item for item in iterable if item is not None]
-    res = torch.cat(items, dim=dim)
+    res = torch.cat(items, dim=dim) if len(items) > 0 else None
     return res
 
 
