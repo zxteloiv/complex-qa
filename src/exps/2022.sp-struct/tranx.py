@@ -100,24 +100,22 @@ def scholar():
 
 @Registry.hparamset()
 def sch_var1():
-    # check if the original lstm could achieve similar SOTA
+    # check if the cell-based bilstm could achieve similar SOTA
     p = scholar()
     p.encoder = 'lstm'
     p.decoder = 'lstm'
-    p.use_cell_based_encoder = False
+    p.use_cell_based_encoder = True
+    p.cell_encoder_is_bidirectional = True
     return p
 
 
 @Registry.hparamset()
 def sch_var2():
-    # check if the onlstm is better without attention
     p = scholar()
-    p.encoder = 'onlstm'
-    p.decoder = 'onlstm'
-    p.enc_attn = 'none'
-    p.dec_hist_attn = 'none'
-    p.dec_inp_composer = 'none'
-    p.proj_inp_composer = 'none'
+    p.encoder = 'bilstm'
+    p.decoder = 'lstm'
+    p.use_cell_based_encoder = False
+    p.cell_encoder_is_bidirectional = True
     return p
 
 
