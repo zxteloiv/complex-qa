@@ -1,7 +1,7 @@
 from typing import Optional
 import torch.nn
 from models.modules.variational_dropout import VariationalDropout
-from ..interfaces.unified_rnn import EncoderRNNStack
+from ..interfaces.unified_rnn import EncoderRNNStack, EncoderRNN
 from models.modules.container import SelectArgsById, UnpackedInputsSequential
 
 
@@ -105,6 +105,30 @@ class StackedEncoder(EncoderRNNStack):
             enc_cls = lambda floor: PytorchSeq2SeqWrapper(torch.nn.LSTM(
                 p.emb_sz if floor == 0 else hid_sz * 2, hid_sz, bidirectional=True, batch_first=True,
             ))
+        elif p.encoder == "torch_bilstm":
+            class ExtLSTM(EncoderRNN):
+                def forward(self, inputs, mask, hidden) -> torch.Tensor:
+                    out, _ = self.lstm.forward(inputs, hidden)
+                    return out
+
+                def __init__(self, lstm: torch.nn.LSTM):
+                    super().__init__()
+                    self.lstm = lstm
+
+                def is_bidirectional(self) -> bool:
+                    return self.lstm.bidirectional
+
+                def get_input_dim(self) -> int:
+                    return self.lstm.input_size
+
+                def get_output_dim(self) -> int:
+                    num_directions = 2 if self.is_bidirectional() else 1
+                    return self.lstm.hidden_size * num_directions
+
+            enc_cls = lambda floor: ExtLSTM(torch.nn.LSTM(
+                p.emb_sz if floor == 0 else hid_sz * 2, hid_sz, bidirectional=True, batch_first=True
+            ))
+
         elif p.encoder == "aug_lstm":
             enc_cls = lambda floor: AugmentedLstmSeq2SeqEncoder(p.emb_sz if floor == 0 else hid_sz, hid_sz,
                                                                 recurrent_dropout_probability=dropout,

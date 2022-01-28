@@ -112,7 +112,7 @@ def sch_var1():
 @Registry.hparamset()
 def sch_var2():
     p = scholar()
-    p.encoder = 'bilstm'
+    p.encoder = 'torch_bilstm'
     p.decoder = 'lstm'
     p.use_cell_based_encoder = False
     p.cell_encoder_is_bidirectional = True
