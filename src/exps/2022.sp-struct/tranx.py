@@ -106,6 +106,14 @@ def sch_var1():
     p.decoder = 'lstm'
     p.use_cell_based_encoder = True
     p.cell_encoder_is_bidirectional = True
+    # p.enc_attn = "bilinear"
+    p.tied_decoder_embedding = True
+    return p
+
+@Registry.hparamset()
+def sch_var3():
+    p = sch_var1()
+    p.enc_attn = "bilinear"
     return p
 
 
