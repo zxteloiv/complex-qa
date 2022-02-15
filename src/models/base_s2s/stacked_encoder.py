@@ -113,6 +113,11 @@ class StackedEncoder(EncoderRNNStack):
                 def forward(self, inputs, mask, hidden) -> torch.Tensor:
                     if hidden is not None:
                         raise NotImplementedError('only the none state is supported now.')
+
+                    if not self.use_packed_sequence:
+                        out, _ = self.lstm(inputs, hidden)
+                        return out
+
                     # mask: (batch, length)
                     # hidden: [(batch, hid), (batch, hid)], since its only for lstm
                     (
@@ -131,12 +136,12 @@ class StackedEncoder(EncoderRNNStack):
                     unpacked_sequence_tensor, _ = pad_packed_sequence(packed_sequence_output,
                                                                       batch_first=True)
                     out = unpacked_sequence_tensor.index_select(0, restoration_indices)
-                    # out, _ = self.lstm(inputs, hidden)
                     return out
 
-                def __init__(self, lstm: torch.nn.LSTM):
+                def __init__(self, lstm: torch.nn.LSTM, use_packed_sequence_protocol: bool = True):
                     super().__init__()
                     self.lstm = lstm
+                    self.use_packed_sequence = use_packed_sequence_protocol
 
                 def is_bidirectional(self) -> bool:
                     return self.lstm.bidirectional

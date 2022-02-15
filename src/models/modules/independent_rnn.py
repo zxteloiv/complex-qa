@@ -40,7 +40,7 @@ class IndRNNCell(UnifiedRNN):
     def get_output_dim(self):
         return self.hidden_size
 
-    def forward(self, inputs: torch.Tensor, hidden: Optional[torch.Tensor] = None) -> torch.Tensor:
+    def forward(self, inputs: torch.Tensor, hidden: Optional[torch.Tensor] = None):
         """
 
         :param inputs: (batch, input_size)
@@ -56,8 +56,8 @@ class IndRNNCell(UnifiedRNN):
         uh = self.u_vec * hidden if hidden is not None else 0
 
         raw = Wx + uh + self.bias
-
-        return self.activation(raw)
+        out = self.activation(raw)
+        return out, out
 
     def get_output_state(self, hidden):
         return hidden

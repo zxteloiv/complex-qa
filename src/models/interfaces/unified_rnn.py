@@ -1,6 +1,9 @@
 from abc import ABC
-from typing import List, Optional, Callable, Any, Tuple, Union
+from typing import List, Optional, Callable, Any, Tuple, Union, Sequence
 import torch
+
+
+T_HIDDEN = Union[None, torch.Tensor, Sequence[torch.Tensor]]
 
 
 class _RNNBase(torch.nn.Module, ABC):

@@ -37,9 +37,9 @@ class ONLSTMCell(UnifiedRNN):
 
     def forward(self, inputs, hidden):
         if hidden is None:
-            (hx, cx, _), _ = self.init_hidden_states(inputs.new_zeros((inputs.size()[0], self.hidden_size)))
+            (hx, cx, _, _), _ = self.init_hidden_states(inputs.new_zeros((inputs.size()[0], self.hidden_size)))
         else:
-            hx, cx, d = hidden  # distances is not required for recurrent computations, but only for explanation
+            hx, cx, _, _ = hidden  # distances is not required for recurrent computations, but only for explanation
         n_chunk, chunk_sz = self.n_chunk, self.chunk_size
 
         gates = self.ih(inputs) + self.hh(self.h_dropout(hx))
@@ -66,15 +66,15 @@ class ONLSTMCell(UnifiedRNN):
         cy = forgetgate * cx + ingate * cell
 
         hy = outgate * torch.tanh(cy)
-        hidden = hy.view(-1, self.hidden_size), cy, (distance_cforget, distance_cin)
+        hidden = hy.view(-1, self.hidden_size), cy, distance_cforget, distance_cin
         return hidden, hidden[0]
 
     def init_hidden_states(self, forward_out: torch.Tensor) -> Tuple[Any, torch.Tensor]:
         h = forward_out
         c = h.new_zeros(h.size()[0], self.n_chunk, self.chunk_size)
         dist = None     # the dist is resided in the internal of the hidden state, extractable by the get_distances API
-        hidden = (h, c, dist)
+        hidden = (h, c, dist, dist)
         return hidden, h
 
     def get_distances(self, hidden):
-        return None if hidden is None else hidden[-1]
+        return None if hidden is None else hidden[-2:]

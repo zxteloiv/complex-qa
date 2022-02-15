@@ -504,8 +504,8 @@ class BaseSeq2Seq(torch.nn.Module):
             from .cell_encoder import CellEncoder
             bid_cell = getattr(p, 'cell_encoder_is_bidirectional', False)
             b_rnns = BaseSeq2Seq.get_stacked_rnns(p.encoder, p.emb_sz, hid_sz, p.num_enc_layers, dropout)
-
-            return StackedEncoder([CellEncoder(rnn, brnn) if bid_cell else CellEncoder(rnn)
+            use_pseq = getattr(p, 'cell_encoder_uses_packed_sequence', False)
+            return StackedEncoder([CellEncoder(rnn, brnn, use_pseq) if bid_cell else CellEncoder(rnn, None, use_pseq)
                                    for rnn, brnn in zip(rnns, b_rnns)],
                                   input_dropout=dropout)
 
