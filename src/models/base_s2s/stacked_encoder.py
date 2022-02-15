@@ -2,7 +2,8 @@ from typing import Optional
 import torch.nn
 from models.modules.variational_dropout import VariationalDropout
 from ..interfaces.unified_rnn import EncoderRNNStack, EncoderRNN
-from models.modules.container import SelectArgsById, UnpackedInputsSequential
+from allennlp.nn.util import sort_batch_by_length
+from torch.nn.utils.rnn import pack_padded_sequence, PackedSequence, pad_packed_sequence
 
 
 class StackedEncoder(EncoderRNNStack):
@@ -106,53 +107,6 @@ class StackedEncoder(EncoderRNNStack):
                 p.emb_sz if floor == 0 else hid_sz * 2, hid_sz, bidirectional=True, batch_first=True,
             ))
         elif p.encoder == "torch_bilstm":
-            from allennlp.nn.util import sort_batch_by_length
-            from torch.nn.utils.rnn import pack_padded_sequence, PackedSequence, pad_packed_sequence
-
-            class ExtLSTM(EncoderRNN):
-                def forward(self, inputs, mask, hidden) -> torch.Tensor:
-                    if hidden is not None:
-                        raise NotImplementedError('only the none state is supported now.')
-
-                    if not self.use_packed_sequence:
-                        out, _ = self.lstm(inputs, hidden)
-                        return out
-
-                    # mask: (batch, length)
-                    # hidden: [(batch, hid), (batch, hid)], since its only for lstm
-                    (
-                        sorted_inputs,              # (batch, length, input_dim)
-                        sorted_sequence_lengths,    # (batch,), the descending lengths
-                        restoration_indices,        # (batch,), indices: sorted -> original
-                        sorting_indices,            # (batch,), indices: original -> sorted
-                    ) = sort_batch_by_length(inputs, mask.sum(-1))
-
-                    packed_sequence_input: PackedSequence = pack_padded_sequence(
-                        sorted_inputs,
-                        sorted_sequence_lengths.data.tolist(),
-                        batch_first=True,
-                    )
-                    packed_sequence_output, _ = self.lstm(packed_sequence_input, None)
-                    unpacked_sequence_tensor, _ = pad_packed_sequence(packed_sequence_output,
-                                                                      batch_first=True)
-                    out = unpacked_sequence_tensor.index_select(0, restoration_indices)
-                    return out
-
-                def __init__(self, lstm: torch.nn.LSTM, use_packed_sequence_protocol: bool = True):
-                    super().__init__()
-                    self.lstm = lstm
-                    self.use_packed_sequence = use_packed_sequence_protocol
-
-                def is_bidirectional(self) -> bool:
-                    return self.lstm.bidirectional
-
-                def get_input_dim(self) -> int:
-                    return self.lstm.input_size
-
-                def get_output_dim(self) -> int:
-                    num_directions = 2 if self.is_bidirectional() else 1
-                    return self.lstm.hidden_size * num_directions
-
             enc_cls = lambda floor: ExtLSTM(torch.nn.LSTM(
                 p.emb_sz if floor == 0 else hid_sz * 2, hid_sz, bidirectional=True, batch_first=True
             ))
@@ -175,3 +129,49 @@ class StackedEncoder(EncoderRNNStack):
                                  output_size=hid_sz,
                                  input_dropout=dropout)
         return encoder
+
+
+class ExtLSTM(EncoderRNN):
+    def forward(self, inputs, mask, hidden) -> torch.Tensor:
+        if hidden is not None:
+            raise NotImplementedError('only the none state is supported now.')
+
+        if not self.use_packed_sequence:
+            out, _ = self.lstm(inputs, hidden)
+            return out
+
+        # mask: (batch, length)
+        # hidden: [(batch, hid), (batch, hid)], since its only for lstm
+        (
+            sorted_inputs,  # (batch, length, input_dim)
+            sorted_sequence_lengths,  # (batch,), the descending lengths
+            restoration_indices,  # (batch,), indices: sorted -> original
+            sorting_indices,  # (batch,), indices: original -> sorted
+        ) = sort_batch_by_length(inputs, mask.sum(-1))
+
+        packed_sequence_input: PackedSequence = pack_padded_sequence(
+            sorted_inputs,
+            sorted_sequence_lengths.data.tolist(),
+            batch_first=True,
+        )
+        packed_sequence_output, _ = self.lstm(packed_sequence_input, None)
+        unpacked_sequence_tensor, _ = pad_packed_sequence(packed_sequence_output,
+                                                          batch_first=True)
+        out = unpacked_sequence_tensor.index_select(0, restoration_indices)
+        return out
+
+    def __init__(self, lstm: torch.nn.LSTM, use_packed_sequence_protocol: bool = True):
+        super().__init__()
+        self.lstm = lstm
+        self.use_packed_sequence = use_packed_sequence_protocol
+
+    def is_bidirectional(self) -> bool:
+        return self.lstm.bidirectional
+
+    def get_input_dim(self) -> int:
+        return self.lstm.input_size
+
+    def get_output_dim(self) -> int:
+        num_directions = 2 if self.is_bidirectional() else 1
+        return self.lstm.hidden_size * num_directions
+

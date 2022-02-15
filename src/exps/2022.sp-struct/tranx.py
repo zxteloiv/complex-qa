@@ -71,12 +71,13 @@ def scholar():
     p.num_dec_layers = 1
     p.emb_sz = 100
 
-    p.use_cell_based_encoder = True
+    p.use_cell_based_encoder = False
     # cell-based encoders: typed_rnn, ind_rnn, onlstm, lstm, gru, rnn; see models.base_s2s.base_seq2seq.py file
     # seq-based encoders: lstm, transformer, bilstm, aug_lstm, aug_bilstm; see models.base_s2s.stacked_encoder.py file
-    p.cell_encoder_is_bidirectional = False     # any cell-based RNN encoder above could be bidirectional
+    p.cell_encoder_is_bidirectional = True     # any cell-based RNN encoder above could be bidirectional
+    p.cell_encoder_uses_packed_sequence = False
 
-    p.encoder = 'lstm'
+    p.encoder = 'torch_bilstm'
     p.enc_out_dim = p.hidden_sz
     p.dec_in_dim = p.hidden_sz
     p.dec_out_dim = p.hidden_sz
@@ -95,29 +96,6 @@ def scholar():
     p.dec_inp_comp_activation = 'mish'
     p.proj_inp_composer = 'cat_mapping'
     p.proj_inp_comp_activation = 'mish'
-    return p
-
-
-@Registry.hparamset()
-def sch_var1():
-    # check if the cell-based bilstm could achieve similar SOTA
-    p = scholar()
-    p.encoder = 'lstm'
-    p.decoder = 'lstm'
-    p.use_cell_based_encoder = True
-    p.cell_encoder_is_bidirectional = True
-    p.cell_encoder_uses_packed_sequence = True
-    p.tied_decoder_embedding = False
-    return p
-
-
-@Registry.hparamset()
-def sch_var2():
-    p = scholar()
-    p.encoder = 'torch_bilstm'
-    p.decoder = 'lstm'
-    p.use_cell_based_encoder = False
-    p.cell_encoder_is_bidirectional = True
     return p
 
 
