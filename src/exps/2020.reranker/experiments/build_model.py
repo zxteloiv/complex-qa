@@ -47,7 +47,7 @@ def get_re2_variant(hparams, vocab: NSVocabulary):
             return StackedEncoder([
                 MHAEncoder(inp_sz if j == 0 else hid_sz, hid_sz, hparams.num_heads, dropout)
                 for j in range(hparams.num_stacked_encoder)
-            ], inp_sz, hid_sz, dropout, output_every_layer=False)
+            ], inp_sz, hid_sz, dropout)
 
     fusion_cls = NeoFusion if hasattr(hparams, "fusion") and hparams.fusion == "neo" else Re2Fusion
 
@@ -187,7 +187,7 @@ def get_re2_char_model(hparams, vocab: NSVocabulary):
             return StackedEncoder([
                 MHAEncoder(inp_sz if j == 0 else hid_sz, hid_sz, hparams.num_heads, dropout)
                 for j in range(hparams.num_stacked_encoder)
-            ], inp_sz, hid_sz, dropout, output_every_layer=False)
+            ], inp_sz, hid_sz, dropout)
 
     fusion_cls = NeoFusion if hasattr(hparams, "fusion") and hparams.fusion == "neo" else Re2Fusion
 

@@ -161,7 +161,8 @@ class BaseSeq2Seq(torch.nn.Module):
         # source_embedding: (batch, max_input_length, embedding_sz)
         source_embedding = self._src_embedding(source)
         source_embedding = self._src_emb_dropout(source_embedding)
-        source_hidden, layered_hidden = self._encoder(source_embedding, source_mask)
+        source_hidden = self._encoder(source_embedding, source_mask)
+        layered_hidden = self._encoder.get_last_layered_output()
         if self._enc_dec_trans_usage == 'consistent':
             source_hidden = self._enc_dec_trans(source_hidden)
             layered_hidden = list(map(self._enc_dec_trans, layered_hidden))

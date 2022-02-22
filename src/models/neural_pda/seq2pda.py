@@ -155,7 +155,7 @@ class Seq2PDA(nn.Module):
     def _encode_source(self, source_tokens):
         source_tokens, source_mask = prepare_input_mask(source_tokens, padding_val=self.tok_pad)
         source = self.src_embedder(source_tokens)
-        source_hidden, _ = self.encoder(source, source_mask)
+        source_hidden = self.encoder(source, source_mask)
         last_repr = get_final_encoder_states(source_hidden, source_mask, self.encoder.is_bidirectional())
 
         def _enc_attn_fn(out):

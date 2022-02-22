@@ -23,7 +23,6 @@ class TreeActionPolicy(torch.nn.Module):
         self.node_embedding = node_embedding
         self.topo_pos_embedding = pos_embedding
         self.topo_encoder = topo_pos_encoder
-        self.topo_encoder.output_every_layer = False
 
         self.feature_composer = feature_composer
         self.tree_encoder = tree_encoder

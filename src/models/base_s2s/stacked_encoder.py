@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, List
 import torch.nn
 from models.modules.variational_dropout import VariationalDropout
 from ..interfaces.unified_rnn import EncoderRNNStack, EncoderRNN
@@ -23,7 +23,6 @@ class StackedEncoder(EncoderRNNStack):
                  input_size: Optional = None,
                  output_size: Optional = None,
                  input_dropout=0.,
-                 output_every_layer=True,
                  ):
         super(StackedEncoder, self).__init__()
 
@@ -31,13 +30,15 @@ class StackedEncoder(EncoderRNNStack):
         self.input_size = input_size or encs[0].get_input_dim()
         self.output_size = output_size
         self.input_dropout = VariationalDropout(input_dropout, on_the_fly=True)
-        self.output_every_layer = output_every_layer
+        self._layered_output = None
 
     def forward(self,
                 inputs: torch.Tensor,
                 mask: Optional[torch.LongTensor],
                 hx=None,  # not supported at present
                 ):
+        self._layered_output = None
+
         last_output = inputs
         layered_output = []
         for i, enc in enumerate(self.layer_encs):
@@ -47,12 +48,12 @@ class StackedEncoder(EncoderRNNStack):
             last_output = enc(last_output, mask, None)
             layered_output.append(last_output)
 
+        self._layered_output = layered_output
         enc_output = layered_output[-1]
+        return enc_output
 
-        if self.output_every_layer:
-            return enc_output, layered_output
-        else:
-            return enc_output
+    def get_last_layered_output(self) -> List[torch.Tensor]:
+        return self._layered_output
 
     def get_layer_num(self):
         return len(self.layer_encs)

@@ -68,8 +68,12 @@ class EncoderRNNStack(_RNNEncoderBase, ABC):
     def get_layer_num(self) -> int:
         raise NotImplementedError
 
-    def forward(self, inputs, mask, hidden) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
+    def forward(self, inputs, mask, hidden) -> Union[torch.Tensor, Tuple[torch.Tensor, List[torch.Tensor]]]:
         """returns the last encoder"""
+        raise NotImplementedError
+
+    def get_last_layered_output(self) -> List[torch.Tensor]:
+        """return the output of every layer"""
         raise NotImplementedError
 
 
