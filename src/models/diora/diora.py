@@ -10,15 +10,13 @@ from net_utils import BatchInfo
 
 # Composition Functions
 class ComposeMLP(nn.Module):
-    def __init__(self, size, activation, n_layers=2, leaf=False):
+    def __init__(self, size, activation, n_layers=2):
         super(ComposeMLP, self).__init__()
 
         self.size = size
         self.activation = activation
         self.n_layers = n_layers
 
-        if leaf:
-            self.V = nn.Parameter(torch.FloatTensor(self.size, self.size))
         self.W = nn.Parameter(torch.FloatTensor(2 * self.size, self.size))
         self.B = nn.Parameter(torch.FloatTensor(self.size))
 
@@ -40,10 +38,6 @@ class ComposeMLP(nn.Module):
         params = [p for p in self.parameters() if p.requires_grad]
         for i, param in enumerate(params):
             param.data.normal_()
-
-    def leaf_transform(self, x):
-        h = torch.tanh(torch.matmul(x, self.V) + self.B)
-        return h
 
     def forward(self, hs):
         input_h = torch.cat(hs, 1)
@@ -97,7 +91,7 @@ class DioraMLP(DioraBase):
         self.outside_score_func = Bilinear(self.size)
         self.root_vector_out_h = nn.Parameter(torch.FloatTensor(self.size))
 
-        self.inside_compose_func = ComposeMLP(self.size, self.activation, n_layers=self.n_layers, leaf=True)
+        self.inside_compose_func = ComposeMLP(self.size, self.activation, n_layers=self.n_layers)
         self.outside_compose_func = ComposeMLP(self.size, self.activation, n_layers=self.n_layers)
 
     def init_with_batch(self, h, info=None):

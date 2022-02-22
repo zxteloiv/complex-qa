@@ -421,7 +421,7 @@ class DioraMLPWithTopk(DioraBase):
     def init_parameters(self):
         # Model parameters for transformation required at both input and output
         self.inside_score_func = Bilinear(self.size)
-        self.inside_compose_func = ComposeMLP(self.size, self.activation, n_layers=self.n_layers, leaf=True)
+        self.inside_compose_func = ComposeMLP(self.size, self.activation, n_layers=self.n_layers)
         self.outside_score_func = Bilinear(self.size)
         self.outside_compose_func = ComposeMLP(self.size, self.activation, n_layers=self.n_layers)
         self.root_vector_out_h = nn.Parameter(torch.FloatTensor(self.size))

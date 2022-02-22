@@ -110,15 +110,17 @@ class Index(object):
         return self.cached_lookup(func, name, key)
 
 
-# Inside
-def inside_fill_chart(batch_info, chart, index, h=None, s=None):
-    L = batch_info.length - batch_info.level
-    offset = index.get_offset(batch_info.length)[batch_info.level]
+def get_fill_chart_func(prefix):
+    def fill_chart(batch_info, chart, index, h, s):
+        L = batch_info.length - batch_info.level
+        offset = index.get_offset(batch_info.length)[batch_info.level]
+        chart[prefix+'_h'][:, offset:offset + L] = h
+        chart[prefix+'_s'][:, offset:offset + L] = s
+    return fill_chart
 
-    if h is not None:
-        chart['inside_h'][:, offset:offset+L] = h
-    if s is not None:
-        chart['inside_s'][:, offset:offset+L] = s
+
+inside_fill_chart = get_fill_chart_func('inside')
+outside_fill_chart = get_fill_chart_func('outside')
 
 
 def get_inside_states(batch_info, chart, index, size):
@@ -128,15 +130,6 @@ def get_inside_states(batch_info, chart, index, size):
     rs = chart.index_select(index=ridx, dim=1).view(-1, size)
 
     return ls, rs
-
-
-# Outside
-def outside_fill_chart(batch_info, chart, index, h, s):
-    L = batch_info.length - batch_info.level
-    offset = index.get_offset(batch_info.length)[batch_info.level]
-
-    chart['outside_h'][:, offset:offset+L] = h
-    chart['outside_s'][:, offset:offset+L] = s
 
 
 def get_outside_states(batch_info, pchart, schart, index, size):

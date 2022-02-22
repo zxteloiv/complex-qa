@@ -12,17 +12,20 @@ class DioraBase(nn.Module):
         self.reset()
         self.K = val
 
-    def __init__(self, size=None, outside=True, **kwargs):
+    def __init__(self, input_size=None, size=None, outside=True, **kwargs):
         super(DioraBase, self).__init__()
         self.K = 1
         self.size = size
+        self.input_size = input_size or size
         self.default_outside = outside
         self.inside_normalize_func = NormalizeFunc('unit')
         self.outside_normalize_func = NormalizeFunc('unit')
         self.init = kwargs.get('init', 'normal')
 
         self.activation = nn.ReLU()
-
+        # the linear module bias is shared with the compose_func in the original repo
+        # which hadn't been proven by experiments, but we follow the settings here.
+        self.leaf_linear = nn.Linear(self.input_size, self.size, bias=False)
         self.index = None
         self.cache = None
         self.chart = None
@@ -86,10 +89,11 @@ class DioraBase(nn.Module):
 
     def leaf_transform(self, x):
         normalize_func = self.inside_normalize_func
-        transform_func = self.inside_compose_func.leaf_transform
+        compose_func = self.inside_compose_func
+
+        h = torch.tanh(self.leaf_linear(x) + compose_func.B)
 
         input_shape = x.shape[:-1]
-        h = transform_func(x)
         h = normalize_func(h.view(*input_shape, self.size))
 
         return h
