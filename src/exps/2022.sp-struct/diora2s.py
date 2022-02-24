@@ -25,20 +25,28 @@ def sch_tranx():
     p = _base_hparams()
     # only list some crucial changes here
     p.TRAINING_LIMIT = 150
-    p.encoder = 's-diora'
+    p.encoder = 'diora'
     p.enc_attn = "none"
     p.dec_hist_attn = "none"
     p.dec_inp_composer = 'none'
     p.dec_inp_comp_activation = 'mish'
     p.proj_inp_composer = 'none'
     p.proj_inp_comp_activation = 'mish'
-    p.diora_topk = 2
+    p.diora_topk = 1
     return p
 
 @Registry.hparamset()
 def sch_s2s():
     p = _base_hparams()
     p.tgt_namespace = 'sql'
+    p.encoder = 'diora'
+    p.enc_attn = "none"
+    p.dec_hist_attn = "none"
+    p.dec_inp_composer = 'none'
+    p.dec_inp_comp_activation = 'mish'
+    p.proj_inp_composer = 'none'
+    p.proj_inp_comp_activation = 'mish'
+    p.diora_topk = 1
     return p
 
 
