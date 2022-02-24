@@ -1,11 +1,11 @@
 import torch
 import torch.nn as nn
-from base_model import DioraBase
+from .base_model import DioraBase
 
-from net_utils import get_inside_states, inside_fill_chart
-from net_utils import get_outside_states, outside_fill_chart
-from inside_index import build_inside_component_lookup
-from net_utils import BatchInfo
+from .net_utils import get_inside_states, inside_fill_chart
+from .net_utils import get_outside_states, outside_fill_chart
+from .inside_index import build_inside_component_lookup
+from .net_utils import BatchInfo
 
 
 # Composition Functions

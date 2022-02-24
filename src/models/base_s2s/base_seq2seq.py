@@ -400,7 +400,7 @@ class BaseSeq2Seq(torch.nn.Module):
             assert proj_in_dim == emb_sz, f"Tied embeddings must have the same dimensions, proj{proj_in_dim} != emb{emb_sz}"
             word_proj.weight = target_embedding.weight  # tied embedding
 
-        model = BaseSeq2Seq(
+        model = cls(
             vocab=vocab,
             encoder=encoder,
             decoder=decoder,

@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 
-from net_utils import NormalizeFunc, BatchInfo, build_chart, Index
+from .net_utils import NormalizeFunc, BatchInfo, build_chart, Index
 
 
 class DioraBase(nn.Module):

@@ -35,7 +35,6 @@ class StackedEncoder(EncoderRNNStack):
     def forward(self,
                 inputs: torch.Tensor,
                 mask: Optional[torch.LongTensor],
-                hx=None,  # not supported at present
                 ):
         self._layered_output = None
 

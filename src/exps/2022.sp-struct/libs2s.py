@@ -33,10 +33,11 @@ def get_updater(bot: TrialBot):
     return updater
 
 
-def run_exp(args: argparse.Namespace):
+def run_exp(args: argparse.Namespace, get_model_func=None):
     assert args is not None
     from models.base_s2s.base_seq2seq import BaseSeq2Seq
-    bot = TrialBot(trial_name='enc2dec', get_model_func=BaseSeq2Seq.from_param_and_vocab, args=args)
+    get_model_func = get_model_func or BaseSeq2Seq.from_param_and_vocab
+    bot = TrialBot(trial_name='enc2dec', get_model_func=get_model_func, args=args)
 
     from utils.trialbot.extensions import print_hyperparameters
     from utils.trialbot.extensions import get_metrics, print_models

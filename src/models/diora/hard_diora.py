@@ -5,16 +5,16 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from base_model import DioraBase
-from diora import Bilinear
-from diora import ComposeMLP
+from .base_model import DioraBase
+from .diora import Bilinear
+from .diora import ComposeMLP
 
-from net_utils import build_chart
-from net_utils import BatchInfo
-from net_utils import inside_fill_chart, outside_fill_chart
-from net_utils import get_inside_states
-from inside_index import build_inside_component_lookup
-from outside_index import get_outside_components
+from .net_utils import build_chart
+from .net_utils import BatchInfo
+from .net_utils import inside_fill_chart, outside_fill_chart
+from .net_utils import get_inside_states
+from .inside_index import build_inside_component_lookup
+from .outside_index import get_outside_components
 
 
 def get_inside_chart_cfg(diora: 'DioraMLPWithTopk', level=None, K=None, device=None):
