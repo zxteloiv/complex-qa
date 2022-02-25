@@ -21,8 +21,7 @@ class Diora2Seq(BaseSeq2Seq):
         # src_vocab_size = self.vocab.get_vocab_size(self._source_namespace)
         _, emb_sz = self._src_embedding.weight.size()
         self.reconstruct = torch.nn.Linear(self._encoder.get_output_dim(), emb_sz)
-        self._src_embedding.weight.requires_grad = False
-
+        # self._src_embedding.weight.requires_grad = False
 
     def _init_decoder(self, layer_states, source_mask):
         usage: str = self._enc_dec_trans_usage
@@ -54,7 +53,8 @@ class Diora2Seq(BaseSeq2Seq):
         # logits: (batch, length, num_toks)
         logits = torch.einsum('ble,ne->bln', proj_cells, emb_weight)
 
-        duplicate_mask = self._build_duplicate_token_mask(source)
+        # duplicate_mask = self._build_duplicate_token_mask(source)
+        duplicate_mask = 1
         loss = seq_cross_ent(logits, source, duplicate_mask * mask, average="token")
         return loss
 

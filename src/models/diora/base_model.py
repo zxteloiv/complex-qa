@@ -22,7 +22,7 @@ class DioraBase(nn.Module):
         self.outside_normalize_func = NormalizeFunc('unit')
         self.init = kwargs.get('init', 'normal')
 
-        self.activation = nn.ReLU()
+        self.activation = nn.Mish()
         # the linear module bias is shared with the compose_func in the original repo
         # which hadn't been proven by experiments, but we follow the settings here.
         self.leaf_linear = nn.Linear(self.input_size, self.size, bias=False)

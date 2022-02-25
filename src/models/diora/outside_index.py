@@ -4,49 +4,16 @@ from .offset_cache import get_offset_cache
 
 
 class OutsideIndex(object):
-    def get_pairs(self, level, i, n):
-        """
-        Returns all (parent, sibling) coordinate pairs that
-        are used to construct a node at coordinates
-        (level, i) where there n leaf nodes.
-
-        """
-        pairs = []
-
-        for level_ in range(level + 1, i + 1):
-            p_level = level_
-            p_i = i
-            s_level = level_ - level - 1
-            s_i = i - level - 1
-
-            pairs.append([(p_level, p_i), (s_level, s_i)])
-
-        for i_ in range(i + 1, n):
-            p_level = level + i_ - i
-            p_i = i_
-            s_level = i_ - i - 1
-            s_i = i_
-
-            pairs.append([(p_level, p_i), (s_level, s_i)])
-
-        return pairs
-
-    def xget_all_pairs(self, level, n):
-        pairs = []
-        for i in range(level, n):
-            pairs += self.get_pairs(level, i, n)
-        return pairs
-
     def get_all_pairs(self, level, n):
-        L = n - level
-        N = L - 1
+        L = n - level   # num of cells at the level
+        N = L - 1   # num of cells for upper level or the level except for one cell
 
         pairs = []
 
-        for i in range(N):
+        for i in range(N):  # for any upper-layer cells
             jseen = 0
-            for j in range(L):
-                if j < N - i:
+            for j in range(L):  # for any cells at the level
+                if j < N - i:   # the current cell is on the left of the
                     s_level = n - i - 1
                     s_i = N - i - j - 1
                     p_level = s_level
@@ -57,24 +24,11 @@ class OutsideIndex(object):
                     p_level = n - (N - s_level)
                     p_i = n - (N - s_i)
                     jseen += 1
-                pair = [(p_i, p_level), (s_i, s_level)]
+                # pair = [(p_i, p_level), (s_i, s_level)]
+                pair = [(p_level, p_i), (s_level, s_i)]
                 pairs.append(pair)
 
         return pairs
-
-    def get_leaf(self, n):
-        node2leaf = {}
-
-        for level in range(1, n):
-            L = n - level
-            for pos in range(L):
-                node2leaf[(level, pos)] = []
-                for i in range(L-1):
-                    offset = level + 1
-                    leaf =  (pos + offset + i) % n
-                    node2leaf[(level, pos)].append(leaf)
-
-        return node2leaf
 
 
 def get_outside_components(length, level, offset_cache=None):
