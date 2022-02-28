@@ -35,7 +35,7 @@ class BaseSeq2Seq(torch.nn.Module):
                  eos_symbol: str = '<EOS>',
                  padding_index: int = 0,
                  max_decoding_step: int = 50,
-                 decoder_init_strategy: str = "forward_all",
+                 decoder_init_strategy: str = "forward_last_all",
                  enc_dec_transform_usage: str = 'consistent',
 
                  # training_configuration
@@ -100,38 +100,76 @@ class BaseSeq2Seq(torch.nn.Module):
     # for possible misspelling error
     get_metrics = get_metric
 
-    def forward(self, source_tokens: torch.LongTensor, target_tokens: torch.LongTensor = None) -> Dict[
-        str, torch.Tensor]:
-        # source: (batch, source_length), containing the input word IDs
-        # target: (batch, target_length), containing the output IDs
-        source, source_mask = prepare_input_mask(source_tokens, self._padding_index)
-        target, target_mask = prepare_input_mask(target_tokens, self._padding_index)
-        output = {"source": source}
-
+    def forward(self,
+                source_tokens: torch.LongTensor,
+                target_tokens: torch.LongTensor = None
+                ) -> Dict[str, torch.Tensor]:
         self._reset_variational_dropouts()
 
-        state, layer_states = self._encode(source, source_mask)
-        hx = self._init_decoder(layer_states, source_mask)
-        enc_attn_fn = self._get_enc_attn_fn(state, source_mask)
+        source, source_mask, state, layer_states, state_mask = self._forward_enc(source_tokens)
+        hx, enc_attn_fn, start = self._prepare_dec(state, layer_states, state_mask)
+        target, target_mask, preds, logits = self._forward_dec(target_tokens, start, enc_attn_fn, hx)
 
+        output = {'source': source}
         if self.training:
-            assert target is not None
-            # preds: (batch, seq_len)
-            # logits: (batch, seq_len, vocab_size)
-            preds, logits = self._forward_dec_loop(source_mask, enc_attn_fn, hx, target, target_mask)
-            output['loss'] = seq_cross_ent(logits, target[:, 1:].contiguous(), target_mask[:, 1:].contiguous(),
-                                           self._training_avg)
-        else:
-            runtime_len = -1 if target is None else target.size()[1] - 1
-            preds, logits = self._forward_dec_loop(source_mask, enc_attn_fn, hx, None, None, runtime_len)
+            output['loss'] = self._compute_loss(logits, target, target_mask)
 
-        output.update(predictions=preds, logits=logits, target=target)
-
-        if target is not None:
+        if target_tokens is not None:
             total_err = self._compute_metrics(source_mask, preds, logits, target, target_mask)
             output.update(errno=total_err.tolist())
 
+        output.update(predictions=preds, logits=logits, target=target)
         return output
+
+    def _forward_enc(self, source_tokens):
+        # source: (batch, source_length), containing the input word IDs
+        # target: (batch, target_length), containing the output IDs
+        source, source_mask = prepare_input_mask(source_tokens, self._padding_index)
+        state, layer_states = self._encode(source, source_mask)
+        # by default, state_mask is the same as the source mask,
+        # but if the state is not directly aligned with source,
+        # it will be different.
+        state_mask = source_mask
+        return source, source_mask, state, layer_states, state_mask
+
+    def _prepare_dec(self, state, layer_states, state_mask):
+        hx = self._init_decoder(layer_states, state_mask)
+        enc_attn_fn = self._get_enc_attn_fn(state, state_mask)
+        default_start = state_mask.new_full((state_mask.size()[0],), fill_value=self._start_id)
+        return hx, enc_attn_fn, default_start
+
+    def _forward_dec(self, target_tokens, default_start, enc_attn_fn, hx):
+        target, target_mask = prepare_input_mask(target_tokens, self._padding_index)
+
+        if self.training and target is None:
+            raise ValueError("target must be presented during training")
+
+        # preds: (batch, seq_len)
+        # logits: (batch, seq_len, vocab_size)
+        # preds, logits = self._forward_dec_loop(start, enc_attn_fn, hx, target, target_mask, runtime_len)
+        last_pred = default_start
+        num_decoding_steps = self._get_decoding_loop_len(target)
+        mem = SeqCollector()
+        for timestep in range(num_decoding_steps):
+            step_input = self._choose_rnn_input(last_pred, None if target is None else target[:, timestep])
+            dec_hist_attn_fn = self._create_runtime_dec_hist_attn_fn(mem, target_mask, timestep)
+            cell_out, step_logit = self._forward_dec_loop(step_input, enc_attn_fn, dec_hist_attn_fn, hx)
+            # last_pred: (batch,), greedy decoding
+            last_pred = torch.argmax(step_logit, dim=-1)
+            mem(output=cell_out, logit=step_logit)
+
+        # logits: (batch, seq_len, vocab_size)
+        # predictions: (batch, seq_len)
+        logits = mem.get_stacked_tensor('logit')
+        predictions = logits.argmax(dim=-1)
+
+        return target, target_mask, predictions, logits
+
+    def _compute_loss(self, logits, target, target_mask):
+        gold = target[:, 1:].contiguous()       # skip the first <START> token and corresponding mask
+        mask = target_mask[:, 1:].contiguous()
+        loss = seq_cross_ent(logits, gold, mask, self._training_avg)
+        return loss
 
     def revert_tensor_to_string(self, output_dict: dict) -> dict:
         """Convert the predicted word ids into discrete tokens"""
@@ -182,40 +220,13 @@ class BaseSeq2Seq(torch.nn.Module):
         hx, _ = self._decoder.init_hidden_states(dec_states)
         return hx
 
-    def _forward_dec_loop(self, source_mask: torch.Tensor, enc_attn_fn, hx: Any,
-                          target: Optional[torch.LongTensor], target_mask: Optional[torch.LongTensor],
-                          runtime_max_decoding_len: int = -1,
-                          ) -> Tuple[torch.LongTensor, torch.FloatTensor]:
-        """
-        :param enc_attn_fn: tensor -> tensor
-        :param hx:
-        :param target:
-        :param target_mask:
-        :param runtime_max_decoding_len:
-        :return:
-        """
-        last_pred = source_mask.new_full((source_mask.size()[0],), fill_value=self._start_id)
-        num_decoding_steps = self._get_decoding_loop_len(target, runtime_max_decoding_len)
-        mem = SeqCollector()
-        for timestep in range(num_decoding_steps):
-            step_input = self._choose_rnn_input(last_pred, None if target is None else target[:, timestep])
-            inputs_embedding = self._get_step_embedding(step_input)
-            dec_hist_attn_fn = self._create_runtime_dec_hist_attn_fn(mem, target_mask, timestep)
-            cell_inp = self._get_cell_input(inputs_embedding, hx, enc_attn_fn, dec_hist_attn_fn)
-            hx, cell_out = self._decoder(cell_inp, hx)
-            proj_inp = self._get_proj_input(cell_out, enc_attn_fn, dec_hist_attn_fn)
-            step_logit = self._get_step_projection(proj_inp)
-            # greedy decoding
-            # last_pred: (batch,)
-            last_pred = torch.argmax(step_logit, dim=-1)
-            mem(output=cell_out, logit=step_logit)
-
-        # logits: (batch, seq_len, vocab_size)
-        # predictions: (batch, seq_len)
-        logits = mem.get_stacked_tensor('logit')
-        predictions = logits.argmax(dim=-1)
-
-        return predictions, logits
+    def _forward_dec_loop(self, step_input, enc_attn_fn, dec_hist_attn_fn, hx: Any):
+        inputs_embedding = self._get_step_embedding(step_input)
+        cell_inp = self._get_cell_input(inputs_embedding, hx, enc_attn_fn, dec_hist_attn_fn)
+        hx, cell_out = self._decoder(cell_inp, hx)
+        proj_inp = self._get_proj_input(cell_out, enc_attn_fn, dec_hist_attn_fn)
+        step_logit = self._get_step_projection(proj_inp)
+        return cell_out, step_logit
 
     def _get_enc_attn_fn(self, source_state, source_mask):
         if 'attn' == self._enc_dec_trans_usage:
@@ -229,11 +240,9 @@ class BaseSeq2Seq(torch.nn.Module):
 
         return enc_attn_fn
 
-    def _get_decoding_loop_len(self, target, maximum):
+    def _get_decoding_loop_len(self, target):
         if target is not None:
             num_decoding_steps = target.size()[1] - 1
-        elif maximum > 0:
-            num_decoding_steps = maximum
         else:
             num_decoding_steps = self._max_decoding_step
         return num_decoding_steps
