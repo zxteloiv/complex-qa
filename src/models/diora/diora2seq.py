@@ -6,6 +6,7 @@ from .diora_encoder import DioraEncoder, EncoderRNNStack
 from utils.nn import prepare_input_mask, seq_cross_ent
 from .hard_diora import DioraMLPWithTopk
 from .diora import DioraMLP
+from functools import reduce
 
 
 class Diora2Seq(BaseSeq2Seq):
@@ -89,20 +90,40 @@ class Diora2Seq(BaseSeq2Seq):
     def forward(self, source_tokens: torch.LongTensor,
                 target_tokens: torch.LongTensor = None
                 ) -> Dict[str, torch.Tensor]:
-        output = super().forward(source_tokens, target_tokens)
-        if not self.training or 'loss' not in output:
-            return output
+        # simulated for 1-size batch iteration
+        outputs = []
+        for batch_id, src_toks in enumerate(source_tokens):
+            # batch_id: int
+            # src_toks: (max_src_len,)
 
-        source, source_mask = prepare_input_mask(source_tokens, self._padding_index)
-        reconstruct_loss = self._get_reconstruct_loss(source, source_mask)
-        output['loss'] = output['loss'] + reconstruct_loss
+            valid_src_len = (src_toks > 0).sum()
+            src_toks = src_toks[:valid_src_len].unsqueeze(0)
 
-        self._encoder: DioraEncoder
-        if isinstance(self._encoder.diora, DioraMLPWithTopk):
-            tr_loss = self._get_tree_loss(source_mask, margin=1)
-            output['loss'] = output['loss'] + tr_loss
+            # tgt_toks: (max_tgt_len,)
+            tgt_toks = None
+            if target_tokens is not None:
+                tgt_toks = target_tokens[batch_id]
+                valid_tgt_len = (tgt_toks > 0).sum()
+                tgt_toks = tgt_toks[:valid_tgt_len].unsqueeze(0)
 
-        return output
+            output = super().forward(src_toks, tgt_toks)
+            if self.training and 'loss' in output:
+                src, src_mask = prepare_input_mask(src_toks, self._padding_index)
+                reconstruct_loss = self._get_reconstruct_loss(src, src_mask)
+                output['loss'] = output['loss'] + reconstruct_loss
+
+                self._encoder: DioraEncoder
+                if isinstance(self._encoder.diora, DioraMLPWithTopk):
+                    tr_loss = self._get_tree_loss(src_mask, margin=1)
+                    output['loss'] = output['loss'] + tr_loss
+            outputs.append(output)
+
+        final_output = {"batch_output": outputs}
+        if len(outputs) > 0 and 'loss' in outputs[0]:
+            batch_sz = len(outputs)
+            final_output['loss'] = reduce(lambda x, y: x + y, [o['loss'] for o in outputs], 0) / batch_sz
+
+        return final_output
 
     @staticmethod
     def get_encoder(p) -> 'EncoderRNNStack':

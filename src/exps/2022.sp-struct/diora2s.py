@@ -24,17 +24,17 @@ def main():
 def sch_tranx():
     p = _base_hparams()
     # only list some crucial changes here
-    p.batch_sz = 1
-    p.TRAINING_LIMIT = 25
+    p.batch_sz = 16
+    p.TRAINING_LIMIT = 400
     p.enc_out_dim = 150
-    p.encoder = 's-diora'
+    p.encoder = 'diora'
     p.enc_attn = "none"
     p.dec_hist_attn = "none"
     p.dec_inp_composer = 'none'
     p.dec_inp_comp_activation = 'mish'
     p.proj_inp_composer = 'none'
     p.proj_inp_comp_activation = 'mish'
-    p.diora_topk = 2
+    p.diora_topk = 1
     return p
 
 @Registry.hparamset()
