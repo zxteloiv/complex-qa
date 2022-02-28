@@ -1,3 +1,4 @@
+import logging
 from typing import Dict
 import torch
 from utils.nn import assign_stacked_states
@@ -16,29 +17,23 @@ class Diora2Seq(BaseSeq2Seq):
             raise TypeError("Diora2Seq instances must be assembled with"
                             "DioraEncoder instead of other StackedEncoder."
                             "Because it is forbidden to stack Diora with other type of encoders.")
-
+        if self._strategy.startswith("forward_last"):
+            logging.getLogger(self.__class__.__name__).info(
+                f'the strategy {self._strategy} will choose the last position of the diora encoder '
+                f'output, which is actually the root of the source input, to initialize the decoder '
+                f'states.'
+            )
+        else:
+            logging.getLogger(self.__class__.__name__).info(
+                f'the strategy {self._strategy} may use all the positions along with all the constituents '
+                f'to aggregate the encoder representation, and then to initialize the decoder.'
+            )
         # use the settings similar to the original implementation, fixed embedding and train the projections;
         # there's already a leaf transformation within diora, so we only project the embeddings for the loss
         # src_vocab_size = self.vocab.get_vocab_size(self._source_namespace)
         _, emb_sz = self._src_embedding.weight.size()
         self.reconstruct = torch.nn.Linear(self._encoder.get_output_dim(), emb_sz)
         # self._src_embedding.weight.requires_grad = False
-
-    def _init_decoder(self, layer_states, source_mask):
-        usage: str = self._enc_dec_trans_usage
-        # for Diora, the encoder must contain barely 1 layer
-        assert len(layer_states) == 1 and layer_states[0].size()[1] == 1
-        agg_src = [s[:, 0] for s in layer_states]
-
-        if usage == 'dec_init':
-            agg_src = list(map(self._enc_dec_trans, agg_src))
-
-        # "avg_all" is only meaningful at the "_all" part, but the interface requires both
-        # _all is a fixed setting for diora but hardly matters because the target decoder
-        # seldom uses more than 1 layer
-        dec_states = assign_stacked_states(agg_src, self._decoder.get_layer_num(), 'avg_all')
-        hx, _ = self._decoder.init_hidden_states(dec_states)
-        return hx
 
     def _get_reconstruct_loss(self, source, mask):
         self._encoder: DioraEncoder
@@ -54,23 +49,8 @@ class Diora2Seq(BaseSeq2Seq):
         # logits: (batch, length, num_toks)
         logits = torch.einsum('ble,ne->bln', proj_cells, emb_weight)
 
-        # duplicate_mask = self._build_duplicate_token_mask(source)
-        duplicate_mask = 1
-        loss = seq_cross_ent(logits, source, duplicate_mask * mask, average="token")
+        loss = seq_cross_ent(logits, source, mask, average="token")
         return loss
-
-    def _build_duplicate_token_mask(self, source: torch.Tensor):
-        # build duplicate mask
-        batch_sz, length = source.size()
-        duplicate_mask = torch.zeros_like(source)
-        mini_batch_toks = set()
-        for b in range(batch_sz):
-            for l in range(length):
-                tok = source[b, l].item()
-                if tok not in mini_batch_toks:
-                    duplicate_mask[b, l] = 1
-                    mini_batch_toks.add(tok)
-        return duplicate_mask
 
     def _get_tree_loss(self, mask: torch.Tensor, margin=1):
         self._encoder: DioraEncoder
@@ -90,6 +70,14 @@ class Diora2Seq(BaseSeq2Seq):
     def forward(self, source_tokens: torch.LongTensor,
                 target_tokens: torch.LongTensor = None
                 ) -> Dict[str, torch.Tensor]:
+        one_by_one = False
+
+        if one_by_one:
+            return self._forward_one_by_one(source_tokens, target_tokens)
+        else:
+            return self._forward_batch(source_tokens, target_tokens)
+
+    def _forward_one_by_one(self, source_tokens: torch.LongTensor, target_tokens: torch.LongTensor):
         # simulated for 1-size batch iteration
         outputs = []
         for batch_id, src_toks in enumerate(source_tokens):
@@ -106,16 +94,7 @@ class Diora2Seq(BaseSeq2Seq):
                 valid_tgt_len = (tgt_toks > 0).sum()
                 tgt_toks = tgt_toks[:valid_tgt_len].unsqueeze(0)
 
-            output = super().forward(src_toks, tgt_toks)
-            if self.training and 'loss' in output:
-                src, src_mask = prepare_input_mask(src_toks, self._padding_index)
-                reconstruct_loss = self._get_reconstruct_loss(src, src_mask)
-                output['loss'] = output['loss'] + reconstruct_loss
-
-                self._encoder: DioraEncoder
-                if isinstance(self._encoder.diora, DioraMLPWithTopk):
-                    tr_loss = self._get_tree_loss(src_mask, margin=1)
-                    output['loss'] = output['loss'] + tr_loss
+            output = self._forward_batch(src_toks, tgt_toks)
             outputs.append(output)
 
         final_output = {"batch_output": outputs}
@@ -124,6 +103,30 @@ class Diora2Seq(BaseSeq2Seq):
             final_output['loss'] = reduce(lambda x, y: x + y, [o['loss'] for o in outputs], 0) / batch_sz
 
         return final_output
+
+    def _forward_batch(self, source_tokens, target_tokens):
+        output = super().forward(source_tokens, target_tokens)
+        if self.training and 'loss' in output:
+            src, src_mask = prepare_input_mask(source_tokens, self._padding_index)
+            reconstruct_loss = self._get_reconstruct_loss(src, src_mask)
+            output['loss'] = output['loss'] + reconstruct_loss
+
+            self._encoder: DioraEncoder
+            if isinstance(self._encoder.diora, DioraMLPWithTopk):
+                tr_loss = self._get_tree_loss(src_mask, margin=1)
+                output['loss'] = output['loss'] + tr_loss
+
+        return output
+
+    def _forward_enc(self, source_tokens):
+        # source: (batch, source_length), containing the input word IDs
+        # target: (batch, target_length), containing the output IDs
+        source, source_mask = prepare_input_mask(source_tokens, self._padding_index)
+        chart_output, layered_states = self._encode(source, source_mask)
+        # afterwards, source tokens are not used anymore and only the selected diora charts are required
+        self._encoder: DioraEncoder
+        chart_mask = self._encoder.output_mask
+        return source, source_mask, chart_output, layered_states, chart_mask
 
     @staticmethod
     def get_encoder(p) -> 'EncoderRNNStack':

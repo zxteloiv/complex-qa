@@ -28,11 +28,12 @@ def sch_tranx():
     p.TRAINING_LIMIT = 400
     p.enc_out_dim = 150
     p.encoder = 'diora'
-    p.enc_attn = "none"
+    p.enc_dec_trans_usage = 'consistent'
+    p.enc_attn = "dot_product"
     p.dec_hist_attn = "none"
-    p.dec_inp_composer = 'none'
+    p.dec_inp_composer = 'cat_mapping'
     p.dec_inp_comp_activation = 'mish'
-    p.proj_inp_composer = 'none'
+    p.proj_inp_composer = 'cat_mapping'
     p.proj_inp_comp_activation = 'mish'
     p.diora_topk = 1
     return p
@@ -41,7 +42,7 @@ def sch_tranx():
 def sch_s2s():
     p = sch_tranx()
     p.tgt_namespace = 'sql'
-    p.diora_topk = 2
+    p.diora_topk = 1
     return p
 
 
