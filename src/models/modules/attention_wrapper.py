@@ -39,7 +39,7 @@ class AllenNLPAttentionWrapper(IAttn):
 
         # attn, weights: (batch, max_attend_length)
         attn = self._attn(inputs, attend_over, attend_mask)
-        temperature = max(self.tau, self.min_tau)
+        temperature = max(self.tau, self.min_tau) if self.training else self.min_tau
         weights = masked_softmax(attn / temperature, attend_mask.bool(), dim=-1)
 
         # context: (batch, attend_dim)
