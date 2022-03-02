@@ -1,5 +1,6 @@
 from typing import Optional, Tuple, Literal
 from allennlp.modules.attention import Attention
+from allennlp.nn.util import masked_softmax
 from ..transformer.multi_head_attention import GeneralMultiHeadAttention
 from ..interfaces.attention import Attention as IAttn
 import torch
@@ -10,10 +11,16 @@ class AllenNLPAttentionWrapper(IAttn):
     A wrapper for matrix attention in allennlp, fitting the interface of the multi-headed attention
     defined in models.transformer.multi_head_attention
     """
-    def __init__(self, attn: Attention, attn_dropout: float = 0.):
+    def __init__(self, attn: Attention, attn_dropout: float = 0.,
+                 init_tau: float = 1., min_tau: float = .05):
         super(AllenNLPAttentionWrapper, self).__init__()
         self._attn: Attention = attn
         self._dropout = torch.nn.Dropout(attn_dropout)
+        self.tau = init_tau
+        self.init_tau = init_tau
+        self.min_tau = min_tau
+        # manually normalize in the forward pass of the wrapper
+        self._attn._normalize = False
 
     def forward(self,
                 inputs: torch.Tensor,
@@ -30,13 +37,13 @@ class AllenNLPAttentionWrapper(IAttn):
                  attention: (batch, max_input_length, 1, max_attend_length)
         """
 
-        # attn: (batch, max_attend_length, 1)
+        # attn, weights: (batch, max_attend_length)
         attn = self._attn(inputs, attend_over, attend_mask)
-        attn = self._dropout(attn).unsqueeze(-1)
+        temperature = max(self.tau, self.min_tau)
+        weights = masked_softmax(attn / temperature, attend_mask.bool(), dim=-1)
 
         # context: (batch, attend_dim)
-        context = (attn * attend_over).sum(1)
-
+        context = (self._dropout(weights.unsqueeze(-1)) * attend_over).sum(1)
         return context
 
 class SingleTokenMHAttentionWrapper(IAttn):

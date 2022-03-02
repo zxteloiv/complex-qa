@@ -1,6 +1,6 @@
 # mostly a seq2seq but the encoder is modified for the Diora or S-Diora model
-
-from trialbot.training import Registry
+from typing import Optional
+from trialbot.training import Registry, TrialBot
 from trialbot.training.hparamset import HyperParamSet
 from trialbot.utils.root_finder import find_root
 import sys
@@ -9,14 +9,26 @@ sys.path.insert(0, find_root('.SRC'))
 
 def main():
     from utils.trialbot.setup import setup
-    from libs2s import run_exp
+    from libs2s import run_exp, Events
     from models.diora.diora2seq import Diora2Seq
     import datasets.comp_gen_bundle as cg_bundle
+    from models.modules.attention_wrapper import AllenNLPAttentionWrapper
     cg_bundle.install_parsed_qa_datasets(Registry._datasets)
     import datasets.cg_bundle_translator
 
     bot = run_exp(setup(translator='tranx', seed=2021, device=0),
                   get_model_func=Diora2Seq.from_param_and_vocab)
+
+    @bot.attach_extension(Events.EPOCH_STARTED)
+    def attn_tau_scheduler(bot: 'TrialBot'):
+        model: Diora2Seq = bot.model
+        ep, max_ep = bot.state.epoch, bot.hparams.TRAINING_LIMIT
+        attn_mod: Optional[AllenNLPAttentionWrapper] = model._enc_attn
+        if attn_mod is not None and ep > 0:
+            # try a linear scheduler first
+            attn_mod.tau += (attn_mod.min_tau - attn_mod.init_tau) / (0.8 * max_ep)
+            bot.logger.info(f'attention tau decreased into {attn_mod.tau}')
+
     bot.run()
 
 
