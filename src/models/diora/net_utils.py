@@ -29,6 +29,53 @@ class NormalizeFunc(nn.Module):
         raise Exception('Bad mode = {}'.format(mode))
 
 
+# Composition Functions
+class ComposeMLP(nn.Module):
+    def __init__(self, size, activation, n_layers=2):
+        super(ComposeMLP, self).__init__()
+        assert n_layers > 0
+
+        self.size = size
+        self.activation = activation
+        self.n_layers = n_layers
+
+        self.layers = torch.nn.ModuleList([
+            nn.Linear(2 * self.size if n == 0 else self.size, self.size)
+            for n in range(n_layers)
+        ])
+
+    def forward(self, hs):
+        h = torch.cat(hs, 1)
+        for l in self.layers:
+            h = self.activation(l(h))
+        return h
+
+
+# Score Functions
+class Bilinear(nn.Module):
+    def __init__(self, size_1, size_2=None):
+        super(Bilinear, self).__init__()
+        self.size_1 = size_1
+        self.size_2 = size_2 or size_1
+        self.mat = nn.Parameter(torch.FloatTensor(self.size_1, self.size_2))
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        params = [p for p in self.parameters() if p.requires_grad]
+        for i, param in enumerate(params):
+            param.data.normal_()
+
+    def forward(self, vector1, vector2):
+        # bilinear
+        # a = 1 (in a more general bilinear function, a is any positive integer)
+        # vector1.shape = (b, m)
+        # matrix.shape = (m, n)
+        # vector2.shape = (b, n)
+        bma = torch.matmul(vector1, self.mat).unsqueeze(1)
+        ba = torch.matmul(bma, vector2.unsqueeze(2)).view(-1, 1)
+        return ba
+
+
 class BatchInfo(object):
     def __init__(self, **kwargs):
         super(BatchInfo, self).__init__()

@@ -1,80 +1,10 @@
 import torch
-import torch.nn as nn
 from .base_model import DioraBase
 
 from .net_utils import get_inside_states, inside_fill_chart
 from .net_utils import get_outside_states, outside_fill_chart
 from .inside_index import build_inside_component_lookup
 from .net_utils import BatchInfo
-
-
-# Composition Functions
-class ComposeMLP(nn.Module):
-    def __init__(self, size, activation, n_layers=2):
-        super(ComposeMLP, self).__init__()
-
-        self.size = size
-        self.activation = activation
-        self.n_layers = n_layers
-
-        self.W = nn.Parameter(torch.FloatTensor(2 * self.size, self.size))
-        self.B = nn.Parameter(torch.FloatTensor(self.size))
-
-        for i in range(1, n_layers):
-            setattr(self, 'W_{}'.format(i), nn.Parameter(torch.FloatTensor(self.size, self.size)))
-            setattr(self, 'B_{}'.format(i), nn.Parameter(torch.FloatTensor(self.size)))
-        self.reset_parameters()
-
-    @property
-    def device(self):
-        return next(self.parameters()).device
-
-    @property
-    def is_cuda(self):
-        device = self.device
-        return device.index is not None and device.index >= 0
-
-    def reset_parameters(self):
-        params = [p for p in self.parameters() if p.requires_grad]
-        for i, param in enumerate(params):
-            param.data.normal_()
-
-    def forward(self, hs):
-        input_h = torch.cat(hs, 1)
-        h = torch.matmul(input_h, self.W)
-        h = self.activation(h + self.B)
-        for i in range(1, self.n_layers):
-            W = getattr(self, 'W_{}'.format(i))
-            B = getattr(self, 'B_{}'.format(i))
-            h = self.activation(torch.matmul(h, W) + B)
-
-        return h
-
-
-# Score Functions
-
-class Bilinear(nn.Module):
-    def __init__(self, size_1, size_2=None):
-        super(Bilinear, self).__init__()
-        self.size_1 = size_1
-        self.size_2 = size_2 or size_1
-        self.mat = nn.Parameter(torch.FloatTensor(self.size_1, self.size_2))
-        self.reset_parameters()
-
-    def reset_parameters(self):
-        params = [p for p in self.parameters() if p.requires_grad]
-        for i, param in enumerate(params):
-            param.data.normal_()
-
-    def forward(self, vector1, vector2):
-        # bilinear
-        # a = 1 (in a more general bilinear function, a is any positive integer)
-        # vector1.shape = (b, m)
-        # matrix.shape = (m, n)
-        # vector2.shape = (b, n)
-        bma = torch.matmul(vector1, self.mat).unsqueeze(1)
-        ba = torch.matmul(bma, vector2.unsqueeze(2)).view(-1, 1)
-        return ba
 
 
 # Base
@@ -84,15 +14,6 @@ class DioraMLP(DioraBase):
     def __init__(self, *args, **kwargs):
         self.n_layers = kwargs.get('n_layers', None)
         super(DioraMLP, self).__init__(*args, **kwargs)
-
-    def init_parameters(self):
-        # Model parameters for transformation required at both input and output
-        self.inside_score_func = Bilinear(self.size)
-        self.outside_score_func = Bilinear(self.size)
-        self.root_vector_out_h = nn.Parameter(torch.FloatTensor(self.size))
-
-        self.inside_compose_func = ComposeMLP(self.size, self.activation, n_layers=self.n_layers)
-        self.outside_compose_func = ComposeMLP(self.size, self.activation, n_layers=self.n_layers)
 
     def init_with_batch(self, h, info=None):
         super().init_with_batch(h, info)

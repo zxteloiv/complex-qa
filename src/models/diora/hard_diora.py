@@ -6,9 +6,6 @@ import torch
 import torch.nn as nn
 
 from .base_model import DioraBase
-from .diora import Bilinear
-from .diora import ComposeMLP
-
 from .net_utils import build_chart
 from .net_utils import BatchInfo
 from .net_utils import inside_fill_chart, outside_fill_chart
@@ -417,14 +414,6 @@ class DioraMLPWithTopk(DioraBase):
                 for k in keys:
                     self.nested_del(chart, k)
         self.charts = None
-
-    def init_parameters(self):
-        # Model parameters for transformation required at both input and output
-        self.inside_score_func = Bilinear(self.size)
-        self.inside_compose_func = ComposeMLP(self.size, self.activation, n_layers=self.n_layers)
-        self.outside_score_func = Bilinear(self.size)
-        self.outside_compose_func = ComposeMLP(self.size, self.activation, n_layers=self.n_layers)
-        self.root_vector_out_h = nn.Parameter(torch.FloatTensor(self.size))
 
     def inside_func(self, batch_info):
         device = self.device

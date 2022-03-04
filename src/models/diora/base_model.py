@@ -1,9 +1,11 @@
-import math
 import torch
 import torch.nn as nn
-import numpy as np
+from .net_utils import NormalizeFunc, BatchInfo, build_chart, Index, Bilinear, ComposeMLP
 
-from .net_utils import NormalizeFunc, BatchInfo, build_chart, Index
+
+class SigmaH(nn.Module):
+    def forward(self, x):
+        return x * torch.tanh(torch.sqrt(torch.reciprocal(1 + torch.exp(-x))))
 
 
 class DioraBase(nn.Module):
@@ -20,36 +22,22 @@ class DioraBase(nn.Module):
         self.default_outside = outside
         self.inside_normalize_func = NormalizeFunc('unit')
         self.outside_normalize_func = NormalizeFunc('unit')
-        self.init = kwargs.get('init', 'normal')
 
-        self.activation = nn.Mish()
-        # the linear module bias is shared with the compose_func in the original repo
-        # which hadn't been proven by experiments, but we follow the settings here.
-        self.leaf_linear = nn.Linear(self.input_size, self.size, bias=False)
+        # self.activation = nn.Mish()
+        self.activation = SigmaH()
+        # self.activation = nn.Tanh()
+        self.leaf_linear = nn.Linear(self.input_size, self.size)
+        self.root_vector_out_h = nn.Parameter(torch.zeros(self.size))
         self.index = None
         self.cache = None
         self.chart = None
 
-        self.init_parameters()
-        self.reset_parameters()
+        self.inside_score_func = Bilinear(self.size)
+        self.inside_compose_func = ComposeMLP(self.size, self.activation, n_layers=self.n_layers)
+        self.outside_score_func = Bilinear(self.size)
+        self.outside_compose_func = ComposeMLP(self.size, self.activation, n_layers=self.n_layers)
+
         self.reset()
-
-    def init_parameters(self):
-        raise NotImplementedError
-
-    def reset_parameters(self):
-        if self.init == 'normal':
-            params = [p for p in self.parameters() if p.requires_grad]
-            for i, param in enumerate(params):
-                param.data.normal_()
-        elif self.init == 'xavier':
-            for name, param in self.named_parameters():
-                if not param.requires_grad:
-                    continue
-                if len(param.shape) == 2:
-                    nn.init.xavier_uniform_(param)
-                else:
-                    nn.init.zeros_(param)
 
     @property
     def device(self):
@@ -89,9 +77,8 @@ class DioraBase(nn.Module):
 
     def leaf_transform(self, x):
         normalize_func = self.inside_normalize_func
-        compose_func = self.inside_compose_func
 
-        h = torch.tanh(self.leaf_linear(x) + compose_func.B)
+        h = self.activation(self.leaf_linear(x))
 
         input_shape = x.shape[:-1]
         h = normalize_func(h.view(*input_shape, self.size))
@@ -184,7 +171,7 @@ class DioraBase(nn.Module):
         self.chart = build_chart(batch_size, length, size, dtype=torch.float, cuda=self.is_cuda)
         self.cache = {}
 
-    def forward(self, x, info={}):
+    def forward(self, x, info=None):
         # info: dict_keys(['inside_pool', 'outside', 'raw_parse',
         # 'constituency_tags', 'pos_tags', 'binary_tree', 'example_ids'])
         if self.index is None:
