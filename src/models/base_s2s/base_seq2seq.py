@@ -153,7 +153,7 @@ class BaseSeq2Seq(torch.nn.Module):
         for timestep in range(num_decoding_steps):
             step_input = self._choose_rnn_input(last_pred, None if target is None else target[:, timestep])
             dec_hist_attn_fn = self._create_runtime_dec_hist_attn_fn(mem, target_mask, timestep)
-            cell_out, step_logit = self._forward_dec_loop(step_input, enc_attn_fn, dec_hist_attn_fn, hx)
+            cell_out, step_logit, hx = self._forward_dec_loop(step_input, enc_attn_fn, dec_hist_attn_fn, hx)
             # last_pred: (batch,), greedy decoding
             last_pred = torch.argmax(step_logit, dim=-1)
             mem(output=cell_out, logit=step_logit)
@@ -226,7 +226,7 @@ class BaseSeq2Seq(torch.nn.Module):
         hx, cell_out = self._decoder(cell_inp, hx)
         proj_inp = self._get_proj_input(cell_out, enc_attn_fn, dec_hist_attn_fn)
         step_logit = self._get_step_projection(proj_inp)
-        return cell_out, step_logit
+        return cell_out, step_logit, hx
 
     def _get_enc_attn_fn(self, source_state, source_mask):
         if 'attn' == self._enc_dec_trans_usage:
