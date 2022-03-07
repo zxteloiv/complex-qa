@@ -32,6 +32,10 @@ class Diora(DioraBase):
         s = xs + ls + rs
         s = s.view(B, L, N, 1)
         p = torch.softmax(s, dim=2)
+        # p = torch.nn.functional.gumbel_softmax(s, tau=1e-1, hard=True, dim=2)
+        # debug: suppose always the last arrangement is considered
+        # p = torch.zeros_like(s)
+        # p[:, :, -1, :] = 1
 
         hbar = torch.sum(h.view(B, L, N, -1) * p, 2)
         hbar = self.inside_normalize_func(hbar)
@@ -39,10 +43,10 @@ class Diora(DioraBase):
 
         inside_fill_chart(batch_info, chart, index, hbar, sbar)
 
-        self.private_inside_hook(batch_info.level, h, s, p, xs, ls, rs)
-        return h, s, p, xs, ls, rs
+        # use the weight to build an argmax tree for each cell
+        self.decode_inside_tree(batch_info.level, p)
 
-    def private_inside_hook(self, level, h, s, p, x_s, l_s, r_s):
+    def decode_inside_tree(self, level, p):
         """
         This method is meant to be private, and should not be overriden.
         Instead, override `inside_hook`.
@@ -55,7 +59,7 @@ class Diora(DioraBase):
         L = length - level
 
         component_lookup = build_inside_component_lookup(self.index, BatchInfo(length=length, level=level))
-        argmax = x_s.argmax(dim=2)
+        argmax = p.argmax(dim=2)
         for i_b in range(B):
             for pos in range(L):
                 n_idx = argmax[i_b, pos].item()
@@ -91,5 +95,4 @@ class Diora(DioraBase):
         sbar = torch.sum(s * p, 1)
 
         outside_fill_chart(batch_info, chart, index, hbar, sbar)
-        return h, s, p, xs, ps, ss
 
