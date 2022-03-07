@@ -5,8 +5,8 @@ from utils.nn import assign_stacked_states
 from ..base_s2s.base_seq2seq import BaseSeq2Seq
 from .diora_encoder import DioraEncoder, EncoderRNNStack
 from utils.nn import prepare_input_mask, seq_cross_ent
-from .hard_diora import DioraMLPWithTopk
-from .diora import DioraMLP
+from .hard_diora import DioraTopk
+from .diora import Diora
 from functools import reduce
 
 
@@ -112,7 +112,7 @@ class Diora2Seq(BaseSeq2Seq):
             output['loss'] = output['loss'] + reconstruct_loss
 
             self._encoder: DioraEncoder
-            if isinstance(self._encoder.diora, DioraMLPWithTopk):
+            if isinstance(self._encoder.diora, DioraTopk):
                 tr_loss = self._get_tree_loss(src_mask, margin=1)
                 output['loss'] = output['loss'] + tr_loss
 
@@ -134,8 +134,8 @@ class Diora2Seq(BaseSeq2Seq):
         assert diora_type in ('diora', 's-diora'), f'unsupported diora type {diora_type}'
 
         diora_cls = {
-            'diora': DioraMLP,
-            's-diora': DioraMLPWithTopk,
+            'diora': Diora,
+            's-diora': DioraTopk,
         }.get(diora_type)
         num_beam = getattr(p, 'diora_topk', 2)
         hid_sz = getattr(p, 'enc_out_dim', p.hidden_sz)

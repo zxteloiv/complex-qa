@@ -14,7 +14,7 @@ from .inside_index import build_inside_component_lookup
 from .outside_index import get_outside_components
 
 
-def get_inside_chart_cfg(diora: 'DioraMLPWithTopk', level=None, K=None, device=None):
+def get_inside_chart_cfg(diora: 'DioraTopk', level=None, K=None, device=None):
     inputs = {}
     inputs['device'] = device
     inputs['batch_size'] = diora.batch_size
@@ -31,7 +31,7 @@ def get_inside_chart_cfg(diora: 'DioraMLPWithTopk', level=None, K=None, device=N
     return inputs, cfg
 
 
-def get_outside_chart_cfg(diora: 'DioraMLPWithTopk', level=None, K=None, device=None):
+def get_outside_chart_cfg(diora: 'DioraTopk', level=None, K=None, device=None):
     inputs = {}
     inputs['device'] = device
     inputs['batch_size'] = diora.batch_size
@@ -396,17 +396,16 @@ class ChartUtil(nn.Module):
         return result
 
 
-class DioraMLPWithTopk(DioraBase):
+class DioraTopk(DioraBase):
     def __init__(self, *args, **kwargs):
         # {'size': 400, 'outside': True, 'normalize': 'unit',
         # 'n_layers': 2, 'K': 3, 'projection_layer': None}
         self.charts = None
-        self.n_layers = kwargs.get('n_layers', None)
-        super(DioraMLPWithTopk, self).__init__(*args, **kwargs)
+        super(DioraTopk, self).__init__(*args, **kwargs)
         self.K = kwargs.get('K', 2)
 
     def reset(self):
-        super(DioraMLPWithTopk, self).reset()
+        super(DioraTopk, self).reset()
         if self.charts is not None:
             for i in range(1, self.K):
                 chart = self.charts[i]
@@ -456,7 +455,7 @@ class DioraMLPWithTopk(DioraBase):
             outside_fill_chart(batch_info, self.charts[i], self.index, chart_output['h'][i], chart_output['s'][i])
 
     def initialize(self, x):
-        result = super(DioraMLPWithTopk, self).initialize(x)
+        result = super(DioraTopk, self).initialize(x)
         batch_size, length = x.shape[:2]
         size = self.size
         charts = [self.chart]

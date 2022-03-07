@@ -1,4 +1,5 @@
 import torch
+import torch.nn.functional
 from .base_model import DioraBase
 
 from .net_utils import get_inside_states, inside_fill_chart
@@ -8,12 +9,9 @@ from .net_utils import BatchInfo
 
 
 # Base
-class DioraMLP(DioraBase):
-    K = 1
-
+class Diora(DioraBase):
     def __init__(self, *args, **kwargs):
-        self.n_layers = kwargs.get('n_layers', None)
-        super(DioraMLP, self).__init__(*args, **kwargs)
+        super(Diora, self).__init__(*args, **kwargs)
 
     def init_with_batch(self, h, info=None):
         super().init_with_batch(h, info)
@@ -55,14 +53,6 @@ class DioraMLP(DioraBase):
         length = self.length
         B = self.batch_size
         L = length - level
-
-        x_s = x_s.view(*s.shape)
-        assert s.shape == (B, L, level, 1), s.shape
-        smax = s.max(dim=2, keepdim=True)[0]
-        s = s - smax
-
-        for pos in range(L):
-            self.cache['inside_s_components'][level][pos] = s[:, pos, :]
 
         component_lookup = build_inside_component_lookup(self.index, BatchInfo(length=length, level=level))
         argmax = x_s.argmax(dim=2)

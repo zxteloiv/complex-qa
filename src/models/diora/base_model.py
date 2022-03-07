@@ -20,8 +20,8 @@ class DioraBase(nn.Module):
         self.size = size
         self.input_size = input_size or size
         self.default_outside = outside
-        self.inside_normalize_func = NormalizeFunc('unit')
-        self.outside_normalize_func = NormalizeFunc('unit')
+        self.inside_normalize_func = NormalizeFunc('layer', self.size)
+        self.outside_normalize_func = NormalizeFunc('layer', self.size)
 
         # self.activation = nn.Mish()
         self.activation = SigmaH()
@@ -32,6 +32,7 @@ class DioraBase(nn.Module):
         self.cache = None
         self.chart = None
 
+        self.n_layers = kwargs.get('n_layers', 2)
         self.inside_score_func = Bilinear(self.size)
         self.inside_compose_func = ComposeMLP(self.size, self.activation, n_layers=self.n_layers)
         self.outside_score_func = Bilinear(self.size)
