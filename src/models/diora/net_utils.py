@@ -6,6 +6,7 @@ from scipy.special import factorial
 from .outside_index import get_outside_index, get_topk_outside_index
 from .inside_index import get_inside_index
 from .offset_cache import get_offset_cache
+from ..modules.decomposed_bilinear import DecomposedBilinear
 
 
 class UnitNorm(object):
@@ -14,19 +15,20 @@ class UnitNorm(object):
 
 
 class NormalizeFunc(nn.Module):
-    def __init__(self, mode='none'):
+    def __init__(self, mode='none', size=None):
         super(NormalizeFunc, self).__init__()
         self.mode = mode
+        if mode == 'layer':
+            self.norm_func = nn.LayerNorm(size)
+        elif mode == 'unit':
+            self.norm_func = UnitNorm()
+        elif mode == 'none':
+            self.norm_func = lambda x: x
+        else:
+            raise ValueError('Bad mode = {}'.format(mode))
 
     def forward(self, x):
-        mode = self.mode
-        if mode == 'none':
-            return x
-        elif mode == 'unit':
-            return UnitNorm()(x)
-        elif mode == 'layer':
-            return nn.functional.layer_norm(x, x.shape[-1:])
-        raise Exception('Bad mode = {}'.format(mode))
+        return self.norm_func(x)
 
 
 # Composition Functions
@@ -49,6 +51,33 @@ class ComposeMLP(nn.Module):
         for l in self.layers:
             h = self.activation(l(h))
         return h
+
+
+class ComposeBilinear(nn.Module):
+    def __init__(self, size, activation=None, n_layers=None):
+        super().__init__()
+        self.bilinear = DecomposedBilinear(size, size, size,
+                                           decomposed_rank=1, pool_size=size,
+                                           use_linear=True, use_bias=True,
+                                           )
+        self.activation = activation
+
+    def forward(self, hs):
+        h = self.bilinear(hs[0], hs[1])
+        if self.activation is not None:
+            h = self.activation(h)
+        return h
+
+
+class ComposeGRU(nn.Module):
+    def __init__(self, size, activation=None, n_layers=None,
+                 alpha: float = 0.87 * 0.9):
+        super().__init__()
+        self.gru_cell = nn.GRUCell(size, size)
+
+    def forward(self, hs):
+        h, x = hs[0], hs[1]
+        return x * 0.81 + self.gru_cell(x, h)
 
 
 # Score Functions
