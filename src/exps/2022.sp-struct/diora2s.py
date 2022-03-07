@@ -1,5 +1,5 @@
 # mostly a seq2seq but the encoder is modified for the Diora or S-Diora model
-from typing import Optional
+from trialbot.utils.grid_search_helper import import_grid_search_parameters
 from trialbot.training import Registry, TrialBot
 from trialbot.training.hparamset import HyperParamSet
 from trialbot.utils.root_finder import find_root
@@ -29,23 +29,35 @@ def sch_tranx():
     p.TRAINING_LIMIT = 400
     p.enc_out_dim = 150
     p.encoder = 'diora'
+    p.diora_concat_outside = False
+    p.diora_loss_enabled = False
+
     p.enc_dec_trans_usage = 'consistent'
     p.enc_attn = "dot_product"
-    p.dec_hist_attn = "none"
     p.dec_inp_composer = 'cat_mapping'
     p.dec_inp_comp_activation = 'mish'
     p.proj_inp_composer = 'cat_mapping'
     p.proj_inp_comp_activation = 'mish'
-    p.diora_topk = 1
     return p
+
+
+import_grid_search_parameters({
+    'diora_concat_outside': [False, True],
+    'diora_loss_enabled': [False, True],
+}, sch_tranx)
 
 
 @Registry.hparamset()
 def sch_s2s():
     p = sch_tranx()
     p.tgt_namespace = 'sql'
-    p.diora_topk = 1
     return p
+
+
+import_grid_search_parameters({
+    'diora_concat_outside': [False, True],
+    'diora_loss_enabled': [False, True],
+}, sch_s2s)
 
 
 def _base_hparams():
@@ -70,12 +82,6 @@ def _base_hparams():
     p.tied_decoder_embedding = False
     p.emb_sz = 100
 
-    p.use_cell_based_encoder = False
-    # cell-based encoders: typed_rnn, ind_rnn, onlstm, lstm, gru, rnn; see models.base_s2s.base_seq2seq.py file
-    # seq-based encoders: lstm, transformer, bilstm, aug_lstm, aug_bilstm; see models.base_s2s.stacked_encoder.py file
-    p.cell_encoder_is_bidirectional = True     # any cell-based RNN encoder above could be bidirectional
-    p.cell_encoder_uses_packed_sequence = False
-
     p.encoder = 's-diora'
     p.diora_topk = 2
     p.enc_out_dim = p.hidden_sz
@@ -83,26 +89,32 @@ def _base_hparams():
     p.dec_out_dim = p.hidden_sz
 
     p.enc_dec_trans_usage = 'dec_init'
-    p.enc_dec_trans_act = 'tanh'
+    p.enc_dec_trans_act = 'mish'
     p.enc_dec_trans_forced = True
 
     p.proj_in_dim = p.emb_sz
 
     p.enc_dropout = 0
     p.dec_dropout = 0.5
-    p.enc_attn = "none"
+    p.enc_attn = "dot_product"
     p.dec_hist_attn = "none"
-    p.dec_inp_composer = 'none'
+    p.dec_inp_composer = 'cat_mapping'
     p.dec_inp_comp_activation = 'mish'
-    p.proj_inp_composer = 'none'
+    p.proj_inp_composer = 'cat_mapping'
     p.proj_inp_comp_activation = 'mish'
 
     # ============ backward compatibility ==============
     # this attr must be set but is not useful in diora because any diora has a fixed strategy
     p.decoder_init_strategy = "forward_last_all"
     p.num_enc_layers = 1
+    p.use_cell_based_encoder = False
+    # cell-based encoders: typed_rnn, ind_rnn, onlstm, lstm, gru, rnn; see models.base_s2s.base_seq2seq.py file
+    # seq-based encoders: lstm, transformer, bilstm, aug_lstm, aug_bilstm; see models.base_s2s.stacked_encoder.py file
+    p.cell_encoder_is_bidirectional = True     # any cell-based RNN encoder above could be bidirectional
+    p.cell_encoder_uses_packed_sequence = False
 
     return p
+
 
 if __name__ == '__main__':
     main()

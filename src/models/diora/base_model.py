@@ -1,6 +1,7 @@
+from typing import Literal
 import torch
 import torch.nn as nn
-from .net_utils import NormalizeFunc, BatchInfo, build_chart, Index, Bilinear, ComposeMLP
+from .net_utils import NormalizeFunc, BatchInfo, build_chart, Index, Bilinear, composer_name_to_cls
 
 
 class SigmaH(nn.Module):
@@ -9,19 +10,20 @@ class SigmaH(nn.Module):
 
 
 class DioraBase(nn.Module):
-    r"""DioraBase"""
-    def safe_set_K(self, val):
-        self.reset()
-        self.K = val
-
-    def __init__(self, input_size=None, size=None, outside=True, **kwargs):
+    def __init__(self, size,
+                 topk: int = 1,
+                 input_size=None,
+                 default_outside=True,
+                 norm: Literal['none', 'unit', 'layer'] = 'layer',
+                 composer: Literal['mlp', 'gru', 'bilinear'] = 'mlp',
+                 ):
         super(DioraBase, self).__init__()
-        self.K = 1
+        self.K = topk
         self.size = size
         self.input_size = input_size or size
-        self.default_outside = outside
-        self.inside_normalize_func = NormalizeFunc('layer', self.size)
-        self.outside_normalize_func = NormalizeFunc('layer', self.size)
+        self.default_outside = default_outside  # default outside if not overwritten at runtime
+        self.inside_normalize_func = NormalizeFunc(norm, self.size)
+        self.outside_normalize_func = NormalizeFunc(norm, self.size)
 
         # self.activation = nn.Mish()
         self.activation = SigmaH()
@@ -32,13 +34,18 @@ class DioraBase(nn.Module):
         self.cache = None
         self.chart = None
 
-        self.n_layers = kwargs.get('n_layers', 2)
         self.inside_score_func = Bilinear(self.size)
-        self.inside_compose_func = ComposeMLP(self.size, self.activation, n_layers=self.n_layers)
         self.outside_score_func = Bilinear(self.size)
-        self.outside_compose_func = ComposeMLP(self.size, self.activation, n_layers=self.n_layers)
+
+        composer_cls = composer_name_to_cls[composer]
+        self.inside_compose_func = composer_cls(self.size, self.activation, n_layers=2)
+        self.outside_compose_func = composer_cls(self.size, self.activation, n_layers=2)
 
         self.reset()
+
+    def safe_set_K(self, val):
+        self.reset()
+        self.K = val
 
     @property
     def device(self):

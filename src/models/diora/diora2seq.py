@@ -11,7 +11,7 @@ from functools import reduce
 
 
 class Diora2Seq(BaseSeq2Seq):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, use_diora_loss: bool = False, one_by_one: bool = False, *args, **kwargs):
         super().__init__(*args, **kwargs)
         if not isinstance(self._encoder, DioraEncoder):
             raise TypeError("Diora2Seq instances must be assembled with"
@@ -32,8 +32,11 @@ class Diora2Seq(BaseSeq2Seq):
         # there's already a leaf transformation within diora, so we only project the embeddings for the loss
         # src_vocab_size = self.vocab.get_vocab_size(self._source_namespace)
         _, emb_sz = self._src_embedding.weight.size()
-        self.reconstruct = torch.nn.Linear(self._encoder.get_output_dim(), emb_sz)
+        self.reconstruct = torch.nn.Linear(self._encoder.diora.size, emb_sz)
+        # as shown in the de-attentions setup, the embedding is not kept fixed
         # self._src_embedding.weight.requires_grad = False
+        self.use_diora_loss = use_diora_loss
+        self.one_by_one = one_by_one
 
     def _get_reconstruct_loss(self, source, mask):
         self._encoder: DioraEncoder
@@ -70,9 +73,7 @@ class Diora2Seq(BaseSeq2Seq):
     def forward(self, source_tokens: torch.LongTensor,
                 target_tokens: torch.LongTensor = None
                 ) -> Dict[str, torch.Tensor]:
-        one_by_one = False
-
-        if one_by_one:
+        if self.one_by_one:
             return self._forward_one_by_one(source_tokens, target_tokens)
         else:
             return self._forward_batch(source_tokens, target_tokens)
@@ -106,7 +107,7 @@ class Diora2Seq(BaseSeq2Seq):
 
     def _forward_batch(self, source_tokens, target_tokens):
         output = super().forward(source_tokens, target_tokens)
-        if self.training and 'loss' in output:
+        if self.use_diora_loss and self.training and 'loss' in output:
             src, src_mask = prepare_input_mask(source_tokens, self._padding_index)
             reconstruct_loss = self._get_reconstruct_loss(src, src_mask)
             output['loss'] = output['loss'] + reconstruct_loss
@@ -137,10 +138,14 @@ class Diora2Seq(BaseSeq2Seq):
             'diora': Diora,
             's-diora': DioraTopk,
         }.get(diora_type)
-        num_beam = getattr(p, 'diora_topk', 2)
         hid_sz = getattr(p, 'enc_out_dim', p.hidden_sz)
-        diora = diora_cls.from_kwargs_dict(dict(
-            input_size=p.emb_sz, size=hid_sz, n_layers=2, K=num_beam,
-        ))
-        enc = DioraEncoder(diora)
+        diora_kwargs = getattr(p, 'diora_kwargs', dict(size=hid_sz, input_size=p.emb_sz))
+        diora = diora_cls.from_kwargs_dict(diora_kwargs)
+        enc = DioraEncoder(diora, getattr(p, 'diora_concat_outside', False))
         return enc
+
+    @classmethod
+    def from_param_and_vocab(cls, p, vocab):
+        model = super().from_param_and_vocab(p, vocab)
+        model.use_diora_loss = getattr(p, 'diora_loss_enabled', False)
+        return model

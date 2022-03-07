@@ -398,11 +398,8 @@ class ChartUtil(nn.Module):
 
 class DioraTopk(DioraBase):
     def __init__(self, *args, **kwargs):
-        # {'size': 400, 'outside': True, 'normalize': 'unit',
-        # 'n_layers': 2, 'K': 3, 'projection_layer': None}
         self.charts = None
         super(DioraTopk, self).__init__(*args, **kwargs)
-        self.K = kwargs.get('K', 2)
 
     def reset(self):
         super(DioraTopk, self).reset()

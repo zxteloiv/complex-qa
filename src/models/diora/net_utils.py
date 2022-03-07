@@ -70,14 +70,20 @@ class ComposeBilinear(nn.Module):
 
 
 class ComposeGRU(nn.Module):
-    def __init__(self, size, activation=None, n_layers=None,
-                 alpha: float = 0.87 * 0.9):
+    def __init__(self, size, activation=None, n_layers=None):
         super().__init__()
         self.gru_cell = nn.GRUCell(size, size)
 
     def forward(self, hs):
         h, x = hs[0], hs[1]
-        return x * 0.81 + self.gru_cell(x, h)
+        return self.gru_cell(x, h)
+
+
+composer_name_to_cls = {
+    'mlp': ComposeMLP,
+    'gru': ComposeGRU,
+    'bilinear': ComposeBilinear,
+}
 
 
 # Score Functions
