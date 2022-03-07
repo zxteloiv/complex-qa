@@ -89,6 +89,10 @@ class StackedEncoder(EncoderRNNStack):
             enc_cls = lambda floor: PytorchSeq2SeqWrapper(
                 torch.nn.LSTM(p.emb_sz if floor == 0 else hid_sz, hid_sz, batch_first=True)
             )
+        elif p.encoder == "gru":
+            enc_cls = lambda floor: PytorchSeq2SeqWrapper(
+                torch.nn.GRU(p.emb_sz if floor == 0 else hid_sz, hid_sz, batch_first=True)
+            )
         elif p.encoder == "transformer":
             from models.transformer.encoder import TransformerEncoder
             enc_cls = lambda floor: TransformerEncoder(
