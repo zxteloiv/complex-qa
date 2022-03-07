@@ -12,22 +12,11 @@ def main():
     from libs2s import run_exp, Events
     from models.diora.diora2seq import Diora2Seq
     import datasets.comp_gen_bundle as cg_bundle
-    from models.modules.attention_wrapper import AllenNLPAttentionWrapper
     cg_bundle.install_parsed_qa_datasets(Registry._datasets)
     import datasets.cg_bundle_translator
 
     bot = run_exp(setup(translator='tranx', seed=2021, device=0),
                   get_model_func=Diora2Seq.from_param_and_vocab)
-
-    @bot.attach_extension(Events.EPOCH_STARTED)
-    def attn_tau_scheduler(bot: 'TrialBot'):
-        model: Diora2Seq = bot.model
-        ep, max_ep = bot.state.epoch, bot.hparams.TRAINING_LIMIT
-        attn_mod: Optional[AllenNLPAttentionWrapper] = model._enc_attn
-        if attn_mod is not None and ep > 0:
-            # try a linear scheduler first
-            attn_mod.tau += (attn_mod.min_tau - attn_mod.init_tau) / (0.8 * max_ep)
-            bot.logger.info(f'attention tau decreased into {attn_mod.tau}')
 
     bot.run()
 
@@ -49,6 +38,7 @@ def sch_tranx():
     p.proj_inp_comp_activation = 'mish'
     p.diora_topk = 1
     return p
+
 
 @Registry.hparamset()
 def sch_s2s():
