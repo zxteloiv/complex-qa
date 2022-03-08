@@ -29,7 +29,8 @@ def sch_tranx():
     p.TRAINING_LIMIT = 400
     p.enc_out_dim = 150
     p.encoder = 'diora'
-    p.diora_concat_outside = False
+    p.decoder_init_strategy = "avg_all"
+    p.diora_concat_outside = True
     p.diora_loss_enabled = False
 
     p.enc_dec_trans_usage = 'consistent'
@@ -42,7 +43,6 @@ def sch_tranx():
 
 
 import_grid_search_parameters({
-    'diora_concat_outside': [False, True],
     'diora_loss_enabled': [False, True],
 }, sch_tranx)
 
@@ -55,7 +55,6 @@ def sch_s2s():
 
 
 import_grid_search_parameters({
-    'diora_concat_outside': [False, True],
     'diora_loss_enabled': [False, True],
 }, sch_s2s)
 
