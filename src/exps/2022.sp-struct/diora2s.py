@@ -29,9 +29,11 @@ def sch_tranx():
     p.TRAINING_LIMIT = 400
     p.enc_out_dim = 150
     p.encoder = 'diora'
+
+    # the best param from grid search under the single seed 2021, on both tranx and s2s models;
     p.decoder_init_strategy = "avg_all"
     p.diora_concat_outside = True
-    p.diora_loss_enabled = False
+    p.diora_loss_enabled = True
 
     p.enc_dec_trans_usage = 'consistent'
     p.enc_attn = "dot_product"
@@ -42,21 +44,11 @@ def sch_tranx():
     return p
 
 
-import_grid_search_parameters({
-    'diora_loss_enabled': [False, True],
-}, sch_tranx)
-
-
 @Registry.hparamset()
 def sch_s2s():
     p = sch_tranx()
     p.tgt_namespace = 'sql'
     return p
-
-
-import_grid_search_parameters({
-    'diora_loss_enabled': [False, True],
-}, sch_s2s)
 
 
 def _base_hparams():
