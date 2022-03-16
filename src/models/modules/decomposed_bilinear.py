@@ -5,7 +5,7 @@ from torch import nn
 
 class DecomposedBilinear(nn.Module):
     """
-    In general, the module is an approximation to the real bilinear operation with lower parameters,
+    In general, the module is an approximation to the real bilinear operation with much less parameters,
     which follows the common decomposition as https://arxiv.org/abs/1805.07932
 
     Briefly, to approximate `aWb` where W is (left, out, right) and requires O(left * right * out) parameters,
@@ -16,7 +16,7 @@ class DecomposedBilinear(nn.Module):
 
     where (a^T W_a) * (W_b b) is called the bilinear pool.
 
-    The space requirement is O(pool * (rank * (left + right) + hidden))
+    The space requirement is O(pool * (rank * (left + right) + output))
     Under the common situation that rank ~ pool << out, the decomposed bilinear module will save much space.
     """
     def __init__(self,
@@ -92,7 +92,3 @@ class DecomposedBilinear(nn.Module):
 
         # lwr: (*, out_size)
         return lwr.reshape(*left_size[:-1], -1)
-
-
-
-

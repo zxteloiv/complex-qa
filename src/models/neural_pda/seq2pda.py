@@ -1,5 +1,3 @@
-from typing import List
-
 import allennlp.nn.util
 import torch
 import torch.nn as nn
@@ -9,7 +7,7 @@ from allennlp.training.metrics.perplexity import Average
 from utils.nn import prepare_input_mask, get_final_encoder_states
 from .npda import NeuralPDA
 from utils.text_tool import make_human_readable_text
-from .batched_stack import TensorBatchStack
+from models.modules.batched_stack import TensorBatchStack
 import logging
 from ..modules.variational_dropout import VariationalDropout
 from trialbot.data import NSVocabulary

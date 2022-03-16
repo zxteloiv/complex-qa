@@ -6,9 +6,11 @@ from torch.nn import init
 from allennlp.nn.util import masked_softmax
 from ..interfaces.attention import Attention
 
+
 class GeneralizedDotProductAttention(Attention):
     def __init__(self):
         super().__init__()
+        self._last_attn_weights = None
 
     def forward(self, inputs, attend_over, attend_mask = None, structural_mask = None) -> torch.Tensor:
         """

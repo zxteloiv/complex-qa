@@ -4,10 +4,9 @@ from torch import nn
 from torch.nn import functional as F
 
 from allennlp.nn.util import masked_softmax
-from .batched_stack import TensorBatchStack
+from models.modules.batched_stack import TensorBatchStack
 from models.base_s2s.stacked_rnn_cell import StackedRNNCell
 from utils.seq_collector import SeqCollector
-from allennlp.nn.util import min_value_of_dtype
 from .partial_tree_encoder import TopDownTreeEncoder
 from .tree import Tree
 from .rule_scorer import RuleScorer

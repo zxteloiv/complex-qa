@@ -8,7 +8,7 @@ During the tree generation process, the nodes would never be deleted, so it's si
 
 from typing import Optional, Tuple
 import torch
-from .batched_stack import TensorBatchStack
+from models.modules.batched_stack import TensorBatchStack
 _TT = torch.Tensor
 _LT = torch.LongTensor
 _FT = torch.FloatTensor

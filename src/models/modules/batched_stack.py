@@ -1,9 +1,11 @@
 from typing import Optional, Tuple
 import torch
 
+
 class DumpBatchStack:
     def dump(self):
         raise NotImplementedError
+
 
 class BatchStack:
     def reset(self, batch_size, default_device = None):
@@ -238,6 +240,7 @@ class TensorBatchStack(BatchStack, DumpBatchStack):
         mask = self._top_cur.new_ones(upper_bound, upper_bound).tril()[self._top_cur]
         return value, mask
 
+
 if __name__ == '__main__':
     stack = TensorBatchStack(10, 3, 5)
     _, succ = stack.top(batch_size=10)
@@ -246,7 +249,7 @@ if __name__ == '__main__':
     print(stack.dump())
 
     # first push
-    data = torch.randint(100, 200, (10, 5))
+    data = torch.randint(100, 200, (10, 5)).float()
     succ = stack.push(data, torch.ones(10, dtype=torch.long))
     assert (succ == torch.ones(10)).all()
     print("after 1st push:", stack._top_cur)
