@@ -2,7 +2,7 @@ import logging
 import sys, os.path as osp
 sys.path.insert(0, osp.abspath(osp.join(osp.dirname(__file__), '..', '..')))   # up to src
 from trialbot.training import TrialBot, Events, Registry
-from utils.trialbot.setup import setup
+from utils.trialbot.setup_cli import setup
 # import datasets.cfq
 # import datasets.cfq_translator
 import datasets.comp_gen_bundle as cg_bundle

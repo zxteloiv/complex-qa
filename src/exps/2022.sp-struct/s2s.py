@@ -6,13 +6,13 @@ sys.path.insert(0, find_root('.SRC'))
 
 
 def main():
-    from utils.trialbot.setup import setup
-    from libs2s import run_exp
+    from utils.trialbot.setup_cli import setup as setup_cli
+    from libs2s import setup_common_bot
     import datasets.comp_gen_bundle as cg_bundle
     cg_bundle.install_parsed_qa_datasets(Registry._datasets)
     import datasets.cg_bundle_translator
 
-    bot = run_exp(setup(translator='s2s', seed=2021))
+    bot = setup_common_bot(setup_cli(translator='s2s', seed=2021))
     bot.run()
 
 

@@ -15,7 +15,7 @@ from trialbot.training.updater import Updater
 if __name__ == '__main__':
     sys.path.insert(0, osp.abspath(osp.join(osp.dirname(__file__), '..', '..')))
 
-from utils.trialbot.setup import setup
+from utils.trialbot.setup_cli import setup
 from utils.select_optim import select_optim
 from trialbot.data.iterators import RandomIterator
 import datasets.cfq

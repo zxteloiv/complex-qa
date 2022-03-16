@@ -40,7 +40,7 @@ def cfq_seq_qa():
     return p
 
 def main():
-    from utils.trialbot.setup import setup
+    from utils.trialbot.setup_cli import setup
     args = setup(seed=2021)
 
     bot = TrialBot(trial_name="s2s_qa", get_model_func=BaseSeq2Seq.from_param_and_vocab, args=args)

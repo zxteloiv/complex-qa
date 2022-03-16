@@ -15,7 +15,7 @@ def setup(**default_args):
     :param default_args: set args if not found from commandline (sys.argv)
     :return:
     """
-    argv = sys.argv[1:]
+    argv = sys.argv[1:].copy()
     for argname, argval in default_args.items():
         if f'--{argname}' not in argv:
             argv += [f'--{argname}', str(argval)]

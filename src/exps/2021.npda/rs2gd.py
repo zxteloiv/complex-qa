@@ -41,7 +41,7 @@ from utils.trialbot.extensions import collect_garbage
 
 from utils.select_optim import select_optim
 from trialbot.utils.move_to_device import move_to_device
-from utils.trialbot.setup import setup, setup_null_argv
+from utils.trialbot.setup_cli import setup, setup_null_argv
 from utils.lark.restore_cfg import export_grammar
 from utils.cfg import restore_grammar_from_trees, T_CFG, simplify_grammar
 from idioms.export_conf import get_export_conf

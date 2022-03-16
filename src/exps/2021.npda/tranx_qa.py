@@ -1,7 +1,7 @@
 import logging
 import sys, os.path as osp
 sys.path.insert(0, osp.abspath(osp.join(osp.dirname(__file__), '..', '..')))   # up to src
-from utils.trialbot.setup import setup
+from utils.trialbot.setup_cli import setup
 import tranx_bin
 
 def main():

@@ -33,16 +33,29 @@ def get_updater(bot: TrialBot):
     return updater
 
 
-def run_exp(args: argparse.Namespace, get_model_func=None):
+def setup_common_bot(args: argparse.Namespace, get_model_func=None):
     assert args is not None
     from models.base_s2s.base_seq2seq import BaseSeq2Seq
     get_model_func = get_model_func or BaseSeq2Seq.from_param_and_vocab
-    bot = TrialBot(trial_name='enc2dec', get_model_func=get_model_func, args=args)
+    bot = TrialBot(trial_name='enc2dec', get_model_func=get_model_func, args=args, clean_engine=True)
 
     from utils.trialbot.extensions import print_hyperparameters
     from utils.trialbot.extensions import get_metrics, print_models
+    from trialbot.training.extensions import ext_write_info, current_epoch_logger, time_logger, loss_reporter
+
     bot.add_event_handler(Events.STARTED, print_hyperparameters, 90)
     bot.add_event_handler(Events.STARTED, print_models, 100)
+    bot.add_event_handler(Events.STARTED, ext_write_info, 100, msg="TrailBot started")
+    bot.add_event_handler(Events.STARTED, time_logger, 99)
+    bot.add_event_handler(Events.STARTED, ext_write_info, 105, msg=("====" * 20))
+
+    bot.add_event_handler(Events.EPOCH_STARTED, ext_write_info, 105, msg=("----" * 20))
+    bot.add_event_handler(Events.EPOCH_STARTED, ext_write_info, 100, msg="Epoch started")
+    bot.add_event_handler(Events.EPOCH_STARTED, current_epoch_logger, 99)
+    bot.add_event_handler(Events.ITERATION_COMPLETED, loss_reporter, 100)
+
+    bot.add_event_handler(Events.COMPLETED, time_logger, 101)
+    bot.add_event_handler(Events.COMPLETED, ext_write_info, 100, msg="TrailBot completed.")
 
     if not args.test:
         # --------------------- Training -------------------------------
@@ -71,10 +84,9 @@ if __name__ == '__main__':
     # import datasets.cfq
     # import datasets.cfq_translator
 
-    from utils.trialbot.setup import setup
+    from utils.trialbot.setup_cli import setup
     import datasets.comp_gen_bundle as cg_bundle
     cg_bundle.install_parsed_qa_datasets(Registry._datasets)
     import datasets.cg_bundle_translator
 
-    bot = run_exp(setup(seed=2021))
-    bot.run()
+    setup_common_bot(setup(seed=2021)).run()

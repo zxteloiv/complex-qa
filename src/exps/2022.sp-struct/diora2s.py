@@ -8,15 +8,15 @@ sys.path.insert(0, find_root('.SRC'))
 
 
 def main():
-    from utils.trialbot.setup import setup
-    from libs2s import run_exp, Events
+    from utils.trialbot.setup_cli import setup as setup_cli
+    from libs2s import setup_common_bot
     from models.diora.diora2seq import Diora2Seq
     import datasets.comp_gen_bundle as cg_bundle
     cg_bundle.install_parsed_qa_datasets(Registry._datasets)
     import datasets.cg_bundle_translator
 
-    bot = run_exp(setup(translator='tranx', seed=2021, device=0),
-                  get_model_func=Diora2Seq.from_param_and_vocab)
+    bot = setup_common_bot(args=setup_cli(translator='s2s', seed=2021, device=0),
+                           get_model_func=Diora2Seq.from_param_and_vocab)
 
     bot.run()
 
