@@ -1,12 +1,12 @@
 from typing import Optional, List
 import torch.nn
 from models.modules.variational_dropout import VariationalDropout
-from ..interfaces.unified_rnn import EncoderRNNStack, EncoderRNN
+from ..interfaces.encoder import Encoder, EncoderStack
 from allennlp.nn.util import sort_batch_by_length
 from torch.nn.utils.rnn import pack_padded_sequence, PackedSequence, pad_packed_sequence
 
 
-class StackedEncoder(EncoderRNNStack):
+class StackedEncoder(EncoderStack):
     """
     Stacked Encoder over a token sequence. The encoder could be either based on RNN or Transformer.
     The Encoder must not be used with any initial hidden states
@@ -51,7 +51,7 @@ class StackedEncoder(EncoderRNNStack):
         enc_output = layered_output[-1]
         return enc_output
 
-    def get_last_layered_output(self) -> List[torch.Tensor]:
+    def get_layered_output(self) -> List[torch.Tensor]:
         return self._layered_output
 
     def get_layer_num(self):
@@ -135,7 +135,7 @@ class StackedEncoder(EncoderRNNStack):
         return encoder
 
 
-class ExtLSTM(EncoderRNN):
+class ExtLSTM(Encoder):
     def forward(self, inputs, mask, hidden) -> torch.Tensor:
         if hidden is not None:
             raise NotImplementedError('only the none state is supported now.')

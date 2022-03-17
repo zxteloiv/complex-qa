@@ -3,7 +3,8 @@ from typing import Dict
 import torch
 from utils.nn import assign_stacked_states
 from ..base_s2s.base_seq2seq import BaseSeq2Seq
-from .diora_encoder import DioraEncoder, EncoderRNNStack
+from .diora_encoder import DioraEncoder
+from ..interfaces.encoder import EncoderStack
 from utils.nn import prepare_input_mask, seq_cross_ent
 from .hard_diora import DioraTopk
 from .diora import Diora
@@ -130,7 +131,7 @@ class Diora2Seq(BaseSeq2Seq):
         return source, source_mask, chart_output, layered_states, chart_mask
 
     @staticmethod
-    def get_encoder(p) -> 'EncoderRNNStack':
+    def get_encoder(p) -> 'EncoderStack':
         diora_type = p.encoder
         assert diora_type in ('diora', 's-diora'), f'unsupported diora type {diora_type}'
 

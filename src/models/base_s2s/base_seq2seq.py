@@ -5,7 +5,8 @@ from torch import nn
 from trialbot.data.ns_vocabulary import NSVocabulary
 from ..interfaces.attention import Attention as IAttn, VectorContextComposer as AttnComposer
 from ..modules.variational_dropout import VariationalDropout
-from ..interfaces.unified_rnn import RNNStack, EncoderRNNStack, UnifiedRNN
+from ..interfaces.unified_rnn import RNNStack, UnifiedRNN
+from ..interfaces.encoder import EncoderStack
 from utils.nn import filter_cat, prepare_input_mask, seq_cross_ent
 from utils.nn import aggregate_layered_state, assign_stacked_states
 from utils.seq_collector import SeqCollector
@@ -17,7 +18,7 @@ class BaseSeq2Seq(torch.nn.Module):
     def __init__(self,
                  # modules
                  vocab: NSVocabulary,
-                 encoder: EncoderRNNStack,
+                 encoder: EncoderStack,
                  decoder: RNNStack,
                  word_projection: torch.nn.Module,
                  source_embedding: torch.nn.Embedding,
@@ -224,7 +225,7 @@ class BaseSeq2Seq(torch.nn.Module):
         source_embedding = self._src_embedding(source)
         source_embedding = self._src_emb_dropout(source_embedding)
         source_hidden = self._encoder(source_embedding, source_mask)
-        layered_hidden = self._encoder.get_last_layered_output()
+        layered_hidden = self._encoder.get_layered_output()
         if self._enc_dec_trans_usage == 'consistent':
             source_hidden = self._enc_dec_trans(source_hidden)
             layered_hidden = list(map(self._enc_dec_trans, layered_hidden))
@@ -515,7 +516,7 @@ class BaseSeq2Seq(torch.nn.Module):
         return enc_dec_trans_usage
 
     @staticmethod
-    def get_encoder(p) -> EncoderRNNStack:
+    def get_encoder(p) -> EncoderStack:
 
         from .stacked_encoder import StackedEncoder
         use_cell_based_encoder = getattr(p, 'use_cell_based_encoder', False)

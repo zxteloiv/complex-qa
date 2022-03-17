@@ -1,14 +1,14 @@
 from abc import ABC
-from typing import List, Optional, Callable, Any, Tuple, Union, Sequence
+from typing import List, Tuple, Union, Sequence
 import torch
 
 
-T_HIDDEN = Union[None, torch.Tensor, Sequence[torch.Tensor]]
+T_HIDDEN = Union[torch.Tensor, Sequence[torch.Tensor]]
 
 
 class _RNNBase(torch.nn.Module, ABC):
 
-    def get_output_state(self, hidden: Any) -> torch.Tensor:
+    def get_output_state(self, hidden: T_HIDDEN) -> torch.Tensor:
         raise NotImplementedError
 
     def get_input_dim(self) -> int:
@@ -20,60 +20,29 @@ class _RNNBase(torch.nn.Module, ABC):
 
 class UnifiedRNN(_RNNBase, ABC):
 
-    def forward(self, inputs, hidden: Any) -> Tuple[Any, torch.Tensor]:
+    def forward(self, inputs, hidden: T_HIDDEN) -> Tuple[T_HIDDEN, torch.Tensor]:
         # in a pure RNN cell, hidden is something about its internal
         # in a stacked rnn however, hidden is a list of hidden states of each layer
         # they are all unknown structures and thus typed by Any
         raise NotImplementedError
 
-    def init_hidden_states(self, forward_out: torch.Tensor) -> Tuple[Any, torch.Tensor]:
+    def init_hidden_states(self, forward_out: torch.Tensor) -> Tuple[T_HIDDEN, torch.Tensor]:
         """Initialize the hidden states with an unknown internal structure from the forward_out tensor"""
         raise NotImplementedError
 
 
 class RNNStack(_RNNBase, ABC):
-    def forward(self, inputs, hidden: List[Any]) -> Tuple[Any, torch.Tensor]:
+    def forward(self, inputs, hidden: List[T_HIDDEN]) -> Tuple[T_HIDDEN, torch.Tensor]:
         # at least the hidden is a list indicating layers
         raise NotImplementedError
 
     def get_layer_num(self) -> int:
         raise NotImplementedError
 
-    def init_hidden_states(self, tensor_list: List[torch.Tensor]) -> Tuple[Any, torch.Tensor]:
+    def init_hidden_states(self, tensor_list: List[torch.Tensor]) -> Tuple[T_HIDDEN, torch.Tensor]:
         raise NotImplementedError
 
-    def get_layered_output_state(self, hidden: List[Any]) -> List[torch.Tensor]:
-        raise NotImplementedError
-
-
-class _RNNEncoderBase(torch.nn.Module, ABC):
-
-    def is_bidirectional(self) -> bool:
-        raise NotImplementedError
-
-    def get_input_dim(self) -> int:
-        raise NotImplementedError
-
-    def get_output_dim(self) -> int:
-        raise NotImplementedError
-
-
-class EncoderRNN(_RNNEncoderBase, ABC):
-    def forward(self, inputs, mask, hidden) -> torch.Tensor:
-        """returns the output at all timesteps"""
-        raise NotImplementedError
-
-
-class EncoderRNNStack(_RNNEncoderBase, ABC):
-    def get_layer_num(self) -> int:
-        raise NotImplementedError
-
-    def forward(self, inputs, mask) -> Union[torch.Tensor, Tuple[torch.Tensor, List[torch.Tensor]]]:
-        """returns the last encoder output, initialized from zero, without hidden"""
-        raise NotImplementedError
-
-    def get_last_layered_output(self) -> List[torch.Tensor]:
-        """return the output of every layer"""
+    def get_layered_output_state(self, hidden: List[T_HIDDEN]) -> List[torch.Tensor]:
         raise NotImplementedError
 
 
@@ -91,7 +60,7 @@ class HiddenAwareRNN(torch.nn.Module):
         merged = (stacked * weight).sum(2)
         return merged
 
-    def merge_hidden_list(self, hidden_list, weight) -> Any:
+    def merge_hidden_list(self, hidden_list, weight) -> T_HIDDEN:
         """
         Merge the hidden_list using weighted sum.
         Hidden States can not be directly processed therefore they are only possible contained in a list.

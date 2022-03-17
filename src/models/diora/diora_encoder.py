@@ -2,7 +2,7 @@ from typing import Dict, List, Tuple
 import torch
 from torch import nn
 import torch.nn.functional
-from ..interfaces.unified_rnn import EncoderRNNStack
+from ..interfaces.encoder import EncoderStack
 from .base_model import DioraBase
 from utils.preprocessing import nested_list_numbers_to_tensors
 
@@ -19,7 +19,7 @@ CHART = Dict[T_2ndKEY, T_VAL]
 T_INSIDE_TREE = Dict[T_1stKEY, CHART]
 
 
-class DioraEncoder(EncoderRNNStack):
+class DioraEncoder(EncoderStack):
     """Faked Stack, actually only one layer of diora is allowed"""
 
     def forward(self, inputs, mask) -> torch.Tensor:
@@ -102,7 +102,7 @@ class DioraEncoder(EncoderRNNStack):
     def get_layer_num(self) -> int:
         return 1
 
-    def get_last_layered_output(self) -> List[torch.Tensor]:
+    def get_layered_output(self) -> List[torch.Tensor]:
         return [self.last_output]
 
     def __init__(self, diora: 'DioraBase', use_concat_memory: bool = False):

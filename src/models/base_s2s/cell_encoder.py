@@ -1,13 +1,14 @@
 import torch
 from typing import Optional, List, Any
-from ..interfaces.unified_rnn import UnifiedRNN, EncoderRNN
+from ..interfaces.unified_rnn import UnifiedRNN
+from models.interfaces.encoder import Encoder
 from utils.seq_collector import SeqCollector
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence, PackedSequence
 from torch.nn.functional import pad
 from allennlp.nn.util import sort_batch_by_length
 
 
-class CellEncoder(EncoderRNN):
+class CellEncoder(Encoder):
     def forward(self, inputs, mask, hidden) -> torch.Tensor:
         if not self.use_packed_seq:
             return self.forward_tensor_seq(inputs, mask, hidden)
