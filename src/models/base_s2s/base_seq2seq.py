@@ -100,6 +100,23 @@ class BaseSeq2Seq(torch.nn.Module):
     # for possible misspelling error
     get_metrics = get_metric
 
+    def revert_tensor_to_string(self, output_dict: dict) -> dict:
+        """Convert the predicted word ids into discrete tokens"""
+        # predictions: (batch, max_length)
+        output_dict['predicted_tokens'] = make_human_readable_text(
+            output_dict['predictions'], self.vocab, self._target_namespace,
+            stop_ids=[self._eos_id, self._padding_index],
+        )
+        output_dict['source_tokens'] = make_human_readable_text(
+            output_dict['source'], self.vocab, self._source_namespace,
+            stop_ids=[self._padding_index],
+        )
+        output_dict['target_tokens'] = make_human_readable_text(
+            output_dict['target'][:, 1:], self.vocab, self._target_namespace,
+            stop_ids=[self._eos_id, self._padding_index]
+        )
+        return output_dict
+
     def forward(self,
                 source_tokens: torch.LongTensor,
                 target_tokens: torch.LongTensor = None
@@ -120,6 +137,13 @@ class BaseSeq2Seq(torch.nn.Module):
 
         output.update(predictions=preds, logits=logits, target=target)
         return output
+
+    # ========== methods direct called by forward ==============
+
+    def _reset_variational_dropouts(self):
+        for m in self.modules():
+            if isinstance(m, VariationalDropout):
+                m.reset()
 
     def _forward_enc(self, source_tokens):
         # source: (batch, source_length), containing the input word IDs
@@ -171,27 +195,27 @@ class BaseSeq2Seq(torch.nn.Module):
         loss = seq_cross_ent(logits, gold, mask, self._training_avg)
         return loss
 
-    def revert_tensor_to_string(self, output_dict: dict) -> dict:
-        """Convert the predicted word ids into discrete tokens"""
-        # predictions: (batch, max_length)
-        output_dict['predicted_tokens'] = make_human_readable_text(
-            output_dict['predictions'], self.vocab, self._target_namespace,
-            stop_ids=[self._eos_id, self._padding_index],
-        )
-        output_dict['source_tokens'] = make_human_readable_text(
-            output_dict['source'], self.vocab, self._source_namespace,
-            stop_ids=[self._padding_index],
-        )
-        output_dict['target_tokens'] = make_human_readable_text(
-            output_dict['target'][:, 1:], self.vocab, self._target_namespace,
-            stop_ids=[self._eos_id, self._padding_index]
-        )
-        return output_dict
+    def _compute_metrics(self, source_mask, predictions, logits, target, target_mask):
+        # gold, gold_mask: (batch, max_tgt_len - 1)
+        gold = target[:, 1:].contiguous()
+        gold_mask = target_mask[:, 1:].contiguous()
+        # self.bleu(predictions, gold)
+        # batch_xent: (batch,)
+        batch_xent = seq_cross_ent(logits, gold, gold_mask, average='none')
+        for xent in batch_xent:
+            self.ppl(xent)
 
-    def _reset_variational_dropouts(self):
-        for m in self.modules():
-            if isinstance(m, VariationalDropout):
-                m.reset()
+        total_err = ((predictions != gold) * gold_mask).sum(list(range(gold_mask.ndim))[1:]) > 0
+        for instance_err in total_err:
+            self.err_rate(instance_err)
+        self.item_count += predictions.size()[0]
+        for l in source_mask.sum(1):
+            self.src_len(l)
+        for l in gold_mask.sum(1):
+            self.tgt_len(l)
+        return total_err
+
+    # ============= methods called by _forward_enc ===============
 
     def _encode(self, source: torch.LongTensor, source_mask: torch.LongTensor):
         # source: (batch, max_input_length), source sequence token ids
@@ -205,6 +229,8 @@ class BaseSeq2Seq(torch.nn.Module):
             source_hidden = self._enc_dec_trans(source_hidden)
             layered_hidden = list(map(self._enc_dec_trans, layered_hidden))
         return source_hidden, layered_hidden
+
+    # ============= methods called by _prepare_dec ===============
 
     def _init_decoder(self, layer_states, source_mask):
         usage: str = self._enc_dec_trans_usage
@@ -220,14 +246,6 @@ class BaseSeq2Seq(torch.nn.Module):
         hx, _ = self._decoder.init_hidden_states(dec_states)
         return hx
 
-    def _forward_dec_loop(self, step_input, enc_attn_fn, dec_hist_attn_fn, hx: Any):
-        inputs_embedding = self._get_step_embedding(step_input)
-        cell_inp = self._get_cell_input(inputs_embedding, hx, enc_attn_fn, dec_hist_attn_fn)
-        hx, cell_out = self._decoder(cell_inp, hx)
-        proj_inp = self._get_proj_input(cell_out, enc_attn_fn, dec_hist_attn_fn)
-        step_logit = self._get_step_projection(proj_inp)
-        return cell_out, step_logit, hx
-
     def _get_enc_attn_fn(self, source_state, source_mask):
         if 'attn' == self._enc_dec_trans_usage:
             source_state = self._enc_dec_trans(source_state)
@@ -240,7 +258,10 @@ class BaseSeq2Seq(torch.nn.Module):
 
         return enc_attn_fn
 
+    # ============= methods called by _forward_dec ===============
+
     def _get_decoding_loop_len(self, target):
+        """compute the number of steps for the decoder loop"""
         if target is not None:
             num_decoding_steps = target.size()[1] - 1
         else:
@@ -248,6 +269,7 @@ class BaseSeq2Seq(torch.nn.Module):
         return num_decoding_steps
 
     def _choose_rnn_input(self, last_pred, last_gold: Optional):
+        """get the input for each loop step"""
         if self.training and np.random.rand(1).item() < self._scheduled_sampling_ratio:
             # use self-predicted tokens for scheduled sampling in training with _scheduled_sampling_ratio
             # step_inputs: (batch,)
@@ -263,12 +285,6 @@ class BaseSeq2Seq(torch.nn.Module):
             step_inputs = last_gold
         return step_inputs
 
-    def _get_step_embedding(self, step_inp):
-        # inputs_embedding: (batch, embedding_dim)
-        inputs_embedding = self._tgt_embedding(step_inp)
-        inputs_embedding = self._tgt_emb_dropout(inputs_embedding)
-        return inputs_embedding
-
     def _create_runtime_dec_hist_attn_fn(self, mem: SeqCollector, target_mask, timestep: int):
         # build runtime decoder history attention module.
         if self._dec_hist_attn is None:
@@ -283,6 +299,23 @@ class BaseSeq2Seq(torch.nn.Module):
             dec_hist_attn_fn = lambda out: out
 
         return dec_hist_attn_fn
+
+    def _forward_dec_loop(self, step_input, enc_attn_fn, dec_hist_attn_fn, hx: Any):
+        """define each step of the decoder loop"""
+        inputs_embedding = self._get_step_embedding(step_input)
+        cell_inp = self._get_cell_input(inputs_embedding, hx, enc_attn_fn, dec_hist_attn_fn)
+        hx, cell_out = self._decoder(cell_inp, hx)
+        proj_inp = self._get_proj_input(cell_out, enc_attn_fn, dec_hist_attn_fn)
+        step_logit = self._get_step_projection(proj_inp)
+        return cell_out, step_logit, hx
+
+    # ------------- methods called within each decoder step --------------
+
+    def _get_step_embedding(self, step_inp):
+        # inputs_embedding: (batch, embedding_dim)
+        inputs_embedding = self._tgt_embedding(step_inp)
+        inputs_embedding = self._tgt_emb_dropout(inputs_embedding)
+        return inputs_embedding
 
     def _get_cell_input(self, inputs_embedding, hx, enc_attn_fn, dec_hist_attn_fn):
         # compute attention context before the output is updated
@@ -308,25 +341,7 @@ class BaseSeq2Seq(torch.nn.Module):
         step_logit = self._output_projection(proj_input)
         return step_logit
 
-    def _compute_metrics(self, source_mask, predictions, logits, target, target_mask):
-        # gold, gold_mask: (batch, max_tgt_len - 1)
-        gold = target[:, 1:].contiguous()
-        gold_mask = target_mask[:, 1:].contiguous()
-        # self.bleu(predictions, gold)
-        # batch_xent: (batch,)
-        batch_xent = seq_cross_ent(logits, gold, gold_mask, average='none')
-        for xent in batch_xent:
-            self.ppl(xent)
-
-        total_err = ((predictions != gold) * gold_mask).sum(list(range(gold_mask.ndim))[1:]) > 0
-        for instance_err in total_err:
-            self.err_rate(instance_err)
-        self.item_count += predictions.size()[0]
-        for l in source_mask.sum(1):
-            self.src_len(l)
-        for l in gold_mask.sum(1):
-            self.tgt_len(l)
-        return total_err
+    # =================== static and class methods ======================
 
     @classmethod
     def from_param_and_vocab(cls, p, vocab: NSVocabulary):
