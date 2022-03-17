@@ -124,19 +124,19 @@ class BaseSeq2Seq(torch.nn.Module):
                 ) -> Dict[str, torch.Tensor]:
         self._reset_variational_dropouts()
 
-        source, source_mask, state, layer_states, state_mask = self._forward_enc(source_tokens)
-        hx, enc_attn_fn, start = self._prepare_dec(state, layer_states, state_mask)
-        target, target_mask, preds, logits = self._forward_dec(target_tokens, start, enc_attn_fn, hx)
+        layer_states, state_mask = self._forward_enc(source_tokens)
+        hx, enc_attn_fn, start = self._prepare_dec(layer_states, state_mask)
+        preds, logits = self._forward_dec(target_tokens, start, enc_attn_fn, hx)
 
-        output = {'source': source}
+        output = {'source': source_tokens}
         if self.training:
-            output['loss'] = self._compute_loss(logits, target, target_mask)
+            output['loss'] = self._compute_loss(logits, target_tokens)
 
         if target_tokens is not None:
-            total_err = self._compute_metrics(source_mask, preds, logits, target, target_mask)
+            total_err = self._compute_metrics(source_tokens, target_tokens, preds, logits)
             output.update(errno=total_err.tolist())
 
-        output.update(predictions=preds, logits=logits, target=target)
+        output.update(predictions=preds, logits=logits, target=target_tokens)
         return output
 
     # ========== methods direct called by forward ==============
@@ -155,11 +155,11 @@ class BaseSeq2Seq(torch.nn.Module):
         # but if the state is not directly aligned with source,
         # it will be different.
         state_mask = source_mask
-        return source, source_mask, state, layer_states, state_mask
+        return layer_states, state_mask
 
-    def _prepare_dec(self, state, layer_states, state_mask):
+    def _prepare_dec(self, layer_states: List[torch.Tensor], state_mask):
         hx = self._init_decoder(layer_states, state_mask)
-        enc_attn_fn = self._get_enc_attn_fn(state, state_mask)
+        enc_attn_fn = self._get_enc_attn_fn(layer_states[-1], state_mask)
         default_start = state_mask.new_full((state_mask.size()[0],), fill_value=self._start_id)
         return hx, enc_attn_fn, default_start
 
@@ -188,15 +188,18 @@ class BaseSeq2Seq(torch.nn.Module):
         logits = mem.get_stacked_tensor('logit')
         predictions = logits.argmax(dim=-1)
 
-        return target, target_mask, predictions, logits
+        return predictions, logits
 
-    def _compute_loss(self, logits, target, target_mask):
+    def _compute_loss(self, logits, target_tokens):
+        target, target_mask = prepare_input_mask(target_tokens)
         gold = target[:, 1:].contiguous()       # skip the first <START> token and corresponding mask
         mask = target_mask[:, 1:].contiguous()
         loss = seq_cross_ent(logits, gold, mask, self._training_avg)
         return loss
 
-    def _compute_metrics(self, source_mask, predictions, logits, target, target_mask):
+    def _compute_metrics(self, source_tokens, target_tokens, predictions, logits):
+        target, target_mask = prepare_input_mask(target_tokens)
+        source, source_mask = prepare_input_mask(source_tokens)
         # gold, gold_mask: (batch, max_tgt_len - 1)
         gold = target[:, 1:].contiguous()
         gold_mask = target_mask[:, 1:].contiguous()
