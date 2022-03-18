@@ -70,73 +70,12 @@ class StackedEncoder(EncoderStack):
     def is_bidirectional(self) -> bool:
         return self.layer_encs[-1].is_bidirectional()
 
-    @classmethod
-    def get_encoder(cls, p):
-        """
-        p.enc_dropout = 0.
-        p.enc_out_dim = xxx # otherwise p.hidden_sz is used
-        p.emb_sz = 300
-        p.encoder = "lstm"  # lstm, transformer, bilstm, aug_lstm, aug_bilstm
-        p.num_heads = 8     # heads for transformer when used
-        """
-        from allennlp.modules.seq2seq_encoders import PytorchSeq2SeqWrapper, AugmentedLstmSeq2SeqEncoder
-        from allennlp.modules.seq2seq_encoders import StackedBidirectionalLstmSeq2SeqEncoder
-
-        dropout = getattr(p, 'enc_dropout', getattr(p, 'dropout', 0.))
-        hid_sz = getattr(p, 'enc_out_dim', p.hidden_sz)
-
-        if p.encoder == "lstm":
-            enc_cls = lambda floor: PytorchSeq2SeqWrapper(
-                torch.nn.LSTM(p.emb_sz if floor == 0 else hid_sz, hid_sz, batch_first=True)
-            )
-        elif p.encoder == "gru":
-            enc_cls = lambda floor: PytorchSeq2SeqWrapper(
-                torch.nn.GRU(p.emb_sz if floor == 0 else hid_sz, hid_sz, batch_first=True)
-            )
-        elif p.encoder == "transformer":
-            from models.transformer.encoder import TransformerEncoder
-            enc_cls = lambda floor: TransformerEncoder(
-                input_dim=p.emb_sz if floor == 0 else hid_sz,
-                hidden_dim=hid_sz,
-                num_layers=1,
-                num_heads=p.num_heads,
-                feedforward_hidden_dim=hid_sz,
-                feedforward_dropout=dropout,
-                residual_dropout=dropout,
-                attention_dropout=0.,
-                use_positional_embedding=(floor == 0),
-            )
-        elif p.encoder == "bilstm":
-            enc_cls = lambda floor: PytorchSeq2SeqWrapper(torch.nn.LSTM(
-                p.emb_sz if floor == 0 else hid_sz * 2, hid_sz, bidirectional=True, batch_first=True,
-            ))
-        elif p.encoder == "torch_bilstm":
-            enc_cls = lambda floor: ExtLSTM(torch.nn.LSTM(
-                p.emb_sz if floor == 0 else hid_sz * 2, hid_sz, bidirectional=True, batch_first=True
-            ))
-
-        elif p.encoder == "aug_lstm":
-            enc_cls = lambda floor: AugmentedLstmSeq2SeqEncoder(p.emb_sz if floor == 0 else hid_sz, hid_sz,
-                                                                recurrent_dropout_probability=dropout,
-                                                                use_highway=True, )
-        elif p.encoder == "aug_bilstm":
-            enc_cls = lambda floor: StackedBidirectionalLstmSeq2SeqEncoder(
-                p.emb_sz if floor == 0 else hid_sz, hid_sz, num_layers=1,
-                recurrent_dropout_probability=dropout,
-                use_highway=True,
-            )
-        else:
-            raise NotImplementedError
-
-        encoder = StackedEncoder([enc_cls(floor) for floor in range(p.num_enc_layers)],
-                                 input_size=p.emb_sz,
-                                 output_size=hid_sz,
-                                 input_dropout=dropout)
-        return encoder
-
 
 class ExtLSTM(Encoder):
-    def forward(self, inputs, mask, hidden) -> torch.Tensor:
+    """
+    A wrapper for nn.lstm supports both tensor and padded_seq protocols, used for StackedEncoder.
+    """
+    def forward(self, inputs, mask, hidden=None) -> torch.Tensor:
         if hidden is not None:
             raise NotImplementedError('only the none state is supported now.')
 

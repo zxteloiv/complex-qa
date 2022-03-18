@@ -4,9 +4,10 @@ import torch
 from torch import nn
 from trialbot.data.ns_vocabulary import NSVocabulary
 from ..interfaces.attention import Attention as IAttn, VectorContextComposer as AttnComposer
+from ..interfaces.loss_module import LossModule
 from ..modules.variational_dropout import VariationalDropout
 from ..interfaces.unified_rnn import RNNStack, UnifiedRNN
-from ..interfaces.encoder import EncoderStack
+from ..interfaces.encoder import EmbedAndEncode
 from utils.nn import filter_cat, prepare_input_mask, seq_cross_ent
 from utils.nn import aggregate_layered_state, assign_stacked_states
 from utils.seq_collector import SeqCollector
@@ -18,10 +19,9 @@ class BaseSeq2Seq(torch.nn.Module):
     def __init__(self,
                  # modules
                  vocab: NSVocabulary,
-                 encoder: EncoderStack,
+                 embed_encoder: EmbedAndEncode,
                  decoder: RNNStack,
                  word_projection: torch.nn.Module,
-                 source_embedding: torch.nn.Embedding,
                  target_embedding: torch.nn.Embedding,
                  enc_attention: IAttn = None,
                  dec_hist_attn: IAttn = None,
@@ -41,7 +41,6 @@ class BaseSeq2Seq(torch.nn.Module):
 
                  # training_configuration
                  scheduled_sampling_ratio: float = 0.,
-                 enc_dropout: float = 0,
                  dec_dropout: float = .1,
                  training_average: Literal["token", "batch", "none"] = "batch",
                  ):
@@ -50,13 +49,13 @@ class BaseSeq2Seq(torch.nn.Module):
         self._enc_attn = enc_attention
         self._dec_hist_attn = dec_hist_attn
 
+        self._embed_encoder = embed_encoder
+
         self._dec_inp_attn_comp = dec_inp_attn_comp
         self._proj_inp_attn_comp = proj_inp_attn_comp
 
         self._scheduled_sampling_ratio = scheduled_sampling_ratio
-        self._encoder = encoder
         self._decoder = decoder
-        self._src_embedding = source_embedding
         self._tgt_embedding = target_embedding
         self._enc_dec_trans = enc_dec_transformer
         self._enc_dec_trans_usage = enc_dec_transform_usage
@@ -70,7 +69,6 @@ class BaseSeq2Seq(torch.nn.Module):
 
         self._output_projection = word_projection
 
-        self._src_emb_dropout = VariationalDropout(enc_dropout, on_the_fly=True)
         self._tgt_emb_dropout = VariationalDropout(dec_dropout, on_the_fly=False)
         self._proj_inp_dropout = VariationalDropout(dec_dropout, on_the_fly=False)
 
@@ -124,7 +122,7 @@ class BaseSeq2Seq(torch.nn.Module):
                 ) -> Dict[str, torch.Tensor]:
         self._reset_variational_dropouts()
 
-        layer_states, state_mask = self._forward_enc(source_tokens)
+        layer_states, state_mask = self._embed_encoder(source_tokens)
         hx, enc_attn_fn, start = self._prepare_dec(layer_states, state_mask)
         preds, logits = self._forward_dec(target_tokens, start, enc_attn_fn, hx)
 
@@ -146,18 +144,9 @@ class BaseSeq2Seq(torch.nn.Module):
             if isinstance(m, VariationalDropout):
                 m.reset()
 
-    def _forward_enc(self, source_tokens):
-        # source: (batch, source_length), containing the input word IDs
-        # target: (batch, target_length), containing the output IDs
-        source, source_mask = prepare_input_mask(source_tokens, self._padding_index)
-        state, layer_states = self._encode(source, source_mask)
-        # by default, state_mask is the same as the source mask,
-        # but if the state is not directly aligned with source,
-        # it will be different.
-        state_mask = source_mask
-        return layer_states, state_mask
-
     def _prepare_dec(self, layer_states: List[torch.Tensor], state_mask):
+        if self._enc_dec_trans_usage == 'consistent':
+            layer_states = list(map(self._enc_dec_trans, layer_states))
         hx = self._init_decoder(layer_states, state_mask)
         enc_attn_fn = self._get_enc_attn_fn(layer_states[-1], state_mask)
         default_start = state_mask.new_full((state_mask.size()[0],), fill_value=self._start_id)
@@ -195,6 +184,8 @@ class BaseSeq2Seq(torch.nn.Module):
         gold = target[:, 1:].contiguous()       # skip the first <START> token and corresponding mask
         mask = target_mask[:, 1:].contiguous()
         loss = seq_cross_ent(logits, gold, mask, self._training_avg)
+        if isinstance(self._embed_encoder, LossModule):
+            loss = loss + self._embed_encoder.get_loss()
         return loss
 
     def _compute_metrics(self, source_tokens, target_tokens, predictions, logits):
@@ -219,26 +210,11 @@ class BaseSeq2Seq(torch.nn.Module):
             self.tgt_len(l)
         return total_err
 
-    # ============= methods called by _forward_enc ===============
-
-    def _encode(self, source: torch.LongTensor, source_mask: torch.LongTensor):
-        # source: (batch, max_input_length), source sequence token ids
-        # source_mask: (batch, max_input_length), source sequence padding mask
-        # source_embedding: (batch, max_input_length, embedding_sz)
-        source_embedding = self._src_embedding(source)
-        source_embedding = self._src_emb_dropout(source_embedding)
-        source_hidden = self._encoder(source_embedding, source_mask)
-        layered_hidden = self._encoder.get_layered_output()
-        if self._enc_dec_trans_usage == 'consistent':
-            source_hidden = self._enc_dec_trans(source_hidden)
-            layered_hidden = list(map(self._enc_dec_trans, layered_hidden))
-        return source_hidden, layered_hidden
-
     # ============= methods called by _prepare_dec ===============
 
     def _init_decoder(self, layer_states, source_mask):
         usage: str = self._enc_dec_trans_usage
-        use_first_half: bool = self._encoder.is_bidirectional() and usage not in ('dec_init', 'consistent')
+        use_first_half: bool = self._embed_encoder.is_bidirectional() and usage not in ('dec_init', 'consistent')
 
         agg_src = aggregate_layered_state(layer_states, source_mask, self._strategy, use_first_half)
         if usage == 'dec_init':
@@ -345,235 +321,3 @@ class BaseSeq2Seq(torch.nn.Module):
         step_logit = self._output_projection(proj_input)
         return step_logit
 
-    # =================== static and class methods ======================
-
-    @classmethod
-    def from_param_and_vocab(cls, p, vocab: NSVocabulary):
-        """
-        Build the seq2seq model with hyper-parameters.
-        Since S2S is widely used and can be implemented task-agnostic,
-        the builder for trialbot is provided as default.
-        Because we want a flat configuration file and use it only with the BaseSeq2Seq model,
-        the model is responsible for providing definitions.
-
-        p.emb_sz = 256
-        p.src_namespace = 'ns_q'
-        p.tgt_namespace = 'ns_lf'
-        p.hidden_sz = 128
-        p.dec_in_dim = p.hidden_sz # by default
-        p.dec_out_dim = p.hidden_sz # by default
-        p.proj_in_dim = p.hidden_sz # by default
-        p.enc_attn = "bilinear"
-        p.dec_hist_attn = "dot_product"
-        p.dec_inp_composer = 'cat_mapping'
-        p.dec_inp_comp_activation = 'mish'
-        p.proj_inp_composer = 'cat_mapping'
-        p.proj_inp_comp_activation = 'mish'
-        p.enc_dec_trans_act = 'linear'
-        p.enc_dec_trans_usage = 'consistent'
-        p.enc_dec_trans_forced = True
-        p.use_cell_based_encoder = False
-        p.encoder = "bilstm"
-        p.cell_encoder_is_bidirectional = False
-        p.num_enc_layers = 2
-        p.decoder = "lstm"
-        p.num_dec_layers = 2
-        p.dropout = .2
-        p.enc_dropout = p.dropout # by default
-        p.dec_dropout = p.dropout # by default
-        p.max_decoding_step = 100
-        p.scheduled_sampling = .1
-        p.decoder_init_strategy = "forward_last_parallel"
-        p.tied_decoder_embedding = True
-        p.src_emb_pretrained_file = "~/.glove/glove.6B.100d.txt.gz"
-        """
-        from trialbot.data import START_SYMBOL, END_SYMBOL
-        from ..modules.attention_wrapper import get_wrapped_attention
-        from ..modules.attention_composer import get_attn_composer
-        from .stacked_rnn_cell import StackedRNNCell
-
-        emb_sz = p.emb_sz
-        source_embedding, target_embedding = cls._get_embeddings(p, vocab)
-
-        encoder = cls.get_encoder(p)
-        enc_out_dim = encoder.get_output_dim()
-        dec_in_dim = getattr(p, 'dec_in_dim', p.hidden_sz)
-        dec_out_dim = getattr(p, 'dec_out_dim', p.hidden_sz)
-        proj_in_dim = getattr(p, 'proj_in_dim', p.hidden_sz)
-
-        trans_module, _usages = cls._get_transformation_module(p, encoder.is_bidirectional(), enc_out_dim, dec_out_dim)
-        trans_usage_string = cls._get_trans_usage_string(p, trans_module, _usages)
-
-        # Initialize attentions. And compute the dimension requirements for all attention modules
-        # the encoder attention size depends on the transformation usage
-        enc_attn_sz = dec_out_dim if trans_usage_string in ('consistent', 'attn') else enc_out_dim
-        enc_attn = get_wrapped_attention(p.enc_attn, dec_out_dim, enc_attn_sz)
-        # dec output attend over previous dec outputs, thus attn_context dimension == dec_output_dim
-        dec_hist_attn = get_wrapped_attention(p.dec_hist_attn, dec_out_dim, dec_out_dim)
-        attn_sz = 0 if dec_hist_attn is None else dec_out_dim
-        attn_sz += 0 if enc_attn is None else enc_attn_sz
-        dec_inp_composer = get_attn_composer(p.dec_inp_composer, attn_sz, emb_sz, dec_in_dim, p.dec_inp_comp_activation)
-        proj_inp_composer = get_attn_composer(p.proj_inp_composer, attn_sz, dec_out_dim, proj_in_dim,
-                                              p.proj_inp_comp_activation)
-        if enc_attn is not None or dec_hist_attn is not None:
-            assert dec_inp_composer is not None and proj_inp_composer is not None, "Attention must be composed"
-
-        enc_dropout = getattr(p, 'enc_dropout', getattr(p, 'dropout', 0.))
-        dec_dropout = getattr(p, 'dec_dropout', getattr(p, 'dropout', 0.))
-        rnns = cls.get_stacked_rnns(p.decoder, dec_in_dim, dec_out_dim, p.num_dec_layers, dec_dropout)
-        decoder = StackedRNNCell(rnns, dec_dropout)
-
-        word_proj = nn.Linear(proj_in_dim, vocab.get_vocab_size(p.tgt_namespace))
-        if p.tied_decoder_embedding:
-            assert proj_in_dim == emb_sz, f"Tied embeddings must have the same dimensions, proj{proj_in_dim} != emb{emb_sz}"
-            word_proj.weight = target_embedding.weight  # tied embedding
-
-        model = cls(
-            vocab=vocab,
-            encoder=encoder,
-            decoder=decoder,
-            word_projection=word_proj,
-            source_embedding=source_embedding,
-            target_embedding=target_embedding,
-            enc_attention=enc_attn,
-            dec_hist_attn=dec_hist_attn,
-            dec_inp_attn_comp=dec_inp_composer,
-            proj_inp_attn_comp=proj_inp_composer,
-            enc_dec_transformer=trans_module,
-            source_namespace=p.src_namespace,
-            target_namespace=p.tgt_namespace,
-            start_symbol=START_SYMBOL,
-            eos_symbol=END_SYMBOL,
-            padding_index=0,
-            max_decoding_step=p.max_decoding_step,
-            decoder_init_strategy=p.decoder_init_strategy,
-            enc_dec_transform_usage=trans_usage_string,
-            scheduled_sampling_ratio=p.scheduled_sampling,
-            enc_dropout=enc_dropout,
-            dec_dropout=dec_dropout,
-            training_average=getattr(p, "training_average", "batch"),
-        )
-        return model
-
-    @staticmethod
-    def _get_embeddings(p, vocab):
-        emb_sz = p.emb_sz
-        src_pretrain_file = getattr(p, 'src_emb_pretrained_file', None)
-        if src_pretrain_file is None:
-            source_embedding = nn.Embedding(num_embeddings=vocab.get_vocab_size(p.src_namespace),
-                                            embedding_dim=emb_sz,
-                                            padding_idx=0,
-                                            )
-        else:
-            from allennlp.modules.token_embedders import Embedding
-            source_embedding = Embedding(embedding_dim=emb_sz,
-                                         num_embeddings=vocab.get_vocab_size(p.src_namespace),
-                                         vocab_namespace=p.src_namespace,
-                                         padding_index=0,
-                                         pretrained_file=src_pretrain_file,
-                                         vocab=vocab)
-        if p.src_namespace == p.tgt_namespace:
-            target_embedding = source_embedding
-        else:
-            target_embedding = nn.Embedding(num_embeddings=vocab.get_vocab_size(p.tgt_namespace), embedding_dim=emb_sz)
-
-        return source_embedding, target_embedding
-
-    @staticmethod
-    def _get_transformation_module(p, enc_is_bidirectional: bool, enc_out_dim: int, dec_out_dim: int):
-        import allennlp.nn
-        # autodetect for the necessity of the transformation module
-        # expecting the dimensions matchs between the decoder and encoder, otherwise a transformer is introduced.
-        trans_for_dec_init = not (p.decoder_init_strategy.startswith('zero')
-                                  or (enc_is_bidirectional and dec_out_dim * 2 == enc_out_dim)
-                                  or (not enc_is_bidirectional and dec_out_dim == enc_out_dim))
-        # expecting the encoder output and decoder output matches when attention is dot-product,
-        # other attention types will transform the output dimension on their own.
-        trans_for_attn = (p.enc_attn == 'dot_product' and enc_out_dim != dec_out_dim)
-        # the transformer is configured to be
-        forced_transformer: bool = getattr(p, 'enc_dec_trans_forced', False)
-        enc_dec_transformer = None
-        if trans_for_attn or trans_for_dec_init or forced_transformer:
-            enc_dec_transformer = nn.Sequential(
-                nn.Linear(enc_out_dim, dec_out_dim),
-                allennlp.nn.Activation.by_name(getattr(p, 'enc_dec_trans_act', 'linear'))(),
-            )
-        return enc_dec_transformer, (trans_for_dec_init, trans_for_attn)
-
-    @staticmethod
-    def _get_trans_usage_string(p, trans_module, usage):
-        used_by_dec_init, used_by_attn = usage
-        # when transformer is present, check if the consistent transformation is preferred.
-        # if it is so, a mere dec-init or attn usage will get overwritten
-        # consistent will not work if the transformer is unavailable
-        preferred_consistent: bool = getattr(p, 'enc_dec_trans_usage', 'consistent').lower() == 'consistent'
-        if preferred_consistent and trans_module is not None:
-            enc_dec_trans_usage = "consistent"  # the output will be transformed immediately and never in the future
-        elif used_by_dec_init:
-            enc_dec_trans_usage = "dec_init"    # the output will be only transformed when initializing the decoder
-        elif used_by_attn:
-            enc_dec_trans_usage = "attn"    # the output will be only transformed when computing attentions
-        else:
-            enc_dec_trans_usage = ""    # no need at all
-
-        return enc_dec_trans_usage
-
-    @staticmethod
-    def get_encoder(p) -> EncoderStack:
-
-        from .stacked_encoder import StackedEncoder
-        use_cell_based_encoder = getattr(p, 'use_cell_based_encoder', False)
-        if not use_cell_based_encoder:
-            return StackedEncoder.get_encoder(p)
-
-        else:
-            dropout = getattr(p, 'enc_dropout', getattr(p, 'dropout', 0.))
-            hid_sz = getattr(p, 'enc_out_dim', p.hidden_sz)
-            rnns = BaseSeq2Seq.get_stacked_rnns(p.encoder, p.emb_sz, hid_sz, p.num_enc_layers, dropout)
-            from .cell_encoder import CellEncoder
-            bid_cell = getattr(p, 'cell_encoder_is_bidirectional', False)
-            b_rnns = BaseSeq2Seq.get_stacked_rnns(p.encoder, p.emb_sz, hid_sz, p.num_enc_layers, dropout)
-            use_pseq = getattr(p, 'cell_encoder_uses_packed_sequence', False)
-            return StackedEncoder([CellEncoder(rnn, brnn, use_pseq) if bid_cell else CellEncoder(rnn, None, use_pseq)
-                                   for rnn, brnn in zip(rnns, b_rnns)],
-                                  input_dropout=dropout)
-
-    @staticmethod
-    def get_stacked_rnns(cell_type: str, inp_sz: int, hid_sz: int, num_layers: int,
-                         h_dropout: float, onlstm_chunk_sz: int = 10,
-                         ) -> List[UnifiedRNN]:
-        from ..modules.torch_rnn_wrapper import TorchRNNWrapper as RNNWrapper
-        from ..modules.variational_dropout import VariationalDropout
-
-        def _get_cell_in(floor): return inp_sz if floor == 0 else hid_sz
-        def _get_h_vd(d): return VariationalDropout(d, on_the_fly=False) if d > 0 else None
-
-        rnns = cls = None
-        if cell_type == 'typed_rnn':
-            from ..modules.sym_typed_rnn_cell import SymTypedRNNCell
-            rnns = [SymTypedRNNCell(_get_cell_in(floor), hid_sz, "tanh", _get_h_vd(h_dropout))
-                    for floor in range(num_layers)]
-
-        elif cell_type == 'onlstm':
-            from ..onlstm.onlstm import ONLSTMCell
-            rnns = [ONLSTMCell(_get_cell_in(floor), hid_sz, onlstm_chunk_sz, _get_h_vd(h_dropout))
-                    for floor in range(num_layers)]
-
-        elif cell_type == 'ind_rnn':
-            from ..modules.independent_rnn import IndRNNCell
-            rnns = [IndRNNCell(_get_cell_in(floor), hid_sz) for floor in range(num_layers)]
-
-        elif cell_type == "lstm":
-            cls = torch.nn.LSTMCell
-        elif cell_type == "gru":
-            cls = torch.nn.GRUCell
-        elif cell_type == "rnn":
-            cls = torch.nn.RNNCell
-        else:
-            raise ValueError(f"RNN type of {cell_type} not found.")
-
-        if rnns is None:
-            rnns = [RNNWrapper(cls(_get_cell_in(floor), hid_sz), _get_h_vd(h_dropout))
-                    for floor in range(num_layers)]
-
-        return rnns

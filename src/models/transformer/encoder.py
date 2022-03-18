@@ -7,10 +7,11 @@ from allennlp.modules import FeedForward
 from utils.nn import add_positional_features, add_depth_features_to_single_position
 from allennlp.nn import Activation
 from allennlp.modules.layer_norm import LayerNorm
-
+from ..interfaces.encoder import Encoder
 from .multi_head_attention import MultiHeadSelfAttention
 
-class TransformerEncoder(torch.nn.Module):
+
+class TransformerEncoder(Encoder):
     def __init__(self,
                  input_dim: int,  # input embedding dimension
                  hidden_dim: int = None,
@@ -63,7 +64,7 @@ class TransformerEncoder(torch.nn.Module):
         self.hidden_dim = hidden_dim
         self._use_positional_embedding = use_positional_embedding
 
-    def forward(self, inputs: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+    def forward(self, inputs: torch.Tensor, mask: torch.Tensor, hidden=None) -> torch.Tensor:
         output_tensor = add_positional_features(inputs) if self._use_positional_embedding else inputs
 
         for (attention,

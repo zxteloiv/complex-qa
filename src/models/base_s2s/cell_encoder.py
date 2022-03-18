@@ -9,7 +9,7 @@ from allennlp.nn.util import sort_batch_by_length
 
 
 class CellEncoder(Encoder):
-    def forward(self, inputs, mask, hidden) -> torch.Tensor:
+    def forward(self, inputs, mask, hidden=None) -> torch.Tensor:
         if not self.use_packed_seq:
             return self.forward_tensor_seq(inputs, mask, hidden)
 

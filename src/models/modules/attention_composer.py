@@ -93,7 +93,7 @@ cls_mappings = {
 
 
 def get_attn_composer(cls_type: str, context_dim: int, vector_dim: int, output_dim: int, activation: str):
-    if cls_type == "none":
+    if cls_type in ("none", "passthrough", "linear"):
         return NoneComposer(vector_dim, output_dim, activation)
     elif cls_type == "cat":
         assert output_dim == context_dim + vector_dim, "CatComposer will concatenate the context and vector"
