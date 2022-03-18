@@ -86,9 +86,3 @@ class SeqEmbedAndDiora(SeqEmbedEncoder):
             self._loss = loss
 
         return layered_hidden, state_mask
-
-    # @classmethod
-    # def from_param_and_vocab(cls, p, vocab):
-    #     model = super().from_param_and_vocab(p, vocab)
-    #     model.use_diora_loss = getattr(p, 'diora_loss_enabled', False)
-    #     return model
