@@ -275,7 +275,7 @@ def aggregate_layered_state(layer_state: List[torch.Tensor],
     :param use_first_half: use the first half if the encoder output is a concatenated vector of bidirectional outputs
     :return: a list of selected states of each layer to be assigned to the decoder
     """
-    m = re.match(r"(avg|max|forward_last|zero)_(lowest|all|parallel)", strategy)
+    m = re.match(r"(avg|max|forward_last|zero)_?(lowest|all|parallel)?", strategy)
     if not m:
         raise ValueError(f"specified strategy '{strategy}' not supported")
     agg_stg, assign_stg = m.group(1), m.group(2)
@@ -316,7 +316,7 @@ def assign_stacked_states(src_agg: List[torch.Tensor], num_layers: int, strategy
     :param strategy:
     :return:
     """
-    m = re.match(r"(avg|max|forward_last|zero)_(lowest|all|parallel)", strategy)
+    m = re.match(r"(avg|max|forward_last|zero)?_?(lowest|all|parallel)", strategy)
     if not m:
         raise ValueError(f"specified strategy '{strategy}' not supported")
     policy = m.group(2)
