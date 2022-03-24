@@ -92,7 +92,9 @@ class RNNListMixin:
 
 
 class EncoderStackMixin(RNNListMixin):
-    def get_stacked_rnn_encoder(self) -> EncoderStack:
+    @staticmethod
+    def get_stacked_rnn_encoder(encoder_type: str, inp_sz, hid_sz, num_layers, dropout,
+                                num_heads=12) -> EncoderStack:
         """
         p.enc_dropout = 0.
         p.enc_out_dim = xxx # otherwise p.hidden_sz is used
@@ -103,11 +105,8 @@ class EncoderStackMixin(RNNListMixin):
         from allennlp.modules.seq2seq_encoders import PytorchSeq2SeqWrapper as PTRNNWrapper
         from allennlp.modules.seq2seq_encoders import AugmentedLstmSeq2SeqEncoder
         from allennlp.modules.seq2seq_encoders import StackedBidirectionalLstmSeq2SeqEncoder
-        p = self.p
 
-        dropout = getattr(p, 'enc_dropout', getattr(p, 'dropout', 0.))
-        hid_sz = getattr(p, 'enc_out_dim', p.hidden_sz)
-        def _get_inp_sz(floor: int): return p.emb_sz if floor == 0 else hid_sz
+        def _get_inp_sz(floor: int): return inp_sz if floor == 0 else hid_sz
 
         enc_classes = dict(
             lstm=lambda floor: PTRNNWrapper(nn.LSTM(_get_inp_sz(floor), hid_sz, batch_first=True)),
@@ -129,7 +128,7 @@ class EncoderStackMixin(RNNListMixin):
             transformer=lambda floor: TransformerEncoder(
                 _get_inp_sz(floor), hid_sz,
                 num_layers=1,
-                num_heads=p.num_heads,
+                num_heads=num_heads,
                 feedforward_hidden_dim=hid_sz,
                 feedforward_dropout=dropout,
                 residual_dropout=dropout,
@@ -138,43 +137,42 @@ class EncoderStackMixin(RNNListMixin):
             ),
         )
 
-        enc_cls = enc_classes.get(p.encoder)
+        enc_cls = enc_classes.get(encoder_type)
         assert enc_cls is not None
-        encoder = StackedEncoder([enc_cls(floor) for floor in range(p.num_enc_layers)],
-                                 input_size=p.emb_sz,
+        encoder = StackedEncoder([enc_cls(floor) for floor in range(num_layers)],
+                                 input_size=inp_sz,
                                  output_size=hid_sz,
                                  input_dropout=dropout)
         return encoder
 
-    def get_diora_encoder(self) -> EncoderStack:
+    @staticmethod
+    def get_diora_encoder(encoder_type: str, inp_sz, hid_sz, concat_outside: bool = False) -> EncoderStack:
         from ..diora.hard_diora import DioraTopk
         from ..diora.diora import Diora
         from ..diora.diora_encoder import DioraEncoder
 
-        p = self.p
-        diora_type = p.encoder
-        assert diora_type in ('diora', 's-diora'), f'unsupported diora type {diora_type}'
+        assert encoder_type in ('diora', 's-diora'), f'unsupported diora type {encoder_type}'
 
         diora_cls = {
             'diora': Diora,
             's-diora': DioraTopk,
-        }.get(diora_type)
+        }.get(encoder_type)
 
-        hid_sz = getattr(p, 'enc_out_dim', p.hidden_sz)
-        diora_kwargs = getattr(p, 'diora_kwargs', dict(size=hid_sz, input_size=p.emb_sz))
-        diora = diora_cls.from_kwargs_dict(diora_kwargs)
-        enc = DioraEncoder(diora, getattr(p, 'diora_concat_outside', False))
+        diora = diora_cls.from_kwargs_dict(dict(size=hid_sz, input_size=inp_sz))
+        enc = DioraEncoder(diora, concat_outside)
         return enc
 
     def get_stacked_cell_encoder(self) -> EncoderStack:
         p = self.p
         dropout = getattr(p, 'enc_dropout', getattr(p, 'dropout', 0.))
         hid_sz = getattr(p, 'enc_out_dim', p.hidden_sz)
-        rnns = self.get_stacked_rnns(p.encoder, p.emb_sz, hid_sz, p.num_enc_layers, dropout)
-        from .cell_encoder import CellEncoder
         bid_cell = getattr(p, 'cell_encoder_is_bidirectional', False)
-        b_rnns = self.get_stacked_rnns(p.encoder, p.emb_sz, hid_sz, p.num_enc_layers, dropout)
         use_pseq = getattr(p, 'cell_encoder_uses_packed_sequence', False)
+
+        rnns = self.get_stacked_rnns(p.encoder, p.emb_sz, hid_sz, p.num_enc_layers, dropout)
+        b_rnns = self.get_stacked_rnns(p.encoder, p.emb_sz, hid_sz, p.num_enc_layers, dropout)
+
+        from .cell_encoder import CellEncoder
         return StackedEncoder([CellEncoder(rnn, brnn, use_pseq)
                                if bid_cell else
                                CellEncoder(rnn, None, use_pseq)
@@ -183,13 +181,18 @@ class EncoderStackMixin(RNNListMixin):
 
     def get_encoder_stack(self) -> EncoderStack:
         p = self.p
+        dropout = getattr(p, 'enc_dropout', getattr(p, 'dropout', 0.))
+        hid_sz = getattr(p, 'enc_out_dim', p.hidden_sz)
+        num_heads = getattr(p, 'num_heads', 16 if hid_sz % 16 == 0 else 10)
+
         if 'diora' in p.encoder:
-            return self.get_diora_encoder()
+            concat = getattr(p, 'diora_concat_outside', False)
+            return self.get_diora_encoder(p.encoder, p.emb_sz, hid_sz, concat)
 
         if getattr(p, 'use_cell_based_encoder', False):
             return self.get_stacked_cell_encoder()
 
-        return self.get_stacked_rnn_encoder()
+        return self.get_stacked_rnn_encoder(p.encoder, p.emb_sz, hid_sz, p.num_enc_layers, dropout, num_heads)
 
 
 class EmbEncBundleMixin:

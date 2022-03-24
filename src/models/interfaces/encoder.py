@@ -51,7 +51,7 @@ class EmbedAndEncode(torch.nn.Module, ABC):
     but another popular choice would be a wrapper of BERT models.
     """
     def forward(self, tokens: torch.Tensor) -> Tuple[List[torch.Tensor], torch.Tensor]:
-        """accepts the token id sequence, """
+        """accepts the token id sequence, returns layered states and state masks"""
         raise NotImplementedError
 
     def is_bidirectional(self):
