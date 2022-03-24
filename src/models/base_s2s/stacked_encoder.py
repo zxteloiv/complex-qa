@@ -32,10 +32,7 @@ class StackedEncoder(EncoderStack):
         self.input_dropout = VariationalDropout(input_dropout, on_the_fly=True)
         self._layered_output = None
 
-    def forward(self,
-                inputs: torch.Tensor,
-                mask: Optional[torch.LongTensor],
-                ):
+    def forward(self, inputs: torch.Tensor, mask: Optional[torch.LongTensor]):
         self._layered_output = None
 
         last_output = inputs
@@ -75,12 +72,9 @@ class ExtLSTM(Encoder):
     """
     A wrapper for nn.lstm supports both tensor and padded_seq protocols, used for StackedEncoder.
     """
-    def forward(self, inputs, mask, hidden=None) -> torch.Tensor:
-        if hidden is not None:
-            raise NotImplementedError('only the none state is supported now.')
-
+    def forward(self, inputs, mask) -> torch.Tensor:
         if not self.use_packed_sequence:
-            out, _ = self.lstm(inputs, hidden)
+            out, _ = self.lstm(inputs)
             return out
 
         # mask: (batch, length)
@@ -92,15 +86,14 @@ class ExtLSTM(Encoder):
             sorting_indices,  # (batch,), indices: original -> sorted
         ) = sort_batch_by_length(inputs, mask.sum(-1))
 
-        packed_sequence_input: PackedSequence = pack_padded_sequence(
+        packed_input: PackedSequence = pack_padded_sequence(
             sorted_inputs,
             sorted_sequence_lengths.data.tolist(),
             batch_first=True,
         )
-        packed_sequence_output, _ = self.lstm(packed_sequence_input, None)
-        unpacked_sequence_tensor, _ = pad_packed_sequence(packed_sequence_output,
-                                                          batch_first=True)
-        out = unpacked_sequence_tensor.index_select(0, restoration_indices)
+        packed_output, _ = self.lstm(packed_input)
+        unpacked_tensor, _ = pad_packed_sequence(packed_output, batch_first=True)
+        out = unpacked_tensor.index_select(0, restoration_indices)
         return out
 
     def __init__(self, lstm: torch.nn.LSTM, use_packed_sequence_protocol: bool = True):

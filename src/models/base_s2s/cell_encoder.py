@@ -9,34 +9,30 @@ from allennlp.nn.util import sort_batch_by_length
 
 
 class CellEncoder(Encoder):
-    def forward(self, inputs, mask, hidden=None) -> torch.Tensor:
+    def forward(self, inputs, mask) -> torch.Tensor:
         if not self.use_packed_seq:
-            return self.forward_tensor_seq(inputs, mask, hidden)
+            return self.forward_tensor_seq(inputs, mask)
 
-        else:
-            if hidden is not None:
-                raise NotImplementedError("the packed sequence protocol only allows None for initial states")
+        (
+            sorted_inputs,  # (batch, length, input_dim)
+            sorted_sequence_lengths,  # (batch,), the descending lengths
+            restoration_indices,  # (batch,), indices: sorted -> original
+            sorting_indices,  # (batch,), indices: original -> sorted
+        ) = sort_batch_by_length(inputs, mask.sum(-1))
 
-            (
-                sorted_inputs,  # (batch, length, input_dim)
-                sorted_sequence_lengths,  # (batch,), the descending lengths
-                restoration_indices,  # (batch,), indices: sorted -> original
-                sorting_indices,  # (batch,), indices: original -> sorted
-            ) = sort_batch_by_length(inputs, mask.sum(-1))
+        pseq = pack_padded_sequence(sorted_inputs, sorted_sequence_lengths.tolist(), batch_first=True)
+        sorted_out = self.forward_packed_seq(pseq, None)
+        out = sorted_out.index_select(0, restoration_indices)
+        return out
 
-            pseq = pack_padded_sequence(sorted_inputs, sorted_sequence_lengths.tolist(), batch_first=True)
-            sorted_out = self.forward_packed_seq(pseq, None)
-            out = sorted_out.index_select(0, restoration_indices)
-            return out
-
-    def forward_tensor_seq(self, inputs, mask, hidden) -> torch.Tensor:
+    def forward_tensor_seq(self, inputs, mask, hx: Any = None) -> torch.Tensor:
         """
         :param seq: (batch, seq_len, input_dim)
         :param mask: (batch, seq_len), not required for non-bidirectional cells
         :param hx: Any
         :return: (batch, seq_len, hid [*2])
         """
-        forward_out = self._forward_seq(inputs, hidden)
+        forward_out = self._forward_seq(inputs, hx)
         if not self.is_bidirectional():
             return forward_out
 
@@ -44,7 +40,7 @@ class CellEncoder(Encoder):
         # 1) the init hx is the same as the forward pass, because the hx is supposed to enrich the sequence embedding
         # 2) the mask will not get processed explicitly due to the different behavior within the batch, in practice,
         #    the hx will be always 0 if the padding idx is set properly in the nn.Embedding objects
-        back_out = self._forward_seq(inputs, hidden, is_reversed=True)
+        back_out = self._forward_seq(inputs, hx, is_reversed=True)
         # forward_out, back_out: (batch, len, hid)
         # bi_out: (batch, len, hid * 2)
         bi_out = torch.cat([forward_out, back_out], dim=-1)

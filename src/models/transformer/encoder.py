@@ -64,7 +64,7 @@ class TransformerEncoder(Encoder):
         self.hidden_dim = hidden_dim
         self._use_positional_embedding = use_positional_embedding
 
-    def forward(self, inputs: torch.Tensor, mask: torch.Tensor, hidden=None) -> torch.Tensor:
+    def forward(self, inputs: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
         output_tensor = add_positional_features(inputs) if self._use_positional_embedding else inputs
 
         for (attention,

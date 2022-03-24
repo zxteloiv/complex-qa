@@ -20,12 +20,12 @@ class Encoder(_EncoderBase, ABC):
     """
     An encoder accepts an embedding tensor and outputs another tensor
     """
-    def forward(self, inputs, mask, hidden=None) -> torch.Tensor:
+    def forward(self, inputs, mask) -> torch.Tensor:
         """returns the output at all timesteps"""
         raise NotImplementedError
 
 
-class EncoderStack(_EncoderBase, ABC):
+class EncoderStack(Encoder, ABC):
     """
     An encoder stack accepts an embedding tensor and output another tensor,
     but stores the intermediate outputs for possible future uses.
@@ -37,12 +37,8 @@ class EncoderStack(_EncoderBase, ABC):
     def __len__(self):
         return self.get_layer_num()
 
-    def forward(self, inputs, mask) -> Union[torch.Tensor, Tuple[torch.Tensor, List[torch.Tensor]]]:
-        """returns the last encoder output, initialized from zero, without hidden"""
-        raise NotImplementedError
-
     def get_layered_output(self) -> List[torch.Tensor]:
-        """return the output of every layer after the last forward"""
+        """return the output of every intermediate layer after the last forward"""
         raise NotImplementedError
 
 
