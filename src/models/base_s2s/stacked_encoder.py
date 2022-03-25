@@ -41,7 +41,7 @@ class StackedEncoder(EncoderStack):
             if i > 0:
                 last_output = self.input_dropout(last_output)
 
-            last_output = enc(last_output, mask, None)
+            last_output = enc(last_output, mask)
             layered_output.append(last_output)
 
         self._layered_output = layered_output
