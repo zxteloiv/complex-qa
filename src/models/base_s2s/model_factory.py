@@ -12,6 +12,7 @@ from models.transformer.encoder import TransformerEncoder
 from ..modules.attention_wrapper import get_wrapped_attention
 from ..modules.attention_composer import get_attn_composer
 from .stacked_rnn_cell import StackedRNNCell
+import os.path as osp
 
 
 class EmbeddingMxin:
@@ -29,7 +30,7 @@ class EmbeddingMxin:
                                          num_embeddings=vocab.get_vocab_size(p.src_namespace),
                                          vocab_namespace=p.src_namespace,
                                          padding_index=0,
-                                         pretrained_file=src_pretrain_file,
+                                         pretrained_file=osp.expanduser(src_pretrain_file),
                                          vocab=vocab)
         return source_embedding
 
@@ -213,7 +214,7 @@ class WordProjMixin:
     def get_word_projection(self, proj_in_dim, target_embedding=None):
         p, vocab = self.p, self.vocab
         word_proj = nn.Linear(proj_in_dim, vocab.get_vocab_size(p.tgt_namespace))
-        tied_emb = p.tied_decoder_embedding and target_embedding is not None
+        tied_emb = target_embedding is not None and p.tied_decoder_embedding
         logging.getLogger(self.__class__.__name__).info(f"Decoding {'' if tied_emb else 'NOT'} using tied embeddings")
         if tied_emb:
             emb_sz = target_embedding.weight.size()[1]
