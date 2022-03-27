@@ -5,20 +5,20 @@ from utils.tree import Tree, PreorderTraverse
 
 
 def build_from_lark_tree(subtree_or_tok: Union[lark.Tree, lark.Token],
-                         retain_lark_terminal_categories: bool = False,
+                         retain_lark_preterminals: bool = False,
                          add_eps_nodes: bool = False,
                          retain_lark_node_ref: bool = False):
     """
     Convert a lark.Tree object into a plain utils.tree.Tree object.
     :param subtree_or_tok: Lark object, either a lark.Tree or a lark.Token.
-    :param retain_lark_terminal_categories: if set True, the terminal category and terminal values will be retained
-                        in the lark.Tree, yielding an odd Tree node with is_terminal set to True and non-empty children
+    :param retain_lark_preterminals: if set True, the terminal category and terminal values will be retained
+             in the lark.Tree, yielding an odd Tree node with is_terminal set to True and non-empty children
     :param add_eps_nodes:
     :param retain_lark_node_ref:
     :return:
     """
     if isinstance(subtree_or_tok, lark.Token):
-        if retain_lark_terminal_categories:
+        if retain_lark_preterminals:
             t = Tree(subtree_or_tok.type, is_terminal=True, children=[Tree(subtree_or_tok.value, is_terminal=True)])
         else:
             t = Tree(subtree_or_tok.value, is_terminal=True)

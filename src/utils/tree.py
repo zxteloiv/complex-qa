@@ -1,4 +1,4 @@
-from typing import TypeVar, Generator, Callable, List, Optional, Generic
+from typing import TypeVar, Generator, Callable, List, Optional, Generic, Tuple, Union, Dict
 
 T = TypeVar('T')
 T_CHILDREN_FN = Callable[[T], List[T]]
@@ -24,44 +24,76 @@ class Traversal:
 
 
 class PreorderTraverse(Traversal):
-    def __init__(self, children_fn: T_CHILDREN_FN = None, output_parent: bool = False, output_path: bool = False):
+    def __init__(self,
+                 children_fn: T_CHILDREN_FN = None,
+                 output_parent: bool = False,
+                 output_path: bool = False,
+                 hooks: dict = None,
+                 ):
         super().__init__(children_fn)
         self.output_parent = output_parent
         self.output_path = output_path
+        # there're several hooks to run
+        self.hooks: Dict[str, Callable] = hooks or dict()
 
-    def __call__(self, root: T):
-        yield from self._recursive_call(root, path=[])
+    def __call__(self,
+                 root: T,
+                 hooks: Dict[str, Callable] = None,
+                 ) -> Generator[T, None, None]:
+        if hooks is not None:
+            self.hooks.update(hooks)
+        self._root = root
+        yield from self._recursive_call(root, None, [])
+        self._root = None
 
-    def _recursive_call(self, root: T, parent: T = None, path: List[int] = None):
-        output = [root]
+    def _recursive_call(self, subtree: T, parent: T = None, path: List[int] = None):
+        if 'pre_visit' in self.hooks:
+            yield from self.hooks['pre_visit'](subtree, parent, path, self)
+        yield self.visit_node(subtree, parent, path)
+        if 'post_visit' in self.hooks:
+            yield from self.hooks['post_visit'](subtree, parent, path, self)
+
+        for i, c in enumerate(self.children_fn(subtree)):
+            yield from self._recursive_call(c, subtree, path + [i])
+        if 'post_children' in self.hooks:
+            yield from self.hooks['post_children'](subtree, parent, path, self)
+
+    def visit_node(self, node, parent, path) -> Union[T, Tuple[T]]:
+        output = [node]
         if self.output_parent:
             output.append(parent)
         if self.output_path:
             output.append(path)
         if len(output) == 1:
-            yield output[0]
+            return output[0]
         else:
-            yield tuple(output)
-
-        for i, c in enumerate(self.children_fn(root)):
-            yield from self._recursive_call(c, root if self.output_parent else None, path + [i] if self.output_path else None)
+            return tuple(output)
 
 
-class Tree(Generic[T]):
+class Tree:
     EPS_TOK: str = "%%EPS%%"
 
     def __init__(self, label: str, is_terminal: bool = False, children: list = None, payload = None):
         self.label = label
         self.node_id: int = 0
 
-        # Generally if is_terminal is set True, the children must be empty but we set them independently.
+        # In general if is_terminal is set True, the children must be empty but we set them independently.
         # When the children list are empty, is_terminal can be set False because of the EPS rule.
         # In addition, however, we further differentiate a special situation where is_terminal is True and
         # the children list contains a single terminal. such as:
         #     Tree('NAME', is_terminal=True, children=[
         #         Tree('yuki kajiura', is_terminal=True)
         #     ])
-        # This is an important use case in the parse trees of many CFG grammars and parsers.
+        # This is an important use case in many CFG implementations and is usually called a preterminal.
+        #
+        # In summary,
+        # common cases:
+        #   nonterminals: is_terminal=False children=[A, B, ...]
+        #      terminals: is_terminal=True  children=[]
+        # special cases:
+        #      EPS rules: is_terminal=False children=[], i.e., a nonterminal that emits nothing
+        #   preterminals: is_terminal=True  children=[A-Common-Terminal], other cases are invalid
+        #
         self.is_terminal = is_terminal
         self.children: List[Tree] = children or []
         self.payload = payload
@@ -97,6 +129,7 @@ class Tree(Generic[T]):
 
 if __name__ == '__main__':
     # test case 1: traversing a lark tree
+    from .lark.id_tree import build_from_lark_tree
     import lark
     parser = lark.Lark("""
     start: ctok btok*
@@ -117,6 +150,7 @@ if __name__ == '__main__':
 
     for node, node_parent in PreorderTraverse(output_parent=True)(tree):
         pref = node_parent.data + ' --->' if node_parent is not None else '<gen> --->'
+        node: lark.Tree
 
         if isinstance(node, lark.Tree):
             print(pref, node.data)
@@ -124,3 +158,21 @@ if __name__ == '__main__':
             print(pref, node.type, node.value)
         else:
             raise NotImplementedError
+
+    print('-----' * 10)
+    tree = build_from_lark_tree(tree)
+
+    def _post_children(node: Tree, parent: Optional[Tree], path, self: Traversal):
+        RACT = ['REDUCE']
+
+        return [] if node.is_terminal else RACT
+
+    for node in PreorderTraverse(hooks=dict(post_children=_post_children))(tree):
+        if isinstance(node, str) and node == 'REDUCE':
+            print(node)
+        else:
+            node: Tree
+            if node.is_terminal:
+                print("SHIFT:", node.label)
+            else:
+                print("NT:", node.label)
