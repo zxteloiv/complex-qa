@@ -89,7 +89,7 @@ class TensorBatchStack(BatchStack, DumpBatchStack):
         batch_sz = data.size()[0]
         assert data.dtype == self._storage.dtype
         assert push_mask is None or push_mask.size()[0] == batch_sz
-        push_mask = torch.tensor([1], device=data.device).long() if push_mask is None else push_mask
+        push_mask = torch.tensor([1], device=data.device).long() if push_mask is None else push_mask.long()
         # force the incoming batch size equal to the storage,
         # such that no slicing is required and the implementation is easier.
         assert batch_sz == self.max_batch_size
@@ -97,7 +97,7 @@ class TensorBatchStack(BatchStack, DumpBatchStack):
         # stack error is only triggered when the push action is required but the stack is full.
         # stack_error: (batch,)
         stack_error = (self._top_cur >= (self.max_stack_size - 1)) * push_mask
-        succ = 1 - stack_error
+        succ = 1 - stack_error.long()
 
         batch_range = torch.arange(batch_sz, device=data.device)
         # increasing the stack top cursor only if the push action is required and valid

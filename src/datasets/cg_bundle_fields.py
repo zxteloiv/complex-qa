@@ -7,8 +7,10 @@ from trialbot.data import START_SYMBOL, END_SYMBOL
 from itertools import product
 import nltk
 import re
+from utils.tree import Tree, PreorderTraverse
 from utils.preprocessing import nested_list_numbers_to_tensors
 from utils.trialbot.char_array_field import CharArrayField
+from models.rnng import rnng_utils
 _Tree, _Token = lark.Tree, lark.Token
 
 
@@ -211,54 +213,76 @@ class TerminalRuleSeqField(SeqField):
         return {self.renamed_key: rule_seq_tensor}
 
 
-class RuleSymbolSeqField(TerminalRuleSeqField):
-    """Convert a tree to a very long sequence of rules as plain tokens"""
-    def _get_rule_str(self, node: Union[_Tree, _Token]):
-        rule_str = super()._get_rule_str(node)
-        return START_SYMBOL + ' ' + rule_str if self.add_start_end_toks else rule_str
+class RNNGField(Field):
+    def batch_tensor_by_key(self, tensors_by_keys: Mapping[str, List[NullableTensor]]) -> Mapping[str, torch.Tensor]:
+        action_list, target_list = list(map(tensors_by_keys.get, (self.action_key, self.target_key)))
+        if any(x is None or len(x) == 0 for x in (action_list, target_list)):
+            raise ValueError(f'input is empty or contains null keys: {self.action_key}, {self.target_key}')
+
+        return {
+            self.action_key: nested_list_numbers_to_tensors(action_list),
+            self.target_key: nested_list_numbers_to_tensors(target_list),
+        }
+
+    def _check_root(self, node: Tree):
+        if self._default_root is not None and node.label != self._default_root:
+            raise ValueError(f'root ({node.label}) inconsistent with the default ({self._default_root})')
+
+        if node.is_terminal:
+            raise ValueError(f'root ({node.label}) is not a non-terminal')
 
     def generate_namespace_tokens(self, example) -> Generator[Tuple[str, str], None, None]:
-        Tree, Token = lark.Tree, lark.Token
         tree: Tree = example.get(self.source_key)
         if tree is not None:
-            for node in self.traverse_tree(tree):
-                rule_str = self._get_rule_str(node)
-                yield from product([self.ns], rule_str.split())
+            # set root and emit for the root namespace
+            self._check_root(tree)
+            self._default_root = tree.label
+            yield self.ns_root, rnng_utils.get_token_str(tree)
+            # manually emit reduce action for RNNG, thus we can get rid of the hooks
+            yield self.ns_rnng, rnng_utils.get_token_str(rnng_utils.get_reduce_token())
+            yield self.ns_term, START_SYMBOL    # start token to initialize the output buffer
+            for node in PreorderTraverse()(tree):
+                node: Tree
+                # since nodes are either terminals or nonterminals,
+                # they commit to the ns_nt or ns_term namespace.
+                # the reduce action is special and not arisen direct by tokens.
+                ns = self.ns_nt if rnng_utils.is_nt_action(node) else self.ns_term
+                yield ns, rnng_utils.get_token_str(node)
 
-        if self.add_start_end_toks:
-            yield self.ns, END_SYMBOL
-
-    def to_tensor(self, example) -> Mapping[str, Optional[torch.Tensor]]:
-        tree: _Tree = example.get(self.source_key)
+    def to_tensor(self, example) -> Mapping[str, NullableTensor]:
+        tree: Tree = example.get(self.source_key)
         if tree is None:
-            return {self.renamed_key: None}
+            return {self.action_key: None, self.target_key: None}
 
-        tgt_raw = sum((self._get_rule_str(n).split() for n in self.traverse_tree(tree)), start=[])
-        tgt = [self.vocab.get_token_index(s, self.ns) for s in tgt_raw]
+        def _add_reduce_action(n: Tree, *args):
+            return [rnng_utils.get_reduce_token()] if not n.is_terminal else []
 
-        if self.add_start_end_toks:
-            end_id = self.vocab.get_token_index(END_SYMBOL, self.ns)
-            tgt += [end_id]
+        traverse = PreorderTraverse(hooks={'post_children': _add_reduce_action})
+        actions, target = [], []
+        for node in traverse(tree):
+            actions.append(self.token_to_rnng_id(node))
+            if rnng_utils.is_gen_action(node):
+                target.append(self.token_to_rnng_id(node))
+        return {self.action_key: actions, self.target_key: target}
 
-        if self.max_seq_len > 0:
-            tgt = tgt[:self.max_seq_len]
+    def token_to_rnng_id(self, tok: Tree):
+        return rnng_utils.token_to_id(tok, self.vocab, (self.ns_rnng, self.ns_nt, self.ns_term))
 
-        tgt = torch.tensor(tgt)
-        return {self.renamed_key: tgt}
-
-
-class DerivationField(CharArrayField):
-    def tear_to_char_array(self, raw_data: Union[None, str, Any]) -> List[List[str]]:
-        if not isinstance(raw_data, _Tree):
-            return []
-        arr = []
-        for t in raw_data.iter_subtrees_topdown():
-            rule = [t.data]
-            for c in t.children:
-                if isinstance(c, _Tree):
-                    rule.append(c.data)
-                elif isinstance(c, _Token):
-                    rule.append(c.value)
-            arr.append(rule)
-        return arr
-
+    def __init__(self,
+                 source_key: str,
+                 action_key: str = 'actions',
+                 target_key: str = 'target_tokens',
+                 ns_terminals='term',
+                 ns_non_terminals='cat',
+                 ns_rnng='rnng',
+                 ns_root='grammar_entry',
+                 ):
+        super().__init__()
+        self.source_key = source_key
+        self.ns_nt = ns_non_terminals
+        self.ns_term = ns_terminals
+        self.ns_rnng = ns_rnng
+        self.ns_root = ns_root
+        self.action_key = action_key
+        self.target_key = target_key
+        self._default_root = None

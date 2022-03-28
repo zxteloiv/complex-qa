@@ -2,7 +2,7 @@ from trialbot.training import Registry
 from trialbot.data.translator import FieldAwareTranslator
 from trialbot.data.fields import SeqField
 from trialbot.data.translators import KnownFieldTranslator
-from .cg_bundle_fields import TerminalRuleSeqField, ProcessedSentField
+from .cg_bundle_fields import TerminalRuleSeqField, ProcessedSentField, RNNGField
 from .cfq_fields import TreeTraversalField, TutorBuilderField
 from .cfq_fields import PolicyValidity
 
@@ -23,6 +23,24 @@ class NoTermTranXTranslator(FieldAwareTranslator):
             ProcessedSentField(source_key='sent', renamed_key='source_tokens', add_start_end_toks=False,),
             TerminalRuleSeqField(no_preterminals=True,
                                  source_key='sql_tree', renamed_key="target_tokens", namespace="rule_seq", ),
+        ])
+
+
+@Registry.translator('rnng')
+class RNNGTranslator(FieldAwareTranslator):
+    def __init__(self, src_ns='sent',
+                 rnng_namespaces=('rnng', 'nonterminal', 'terminal'),
+                 grammar_entry_ns: str = 'grammar_entry',):
+        super().__init__(field_list=[
+            ProcessedSentField(source_key=src_ns, renamed_key='source_tokens', add_start_end_toks=False,),
+            RNNGField(source_key='runtime_tree',
+                      action_key='actions',         # follow the param name of the RNNG model
+                      target_key='target_tokens',
+                      ns_rnng=rnng_namespaces[0],
+                      ns_non_terminals=rnng_namespaces[1],
+                      ns_terminals=rnng_namespaces[2],
+                      ns_root=grammar_entry_ns,
+                      ),
         ])
 
 
