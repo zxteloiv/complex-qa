@@ -71,7 +71,7 @@ class Seq2RNNG(nn.Module):
     def _compute_loss(self):
         loss = self.rnng.get_loss()
         if isinstance(self.embed_encoder, LossModule):
-            loss += self.embed_encoder.get_loss()
+            loss = loss + self.embed_encoder.get_loss()
         return loss
 
     def get_metrics(self, reset: bool = False):

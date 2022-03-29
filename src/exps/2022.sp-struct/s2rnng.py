@@ -1,5 +1,5 @@
 from trialbot.utils.grid_search_helper import import_grid_search_parameters
-from trialbot.training import Registry, TrialBot
+from trialbot.training import Registry, TrialBot, Events
 from trialbot.training.hparamset import HyperParamSet
 from trialbot.utils.root_finder import find_root
 import sys
@@ -18,6 +18,23 @@ def main():
         args=setup_cli(translator='rnng', seed=2021, device=0),
         get_model_func=RNNGBuilder.from_param_and_vocab,
     )
+
+    @bot.attach_extension(Events.ITERATION_COMPLETED)
+    def debug_preds(bot: TrialBot):
+        from utils.text_tool import make_human_readable_text
+        from models.rnng.rnng_utils import id_to_token_str
+        args, p = bot.args, bot.hparams
+        if args.debug and bot.state.output is not None:
+            output = bot.state.output
+            from functools import partial
+            get_token_from_id_fn = partial(id_to_token_str, vocab=bot.vocab, namespaces=p.rnng_namespaces)
+            srcs = make_human_readable_text(output['source'], bot.vocab, p.src_namespace, [0])
+            golds = make_human_readable_text(output['target'], None, None, [0], get_token_from_id_fn)
+            preds = make_human_readable_text(output['predictions'], None, None, [0], get_token_from_id_fn)
+            for src, gold, pred in zip(srcs, golds, preds):
+                to_print = f'SRC:  {" ".join(src)}\nGOLD: {" ".join(gold)}\nPRED: {" ".join(pred)}'
+                print(to_print)
+
     bot.run()
 
 
@@ -33,7 +50,7 @@ def _base_hparams():
     # self.get_embeddings()
     p.emb_sz = 100
     p.src_namespace = "sent"
-    p.src_emb_pretrained_file = "~/.glove/glove.6B.100d.txt.gz"
+    # p.src_emb_pretrained_file = "~/.glove/glove.6B.100d.txt.gz"
     p.tgt_namespace = "target"
 
     p.lr_scheduler_kwargs = {'model_size': 400, 'warmup_steps': 50}

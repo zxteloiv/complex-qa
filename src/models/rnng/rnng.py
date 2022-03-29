@@ -137,10 +137,12 @@ class RNNG(nn.Module):
         mem = SeqCollector()
         for step in steps:
             step_input = actions[:, step] if self.training else last_pred
+            if step > 0:
+                acc_succ *= (self._stack._top_cur > -1).long()  # avoid actions on empty stack
             action_hx, step_logit, acc_succ = self._forward_step(step_input, action_hx, acc_succ)
             last_pred = step_logit.argmax(dim=-1)
             mem(logit=step_logit, pred=last_pred)
-            if acc_succ.sum() == 0:
+            if acc_succ.sum() == 0 and not self.training:
                 # no valid instances, stop the iterations immediately
                 break
 

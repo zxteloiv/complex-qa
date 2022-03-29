@@ -258,7 +258,7 @@ class RNNGField(Field):
             return [rnng_utils.get_reduce_token()] if not n.is_terminal else []
 
         traverse = PreorderTraverse(hooks={'post_children': _add_reduce_action})
-        actions, target = [], []
+        actions, target = [], [self.token_to_rnng_id(START_SYMBOL)]
         for node in traverse(tree):
             actions.append(self.token_to_rnng_id(node))
             if rnng_utils.is_gen_action(node):
