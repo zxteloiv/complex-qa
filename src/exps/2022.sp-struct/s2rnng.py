@@ -50,7 +50,7 @@ def _base_hparams():
     # self.get_embeddings()
     p.emb_sz = 100
     p.src_namespace = "sent"
-    # p.src_emb_pretrained_file = "~/.glove/glove.6B.100d.txt.gz"
+    p.src_emb_pretrained_file = "~/.glove/glove.6B.100d.txt.gz"
     p.tgt_namespace = "target"
 
     p.lr_scheduler_kwargs = {'model_size': 400, 'warmup_steps': 50}

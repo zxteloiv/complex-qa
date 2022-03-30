@@ -3,7 +3,12 @@ import torch
 
 
 class DumpBatchStack:
-    def dump(self):
+    def dump(self, i: int = None):
+        """
+        Get the full stack values and value masks
+        :param i: dump(i) is an alias for dump()[i], usually 0 or 1
+        :return:
+        """
         raise NotImplementedError
 
 
@@ -150,7 +155,7 @@ class TensorBatchStack(BatchStack, DumpBatchStack):
         succ = 1 - (1 - top_succ) * pop_mask    # only the errors at the required locations matter
         return top_val, succ
 
-    def dump(self) -> Tuple[torch.Tensor, torch.LongTensor]:
+    def dump(self, i: int = None) -> Tuple[torch.Tensor, torch.LongTensor]:
         # top_cur: (batch,)
         lengths = self._top_cur + 1
         max_length = torch.max(lengths)
@@ -160,8 +165,11 @@ class TensorBatchStack(BatchStack, DumpBatchStack):
 
         value = self._storage[:, :max_length]
         # row = max_length + 1, including the zero-length case
-        mask = self._storage.new_ones(max_length + 1, max_length).tril(-1)[lengths]
-        return value, mask
+        mask = self._storage.new_ones(max_length + 1, max_length).long().tril(-1)[lengths]
+        if i is None:
+            return value, mask
+        else:
+            return (value, mask)[i]
 
 
 if __name__ == '__main__':

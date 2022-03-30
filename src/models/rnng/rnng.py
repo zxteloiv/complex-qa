@@ -113,6 +113,9 @@ class RNNG(nn.Module):
         self._initial_hx, _ = self.buffer_encoder.init_hidden_states(init_state)
         self._attend_and_compose = attend_and_compose_fn
 
+    def get_loss(self):
+        return self._loss
+
     def forward(self,
                 batch_sz: int,
                 actions: Optional[torch.LongTensor],
@@ -133,18 +136,17 @@ class RNNG(nn.Module):
         last_pred = self._init_iteration(batch_sz, device)
         action_hx = self._initial_hx
         acc_succ = torch.full((batch_sz,), 1, device=device)
-        steps = range(self.get_step_num(actions))
         mem = SeqCollector()
-        for step in steps:
+        for step in range(self.get_max_step_num(actions)):
             step_input = actions[:, step] if self.training else last_pred
-            if step > 0:
-                acc_succ *= (self._stack._top_cur > -1).long()  # avoid actions on empty stack
+            acc_succ = self._check_stack_finalized(step, acc_succ)
             action_hx, step_logit, acc_succ = self._forward_step(step_input, action_hx, acc_succ)
-            last_pred = step_logit.argmax(dim=-1)
-            mem(logit=step_logit, pred=last_pred)
             if acc_succ.sum() == 0 and not self.training:
                 # no valid instances, stop the iterations immediately
                 break
+
+            last_pred = step_logit.argmax(dim=-1)
+            mem(logit=step_logit, pred=last_pred)
 
         logits = mem.get_stacked_tensor('logit')
         preds = mem.get_stacked_tensor('pred')
@@ -154,9 +156,6 @@ class RNNG(nn.Module):
         if target_tokens is not None:
             self.compute_metrics(actions, target_tokens, preds)
         return preds, logits
-
-    def get_loss(self):
-        return self._loss
 
     def _check_args(self, batch_sz, action_ids, oracle_tokens):
         assert batch_sz is not None or action_ids is not None
@@ -168,6 +167,30 @@ class RNNG(nn.Module):
             if action_ids is None:
                 raise ValueError("Training requires the action sequence provided.")
         return batch_sz
+
+    def _check_stack_finalized(self, step: int, acc_succ):
+        if step == 0 or self.training:
+            # the first step is always valid, though the stack is empty because no action has been performed.
+            # training uses the gold input, which is default to 0.
+            return acc_succ
+
+        # a stack is empty when the reduce action pops too much tokens but fails before pushing on items.
+        # in this situation the stack must be forced to stop.
+        stack_is_not_empty = self._stack._top_cur >= 0
+
+        tags, tag_mask = self._stack_tag.dump()     # (batch, seq, tag_dim)
+        openness = tags[:, :, 0]
+
+        # stack has open items must be followed with future reduce actions, and cannot stop now.
+        stack_has_open_items = (openness * tag_mask).sum(-1) > 0    # (batch,)
+        # stack contains more than 1 items also suggesting the requirement for future reduce actions.
+        stack_contains_many_items = tag_mask.sum(-1) > 1            # (batch,)
+        # only the stack with 1 terminal is considered completed.
+        stack_incomplete = stack_has_open_items.logical_and(stack_contains_many_items)
+
+        # the erroneous items and incomplete stacks will stop (succ=0), otherwise the acc_succ is kept 1.
+        acc_succ *= stack_is_not_empty.logical_and(stack_incomplete).long()
+        return acc_succ
 
     def _init_iteration(self, batch_sz: int, device, action_num: int = None):
         stack_sz = action_num or self.max_action_num
@@ -185,7 +208,7 @@ class RNNG(nn.Module):
     def embed_actions(self, x: torch.LongTensor) -> torch.Tensor:
         return self.emb2hid(self.emb_drop(self.embed(x)))
 
-    def get_step_num(self, action_ids: Optional):
+    def get_max_step_num(self, action_ids: Optional):
         if action_ids is None:
             return self.max_action_num
 
@@ -245,7 +268,6 @@ class RNNG(nn.Module):
 
     def _do_reduce_transactions(self, is_reduce):
         mem = SeqCollector()
-        initial_redicible = is_reduce.detach()
         acc_succ = self._pop_until_nonterminals(is_reduce, mem)
 
         emb = mem.get_stacked_tensor('emb')     # (batch, seq, hidden)
@@ -255,11 +277,13 @@ class RNNG(nn.Module):
         if (mask.sum() == 0).all():             # if the reduce transaction has failed for the entire batch,
             return torch.zeros_like(acc_succ)   # no need to check each flag anymore
 
+        # final_states: (batch, hidden)
         output = self.reducer(emb, mask)        # (batch, seq, hidden)
-
-        # (batch, hidden)
         final_states = get_final_encoder_states(output, mask, self.reducer.is_bidirectional())
-        acc_succ = acc_succ * self._stack.push(final_states, initial_redicible * acc_succ)
+
+        batch_sz = acc_succ.size(0)
+        acc_succ = acc_succ * self._stack.push(final_states, is_reduce * acc_succ)
+        acc_succ = acc_succ * self._stack_tag.push(is_reduce.new_zeros(batch_sz, 1).long(), is_reduce * acc_succ)
         return acc_succ
 
     def _pop_until_nonterminals(self, is_reduce, mem):
