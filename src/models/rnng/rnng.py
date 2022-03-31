@@ -186,7 +186,10 @@ class RNNG(nn.Module):
         # stack contains more than 1 items also suggesting the requirement for future reduce actions.
         stack_contains_many_items = tag_mask.sum(-1) > 1            # (batch,)
         # only the stack with 1 terminal is considered completed.
-        stack_incomplete = stack_has_open_items.logical_and(stack_contains_many_items)
+        if step >= 2:   # two previous actions had been performed
+            stack_incomplete = stack_has_open_items.logical_and(stack_contains_many_items)
+        else:   # step = 0 or 1, the stack cannot contain more than one items.
+            stack_incomplete = stack_has_open_items
 
         # the erroneous items and incomplete stacks will stop (succ=0), otherwise the acc_succ is kept 1.
         acc_succ *= stack_is_not_empty.logical_and(stack_incomplete).long()
