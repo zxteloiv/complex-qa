@@ -50,8 +50,6 @@ class EisnerSurrogate(Function):    # noqa
         cw = arc_raw_w.new_zeros((4, n, n, batch))    # cumulative weights
         contrib = torch.zeros_like(cw)
 
-        cw[L_INCOMP, 0, 0] -= float('inf')
-
         # infer the highest scoring dependency tree
         EisnerSurrogate._inside(n, arc_raw_w, cw, bp, w, hard)
 
@@ -288,12 +286,15 @@ if __name__ == '__main__':
     from eisner import parse_proj
 
     fails_count = 0
-    n_tests = 10
+    n_tests = 1
     for idx in range(n_tests):
         dim = np.random.randint(low=4, high=12)
-        scores = torch.randn((3, dim, dim), requires_grad=True, dtype=torch.float64)
+        scores = torch.randn((3, dim, dim), dtype=torch.float64)
+        # scores[:, dim - 2:] = torch.finfo().min
+        # scores[:, :, dim - 2:] = torch.finfo().min
+        scores = scores.clone().requires_grad_(True)
 
-        # dim = 4
+        # dim = 6
         # scores = torch.zeros((3, dim, dim), dtype=torch.float64)
         # scores[0][0, 2] = 1
         # scores[0][2, 1] = 1
@@ -306,12 +307,16 @@ if __name__ == '__main__':
         # scores[2][0, 3] = 1
         # scores[2][3, 1] = 1
         # scores[2][1, 2] = 1
+        # scores[:, 4:] = torch.finfo().min
+        # scores[:, :, 4:] = torch.finfo().min
         # scores = scores.clone().requires_grad_(True)
+        # print(scores[0])
 
         print('-----------+-----------+-----------')
         print(f'Test #{idx + 1} (dim = {dim})')
         # test forward pass
         t_ij = eisner_surrogate(scores, None, True)
+        print(eisner_surrogate(scores, None))
         torch_out = t_ij.argmax(1)[:, 1:]
         np_out = np.stack([parse_proj(instance.detach().numpy())[1:] for instance in scores])
 
@@ -323,7 +328,7 @@ if __name__ == '__main__':
         #
         print('---------' * 5)
         print(f'Forward pass - {"succeeded" if f_test_res else "failed"}')
-        if not f_test_res:
+        if not f_test_res or True:
             print(t_ij)
             print('torch_out:', torch_out.tolist())
             print('np_out:', np_out.tolist())

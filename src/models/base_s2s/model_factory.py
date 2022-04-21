@@ -163,6 +163,12 @@ class EncoderStackMixin(RNNListMixin):
         enc = DioraEncoder(diora, concat_outside)
         return enc
 
+    @staticmethod
+    def get_perturb_parse_gcn_encoder(inp_sz, hid_sz, num_layers) -> EncoderStack:
+        from ..perturb_and_parse.pp_encoder import PerturbParseEncoder
+        enc = PerturbParseEncoder(inp_sz, hid_sz, num_layers)
+        return enc
+
     def get_stacked_cell_encoder(self) -> EncoderStack:
         p = self.p
         dropout = getattr(p, 'enc_dropout', getattr(p, 'dropout', 0.))
@@ -189,6 +195,9 @@ class EncoderStackMixin(RNNListMixin):
         if 'diora' in p.encoder:
             concat = getattr(p, 'diora_concat_outside', False)
             return self.get_diora_encoder(p.encoder, p.emb_sz, hid_sz, concat)
+
+        if 'perturb_parse' == p.encoder:
+            return self.get_perturb_parse_gcn_encoder(p.emb_sz, hid_sz, p.num_enc_layers)
 
         if getattr(p, 'use_cell_based_encoder', False):
             return self.get_stacked_cell_encoder()
