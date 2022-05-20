@@ -46,48 +46,37 @@ def scholar_onlstm2onlstm():
 
 @Registry.hparamset()
 def scholar():
-    p = HyperParamSet.common_settings(find_root())
+    from libs2s import base_hparams
+    p = base_hparams()
     p.TRAINING_LIMIT = 150
     p.WEIGHT_DECAY = 0.
     p.OPTIM = "adabelief"
     p.ADAM_BETAS = (0.9, 0.999)
     p.batch_sz = 16
 
-    p.hidden_sz = 300
     p.src_namespace = 'sent'
     p.tgt_namespace = 'sql'
-    p.dropout = .5
-    p.decoder = "lstm"
-    p.max_decoding_step = 100
-    p.scheduled_sampling = .1
     p.decoder_init_strategy = "forward_last_parallel"
-    p.tied_decoder_embedding = False
     p.num_enc_layers = 3
     p.num_dec_layers = 3
+
+    p.hidden_sz = 300
     p.emb_sz = 100
+    p.enc_out_dim = p.hidden_sz
+    p.dec_in_dim = p.hidden_sz
+    p.dec_out_dim = p.hidden_sz
+    p.proj_in_dim = p.emb_sz
 
     p.use_cell_based_encoder = False
     # cell-based encoders: typed_rnn, ind_rnn, onlstm, lstm, gru, rnn; see models.base_s2s.base_seq2seq.py file
     # seq-based encoders: lstm, transformer, bilstm, aug_lstm, aug_bilstm; see models.base_s2s.stacked_encoder.py file
     p.encoder = 'lstm'
-    p.enc_out_dim = p.hidden_sz
-    p.dec_in_dim = p.hidden_sz
-    p.dec_out_dim = p.hidden_sz
     p.enc_attn = "dot_product"
 
     p.enc_dec_trans_usage = 'consistent'
     p.enc_dec_trans_act = 'tanh'
     p.enc_dec_trans_forced = False
 
-    p.proj_in_dim = p.emb_sz
-
-    p.enc_dropout = 0
-    p.dec_dropout = 0.5
-    p.dec_hist_attn = "none"
-    p.dec_inp_composer = 'cat_mapping'
-    p.dec_inp_comp_activation = 'mish'
-    p.proj_inp_composer = 'cat_mapping'
-    p.proj_inp_comp_activation = 'mish'
     return p
 
 
