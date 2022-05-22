@@ -59,10 +59,3 @@ class EmbedAndEncode(torch.nn.Module, ABC):
 
     def get_output_dim(self) -> int:
         raise NotImplementedError
-
-    def embed(self, tokens):
-        raise NotImplementedError
-
-    def encode(self, token_embedding, token_mask):
-        raise NotImplementedError
-

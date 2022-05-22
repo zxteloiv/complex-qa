@@ -207,16 +207,33 @@ class EncoderStackMixin(RNNListMixin):
 
 class EmbEncBundleMixin:
     def get_embed_encoder_bundle(self, emb, enc: EncoderStack, padding_idx) -> EmbedAndEncode:
-        p = self.p
+        p, vocab = self.p, self.vocab
         enc_dropout = getattr(p, 'enc_dropout', getattr(p, 'dropout', 0.))
         if p.encoder == 'diora':
             from ..diora.diora_bundle import SeqEmbedAndDiora
             return SeqEmbedAndDiora(emb, enc, padding_idx, enc_dropout,
                                     use_diora_loss=getattr(p, 'diora_loss_enabled', False))
 
-        else:   # for most of the cases, StackedEncoder is the encoder
-            from .seq_embed_encode import SeqEmbedEncoder
-            return SeqEmbedEncoder(emb, enc, padding_idx, enc_dropout)
+        from .seq_embed_encode import SeqEmbedEncoder
+        emb_enc = SeqEmbedEncoder(emb, enc, padding_idx, enc_dropout)
+        emb_enc = self.get_seq_compound_bundle(emb_enc)
+        return emb_enc
+
+    def get_seq_compound_bundle(self, emb_enc: EmbedAndEncode):
+        p, vocab = self.p, self.vocab
+        compound_emb_enc = getattr(p, 'compound_encoder', None)
+        if compound_emb_enc == 'cpcfg':
+            from ..pcfg.pcfg_emb_enc import PCFGEmbedEncode, CompoundPCFG
+            return PCFGEmbedEncode(CompoundPCFG(
+                num_nonterminal=p.num_pcfg_nt,
+                num_preterminal=p.num_pcfg_pt,
+                num_vocab_token=vocab.get_vocab_size(p.src_namespace),
+                hidden_sz=getattr(p, 'pcfg_hidden_dim', p.hidden_sz),
+                emb_enc=emb_enc,
+                encoding_dim=getattr(p, 'pcfg_encoding_dim', p.hidden_sz),
+            ))
+
+        return emb_enc
 
 
 class WordProjMixin:
