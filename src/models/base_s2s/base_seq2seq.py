@@ -123,7 +123,7 @@ class BaseSeq2Seq(torch.nn.Module):
         self._reset_variational_dropouts()
 
         layer_states, state_mask = self._embed_encoder(source_tokens)
-        hx, enc_attn_fn, start = self._prepare_dec(layer_states, state_mask)
+        hx, enc_attn_fn, start = self._prepare_dec(layer_states, state_mask.long())
         preds, logits = self._forward_dec(target_tokens, start, enc_attn_fn, hx)
 
         output = {'source': source_tokens}

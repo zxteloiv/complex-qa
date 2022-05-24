@@ -18,7 +18,7 @@ def main():
 def sch_s2s():
     from libs2s import base_hparams
     p = base_hparams()
-    p.batch_sz = 1
+    p.batch_sz = 16
     p.src_namespace = 'sent'
     p.tgt_namespace = 'sql'
     p.encoder = 'bilstm'
@@ -34,6 +34,10 @@ def sch_s2s():
     p.dec_in_dim = p.hidden_sz
     p.dec_out_dim = p.hidden_sz
     p.proj_in_dim = p.emb_sz
+
+    p.enc_attn = 'none'
+    p.dec_inp_composer = 'none'
+    p.proj_inp_composer = 'none'
 
     return p
 

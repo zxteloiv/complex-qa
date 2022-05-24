@@ -330,7 +330,7 @@ class Seq2SeqBuilder(EmbeddingMxin,
         encoder = self.get_encoder_stack()
         embed_and_encoder = self.get_embed_encoder_bundle(source_embedding, encoder, padding_idx=0)
 
-        enc_out_dim = encoder.get_output_dim()
+        enc_out_dim = embed_and_encoder.get_output_dim()
         dec_in_dim = getattr(p, 'dec_in_dim', p.hidden_sz)
         dec_out_dim = getattr(p, 'dec_out_dim', p.hidden_sz)
         proj_in_dim = getattr(p, 'proj_in_dim', p.hidden_sz)

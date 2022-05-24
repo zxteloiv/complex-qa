@@ -17,7 +17,7 @@ class PCFGEmbedEncode(EmbedAndEncode):
         logPx, kl, x_tree_hid = self.pcfg.encode(tokens)
         batch, h_dim = x_tree_hid.size()
         state = [x_tree_hid.unsqueeze(1)]   # [(b, 1, hid)]
-        state_mask = x_tree_hid.new_ones(batch, 1)
+        state_mask = x_tree_hid.new_ones(batch, 1, dtype=torch.long)
 
         self._loss = (-logPx + kl).mean()
         return state, state_mask

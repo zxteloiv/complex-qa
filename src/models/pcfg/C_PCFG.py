@@ -64,7 +64,8 @@ class CompoundPCFG(PCFGModule):
         self.unary_composer_word = nn.Sequential(nn.Linear(emb_enc.get_output_dim(), encoding_dim),
                                                  ResLayer(encoding_dim, encoding_dim))
         self.unary_composer_term = ResLayer(encoding_dim, encoding_dim)
-        self.binary_composer_child = ResLayer(encoding_dim, encoding_dim)
+        self.binary_composer_left = ResLayer(encoding_dim, encoding_dim)
+        self.binary_composer_right = ResLayer(encoding_dim, encoding_dim)
         self.binary_composer_head = ResLayer(encoding_dim, encoding_dim)
         self.activation = nn.Mish()
 
@@ -150,9 +151,10 @@ class CompoundPCFG(PCFGModule):
             word_hid = self.unary_composer_word(x_hid)          # (b, n, hid)
             emb_chart[:, 0, :, Ts] = unit_norm(un_(un_(term_hid, 0), 1) + un_(word_hid, 2))   # (b, n, T, hid)
 
+            a_hid = self.binary_composer_head(self.nonterm_emb)[None, None, :]  # (1, 1, NT, hid)
+
         device = x.device
         for width in range(1, n):
-            print(f'inside: width={width}')
             lvl_b = un_(tr_(width, device=device), 0)                 # (pos=1, sublvl)
             pos_b = un_(tr_(n - width, device=device), 1)             # (pos, subpos=1)
             lvl_c = un_(tr_(width - 1, -1, -1, device=device), 0)     # (pos=1, sublvl), reversed lvl_b
@@ -167,41 +169,34 @@ class CompoundPCFG(PCFGModule):
             a_score = torch.logsumexp(score_arr, dim=(3, 4, 5))
             score[:, width, :n - width, NTs] = a_score
 
-            def inspect_mem(i=0):
-                mem = torch.cuda.memory_reserved(0)
-                if i > 0:
-                    print(f'width={width} i={i} memory={mem}')
-                else:
-                    print(f'width={width} memory={mem}')
-
-            inspect_mem(0)
-
             if x_hid is not None:
-                b_hid = emb_chart[:, lvl_b, pos_b, :, None].clone()
-                c_hid = emb_chart[:, lvl_c, pos_c, None, :].clone()
-                # bc_hid: (batch, pos, arrangement, B, C, hid)
-                bc_hid = self.binary_composer_child(b_hid) + self.binary_composer_child(c_hid)
-                # a_hid: (1, 1, NT, 1, 1, 1, hid)
-                a_hid = self.binary_composer_head(self.nonterm_emb)[None, None, :, None, None, None]     # (NT, hid)
-                # abc_weight: (batch, pos, A, arrangement, B, C, 1)
-                abc_weight = un_(score_arr.exp(), -1)
-                inspect_mem(1)
-                # normalized_abc = (abc_weight * unit_norm(a_hid + un_(bc_hid, 2))).sum(dim=(3, 4, 5))
-                tmp = a_hid + un_(bc_hid, 2)
-                inspect_mem(2)
-                tmp = unit_norm(tmp)
-                inspect_mem(3)
-                tmp = abc_weight * tmp
-                inspect_mem(4)
-                normalized_abc = tmp.sum(dim=(3, 4, 5))
-                inspect_mem(5)
+                # to save storage, the computation is factored into 3 parts
+                # recall score_arr: (batch, pos, A=NT, arrangement, B, C)
+
+                # b/c_hid: (batch, pos, 1, arrangement, B/C, hid)
+                b_hid = self.binary_composer_left(emb_chart[:, lvl_b, pos_b, :].clone()).unsqueeze(2)
+                c_hid = self.binary_composer_right(emb_chart[:, lvl_c, pos_c, :].clone()).unsqueeze(2)
+
+                # b/c_weight: (batch, pos, A, arrangement, B/C, 1)
+                b_weight = torch.logsumexp(score_arr, dim=(-1)).unsqueeze(-1)
+                c_weight = torch.logsumexp(score_arr, dim=(-2)).unsqueeze(-1)
+
+                # b/c_factor: (batch, pos, A, hid)
+                b_factor = (b_hid * b_weight.exp()).sum(dim=(3, 4))
+                c_factor = (c_hid * c_weight.exp()).sum(dim=(3, 4))
+
+                # a_hid: (1, 1, A, hid)
+                # a_score: (batch, pos, A)
+                a_factor = a_hid * un_(a_score, -1).exp()
+
+                normalized_abc = unit_norm(a_factor + b_factor + c_factor)
                 emb_chart[:, width, :n - width, NTs] = normalized_abc
 
         lengths = x_mask.sum(-1)
-        logPxs = score[tr_(b, device=device), lengths - 1, 0] + roots       # (b, NT)
+        logPxs = score[tr_(b, device=device), lengths - 1, 0, NTs] + roots       # (b, NT)
         logPx = torch.logsumexp(logPxs, dim=1)  # sum out the start NT
         if x_hid is not None:
-            root_hid = emb_chart[tr_(b, device=device), lengths - 1, 0]     # (b, NT, hid)
+            root_hid = emb_chart[tr_(b, device=device), lengths - 1, 0, NTs]     # (b, NT, hid)
             x_tree_hid = (un_(logPxs, -1).exp() * root_hid).sum(dim=1)      # (b, hid)
             return logPx, x_tree_hid
         else:
