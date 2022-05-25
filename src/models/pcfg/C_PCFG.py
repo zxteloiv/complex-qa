@@ -85,8 +85,8 @@ class CompoundPCFG(PCFGModule):
         z = self.reparameterized_sample(q_mean, q_logvar)
         pcfg_params = self.get_pcfg_params(z)
 
-        logPx, x_tree_hid = self.inside(x, pcfg_params, x_hid)
-        return logPx, kl, x_tree_hid
+        logPx, mem = self.inside(x, pcfg_params, x_hid)
+        return logPx, kl, mem
 
     def run_inference(self, x):
         layered_state, state_mask = self.emb_enc(x)     # (b, N, d)
@@ -146,7 +146,7 @@ class CompoundPCFG(PCFGModule):
 
         emb_chart = None
         if x_hid is not None:
-            emb_chart = x_hid.new_zeros(b, n, n, self.NT_T, self.hidden_sz)
+            emb_chart = x_hid.new_zeros(b, n, n, self.NT_T, self.encoding_dim)
             term_hid = self.unary_composer_term(self.term_emb)  # (T, hid)
             word_hid = self.unary_composer_word(x_hid)          # (b, n, hid)
             emb_chart[:, 0, :, Ts] = unit_norm(un_(un_(term_hid, 0), 1) + un_(word_hid, 2))   # (b, n, T, hid)
@@ -196,9 +196,9 @@ class CompoundPCFG(PCFGModule):
         logPxs = score[tr_(b, device=device), lengths - 1, 0, NTs] + roots       # (b, NT)
         logPx = torch.logsumexp(logPxs, dim=1)  # sum out the start NT
         if x_hid is not None:
-            root_hid = emb_chart[tr_(b, device=device), lengths - 1, 0, NTs]     # (b, NT, hid)
-            x_tree_hid = (un_(logPxs, -1).exp() * root_hid).sum(dim=1)      # (b, hid)
-            return logPx, x_tree_hid
+            chart = emb_chart[:, 1:, :, NTs]     # (b, n - 1, n, NT, hid)
+            mem = (roots.reshape(b, 1, 1, self.NT, 1) * chart).sum(3).reshape(b, (n - 1) * n, -1)
+            return logPx, mem
         else:
             return logPx
 

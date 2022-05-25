@@ -35,9 +35,8 @@ def sch_s2s():
     p.dec_out_dim = p.hidden_sz
     p.proj_in_dim = p.emb_sz
 
-    p.enc_attn = 'none'
-    p.dec_inp_composer = 'none'
-    p.proj_inp_composer = 'none'
+    p.decoder_init_strategy = "avg_all"
+    p.enc_attn = 'dot_product'
 
     return p
 
