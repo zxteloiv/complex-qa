@@ -196,7 +196,7 @@ class CompoundPCFG(PCFGModule):
         logPx = torch.logsumexp(logPxs, dim=1)  # sum out the start NT
         if x_hid is not None:
             chart = emb_chart[:, 1:, :, NTs]     # (b, n - 1, n, NT, hid)
-            mem = (roots.reshape(b, 1, 1, self.NT, 1) * chart).sum(3).reshape(b, (n - 1) * n, -1)
+            mem = (roots.reshape(b, 1, 1, self.NT, 1).exp() * chart).sum(3).reshape(b, (n - 1) * n, -1)
             return logPx, mem
         else:
             return logPx

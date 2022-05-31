@@ -120,8 +120,8 @@ class TNPCFG(CompoundPCFG):
 
                 # b/c_hid: (batch, pos, arrangement, B/C, hid)
                 b_repr, c_repr = self._inside_chart_select(emb_chart, coordinates)
-                b_hid = un_(b_score, -1) * self.binary_composer_left(b_repr)
-                c_hid = un_(c_score, -1) * self.binary_composer_right(c_repr)
+                b_hid = un_(b_score, -1).exp() * self.binary_composer_left(b_repr)
+                c_hid = un_(c_score, -1).exp() * self.binary_composer_right(c_repr)
 
                 # left/right: (batch, 1, 1, NT_T, r, 1) <- (batch, NT_T, r)
                 vb_hid = (un_(left, [1, 2, 5]).exp() * un_(b_hid, -2)).sum(3)   # (batch, pos, arr, ~~B/C~~, r, hid)
@@ -133,7 +133,7 @@ class TNPCFG(CompoundPCFG):
 
                 # head: (batch, NT, r)
                 # b/c_factor: (batch, pos, r, hid)
-                bc_factor = torch.matmul(un_(head, 1), vb_hid_wc + vb_wc_hid)
+                bc_factor = torch.matmul(un_(head, 1).exp(), vb_hid_wc + vb_wc_hid)
 
                 # a_hid: (1, 1, A, hid)
                 # a_score: (batch, pos, A)
@@ -147,7 +147,7 @@ class TNPCFG(CompoundPCFG):
         logPx = torch.logsumexp(logPxs, dim=1)  # sum out the start nonterm S
         if x_hid is not None:
             chart = emb_chart[:, 1:, :, NTs]     # (b, n - 1, n, NT, hid)
-            mem = (roots.reshape(b, 1, 1, self.NT, 1) * chart).sum(3).reshape(b, (n - 1) * n, -1)
+            mem = (roots.reshape(b, 1, 1, self.NT, 1).exp() * chart).sum(3).reshape(b, (n - 1) * n, -1)
             return logPx, mem
         return logPx
 

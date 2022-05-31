@@ -15,7 +15,7 @@ def main():
 
 
 @Registry.hparamset()
-def sch_s2s():
+def sch_tdpcfg2s():
     from libs2s import base_hparams
     p = base_hparams()
     p.batch_sz = 16
@@ -38,6 +38,12 @@ def sch_s2s():
     p.decoder_init_strategy = "avg_all"
     p.enc_attn = 'dot_product'
 
+    return p
+
+@Registry.hparamset()
+def sch_cpcfg2s():
+    p = sch_tdpcfg2s()
+    p.compound_encoder = 'cpcfg'
     return p
 
 
