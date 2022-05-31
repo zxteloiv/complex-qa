@@ -28,10 +28,10 @@ class TDPCFG(PCFGMixin):
 
         @checkpoint
         def transform_left_t(x, left):
-            '''
+            """
             :param x: shape (batch, n, T)
             :return: shape (batch, n, r)
-            '''
+            """
             return (x.unsqueeze(-1) + left.unsqueeze(1)).logsumexp(2)
 
         @checkpoint
@@ -48,11 +48,11 @@ class TDPCFG(PCFGMixin):
 
         # @checkpoint
         def merge(Y, Z):
-            '''
+            """
             :param Y: shape (batch, n, w, r)
             :param Z: shape (batch, n, w, r)
             :return: shape (batch, n, x)
-            '''
+            """
             # contract dimension w.
             b_n_r = (Y + Z).logsumexp(-2)
             # contract dimension r.

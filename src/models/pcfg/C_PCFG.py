@@ -155,14 +155,12 @@ class CompoundPCFG(PCFGModule):
 
         device = x.device
         for width in range(1, n):
-            lvl_b = un_(tr_(width, device=device), 0)                 # (pos=1, sublvl)
-            pos_b = un_(tr_(n - width, device=device), 1)             # (pos, subpos=1)
-            lvl_c = un_(tr_(width - 1, -1, -1, device=device), 0)     # (pos=1, sublvl), reversed lvl_b
-            pos_c = un_(tr_(1, width + 1, device=device), 0) + pos_b  # (pos=(n-width), subpos=width))
-
+            coordinates = self._get_inside_coordinates(n, width, device)
+            b_score, c_score = self._inside_chart_select(score, coordinates)
             # *_score: (batch, pos=(n - width), arrangement=width, NT_T, NT_T)
-            b_score = score[:, lvl_b, pos_b, :, None].clone()
-            c_score = score[:, lvl_c, pos_c, None, :].clone()
+            b_score = b_score.unsqueeze(-1)
+            c_score = c_score.unsqueeze(-2)
+
             # score_arr: (batch, pos=(n-width), A=NT, arrangement=width, B=NT_T, C=NT_T)
             score_arr = un_(b_score + c_score, 2) + un_(un_(rule_logp, 1), 3)
             # a_score: (batch, pos, NT)
@@ -174,8 +172,9 @@ class CompoundPCFG(PCFGModule):
                 # recall score_arr: (batch, pos, A=NT, arrangement, B, C)
 
                 # b/c_hid: (batch, pos, 1, arrangement, B/C, hid)
-                b_hid = self.binary_composer_left(emb_chart[:, lvl_b, pos_b, :].clone()).unsqueeze(2)
-                c_hid = self.binary_composer_right(emb_chart[:, lvl_c, pos_c, :].clone()).unsqueeze(2)
+                b_repr, c_repr = self._inside_chart_select(emb_chart, coordinates)
+                b_hid = self.binary_composer_left(b_repr).unsqueeze(2)
+                c_hid = self.binary_composer_right(c_repr).unsqueeze(2)
 
                 # b/c_weight: (batch, pos, A, arrangement, B/C, 1)
                 b_weight = torch.logsumexp(score_arr, dim=(-1)).unsqueeze(-1)
@@ -201,6 +200,22 @@ class CompoundPCFG(PCFGModule):
             return logPx, mem
         else:
             return logPx
+
+    def _get_inside_coordinates(self, n: int, width: int, device):
+        un_ = torch.unsqueeze
+        tr_ = torch.arange
+        lvl_b = un_(tr_(width, device=device), 0)  # (pos=1, sublvl)
+        pos_b = un_(tr_(n - width, device=device), 1)  # (pos, subpos=1)
+        lvl_c = un_(tr_(width - 1, -1, -1, device=device), 0)  # (pos=1, sublvl), reversed lvl_b
+        pos_c = un_(tr_(1, width + 1, device=device), 0) + pos_b  # (pos=(n-width), subpos=width))
+        return lvl_b, pos_b, lvl_c, pos_c
+
+    def _inside_chart_select(self, score_chart, coordinates):
+        lvl_b, pos_b, lvl_c, pos_c = coordinates
+        # *_score: (batch, pos=(n - width), arrangement=width, NT_T)
+        b_score = score_chart[:, lvl_b, pos_b].clone()
+        c_score = score_chart[:, lvl_c, pos_c].clone()
+        return b_score, c_score
 
     def set_condition(self, conditions):
         pass

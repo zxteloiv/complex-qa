@@ -22,7 +22,7 @@ def sch_s2s():
     p.src_namespace = 'sent'
     p.tgt_namespace = 'sql'
     p.encoder = 'bilstm'
-    p.compound_encoder = 'cpcfg'
+    p.compound_encoder = 'tdpcfg'
     p.num_pcfg_nt = 30
     p.num_pcfg_pt = 60
 
