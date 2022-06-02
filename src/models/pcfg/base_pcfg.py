@@ -21,7 +21,7 @@ class PCFGModule(torch.nn.Module):
     def set_condition(self, conditions):
         raise NotImplementedError
 
-    def conditioned_generate(self, conditions=None):
+    def generate(self, pcfg_params):
         raise NotImplementedError
 
 

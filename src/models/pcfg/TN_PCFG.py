@@ -15,7 +15,7 @@ class TNPCFG(CompoundPCFG):
                  num_preterminal: int,
                  num_vocab_token: int,
                  hidden_sz: int,
-                 emb_enc: EmbedAndEncode,
+                 emb_enc: EmbedAndEncode = None,
                  z_dim: Optional[int] = None,
                  encoding_dim: int = None,
                  padding_id: int = 0,
@@ -150,56 +150,3 @@ class TNPCFG(CompoundPCFG):
             mem = (roots.reshape(b, 1, 1, self.NT, 1).exp() * chart).sum(3).reshape(b, (n - 1) * n, -1)
             return logPx, mem
         return logPx
-
-    def forward(self, input, **kwargs):
-        x = input['word']
-        b, n = x.shape[:2]
-
-        def roots():
-            roots = self.root_mlp(self.root_emb).log_softmax(-1)
-            return roots.expand(b, roots.shape[-1]).contiguous()
-
-        def terms():
-            term_prob = self.term_mlp(self.term_emb).log_softmax(-1)
-            term_prob = term_prob.unsqueeze(0).unsqueeze(1).expand(
-                b, n, self.T, self.V
-            )
-            indices = x.unsqueeze(2).expand(b, n, self.T).unsqueeze(3)
-            term_prob = torch.gather(term_prob, 3, indices).squeeze(3)
-            return term_prob
-
-        def rules():
-            rule_state_emb = self.rule_state_emb
-            nonterm_emb = rule_state_emb[:self.NT]
-            head = self.parent_mlp(nonterm_emb).log_softmax(-1)
-            left = self.left_mlp(rule_state_emb).log_softmax(-2)
-            right = self.right_mlp(rule_state_emb).log_softmax(-2)
-            head = head.unsqueeze(0).expand(b, *head.shape)
-            left = left.unsqueeze(0).expand(b, *left.shape)
-            right = right.unsqueeze(0).expand(b, *right.shape)
-            return head, left, right
-
-        root, unary, (head, left, right) = roots(), terms(), rules()
-
-        return {'unary': unary,
-                'root': root,
-                'head': head,
-                'left': left,
-                'right': right,
-                'kl': 0}
-
-    def loss(self, input):
-        rules = self.forward(input)
-        result = self.pcfg._inside(rules=rules, lens=input['seq_len'])
-        logZ = -result['partition'].mean()
-        return logZ
-
-    def evaluate(self, input, decode_type, **kwargs):
-        rules = self.forward(input)
-        if decode_type == 'viterbi':
-            raise NotImplementedError("TD-PCFG cannot be downgraded back to viterbi decoding by design.")
-
-        elif decode_type == 'mbr':
-            return self.pcfg.decode(rules=rules, lens=input['seq_len'], viterbi=False, mbr=True)
-        else:
-            raise NotImplementedError
