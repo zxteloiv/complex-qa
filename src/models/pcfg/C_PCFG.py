@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, Tuple
 
 import torch
 import torch.nn as nn
@@ -223,12 +223,9 @@ class CompoundPCFG(PCFGModule):
         # rules: (b, NT, NT_T, NT_T)
         roots, terms, rules = pcfg_params
         batch_sz, _, vocab_sz = terms.size()
-        rules = rules.reshape(batch_sz, self.NT, -1)
 
         stack = TensorBatchStack(batch_sz, self.NT, 1, dtype=torch.long, device=roots.device)
         output = TensorBatchStack(batch_sz, self.NT, 1, dtype=torch.long, device=roots.device)
-
-        batch_range = torch.arange(batch_sz, device=roots.device)
 
         succ = stack.push(roots.argmax(-1, keepdim=True), push_mask=None)
         step: int = 0
@@ -240,12 +237,10 @@ class CompoundPCFG(PCFGModule):
             lhs_is_nt = (token < self.NT).squeeze()
             lhs_not_nt = ~lhs_is_nt
 
-            words = terms[batch_range, (token - self.NT).squeeze() * lhs_not_nt * succ].argmax(-1, keepdim=True)
+            words = self._generate_next_term(pcfg_params, token, lhs_not_nt * succ)
             output.push(words, push_mask=lhs_not_nt * succ)
 
-            rhs = rules[batch_range, token.squeeze() * lhs_is_nt * succ].argmax(1, keepdim=True) # (batch,) <-- (batch, NT_T ** 2)
-            rhs_b = rhs.div(self.NT_T, rounding_mode='floor')   # equivalent to py3 //
-            rhs_c = rhs % self.NT_T
+            rhs_b, rhs_c = self._generate_next_nonterms(pcfg_params, token, lhs_is_nt * succ)
             succ *= stack.push(rhs_c, lhs_is_nt * succ)
             succ *= stack.push(rhs_b, lhs_is_nt * succ)
 
@@ -260,3 +255,24 @@ class CompoundPCFG(PCFGModule):
         # mean, logvar: (batch, z_dim)
         result = -0.5 * (logvar - torch.pow(mean, 2) - torch.exp(logvar) + 1)
         return result
+
+    def _generate_next_term(self, pcfg_params, token, term_mask) -> torch.LongTensor:
+        roots, terms, _ = pcfg_params
+        batch_sz, _, vocab_sz = terms.size()
+        batch_range = torch.arange(batch_sz, device=roots.device)
+        words = terms[batch_range, (token - self.NT).squeeze() * term_mask].argmax(-1, keepdim=True)
+        return words    # (batch, 1)
+
+    def _generate_next_nonterms(self, pcfg_params, token, nonterm_mask) -> Tuple[torch.LongTensor, torch.LongTensor]:
+        roots, terms, rules = pcfg_params
+        batch_sz, _, vocab_sz = terms.size()
+        rules = rules.reshape(batch_sz, self.NT, -1)    # (batch, NT, NT_T ** 2)
+
+        batch_range = torch.arange(batch_sz, device=roots.device)
+        rhs = rules[batch_range, token.squeeze() * nonterm_mask].argmax(1, keepdim=True)    # (batch, 1)
+
+        rhs_b = rhs.div(self.NT_T, rounding_mode='floor')  # equivalent to py3 //
+        rhs_c = rhs % self.NT_T
+
+        return rhs_b, rhs_c     # (batch, 1), (batch, 1)
+

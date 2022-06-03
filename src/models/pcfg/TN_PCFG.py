@@ -1,4 +1,4 @@
-from typing import Optional, List, Union
+from typing import Optional, List, Union, Tuple
 
 import torch
 import torch.nn as nn
@@ -150,3 +150,16 @@ class TNPCFG(CompoundPCFG):
             mem = (roots.reshape(b, 1, 1, self.NT, 1).exp() * chart).sum(3).reshape(b, (n - 1) * n, -1)
             return logPx, mem
         return logPx
+
+    def _generate_next_nonterms(self,
+                                pcfg_params,    # (b, NT), (b, T, V), [(b, NT, r), (b, NT_T, r) * 2]
+                                token,          # (b, 1)
+                                nonterm_mask    # (b,)
+                                ) -> Tuple[torch.LongTensor, torch.LongTensor]:
+        roots, terms, (head, left, right) = pcfg_params
+        batch_sz = head.size()[0]
+        batch_range = torch.arange(batch_sz, device=head.device, dtype=torch.long)
+        head_r = head[batch_range, token.squeeze() * nonterm_mask].unsqueeze(1)     # (batch, 1, r)
+        rhs_b = torch.logsumexp(head_r + left, dim=-1).argmax(-1, keepdim=True)     # (batch, 1)
+        rhs_c = torch.logsumexp(head_r + right, dim=-1).argmax(-1, keepdim=True)    # (batch, 1)
+        return rhs_b, rhs_c

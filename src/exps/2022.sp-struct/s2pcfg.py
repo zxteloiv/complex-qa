@@ -54,9 +54,9 @@ def _base_hparams():
     p.num_enc_layers = 1
 
     # pcfg
-    p.decoder = 'cpcfg'
-    p.num_pcfg_nt = 10
-    p.num_pcfg_pt = 40
+    p.decoder = 'tdpcfg'
+    p.num_pcfg_nt = 100
+    p.num_pcfg_pt = 200
     p.td_pcfg_rank = p.num_pcfg_nt // 10
     p.pcfg_hidden_dim = p.hidden_sz
     return p
