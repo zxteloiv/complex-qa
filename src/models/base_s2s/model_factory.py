@@ -231,6 +231,8 @@ class EmbEncBundleMixin:
                 hidden_sz=getattr(p, 'pcfg_hidden_dim', p.hidden_sz),
                 emb_enc=emb_enc,
                 encoding_dim=getattr(p, 'pcfg_encoding_dim', p.hidden_sz),
+                preterminal_reduction=p.pcfg_preterminal_reduction,
+                nonterminal_reduction=p.pcfg_nonterminal_reduction,
             ))
         elif compound_emb_enc == 'tdpcfg':
             from ..pcfg.pcfg_emb_enc import PCFGEmbedEncode
@@ -243,6 +245,8 @@ class EmbEncBundleMixin:
                 hidden_sz=getattr(p, 'pcfg_hidden_dim', p.hidden_sz),
                 emb_enc=emb_enc,
                 encoding_dim=getattr(p, 'pcfg_encoding_dim', p.hidden_sz),
+                preterminal_reduction=p.pcfg_preterminal_reduction,
+                nonterminal_reduction=p.pcfg_nonterminal_reduction,
             ))
 
 

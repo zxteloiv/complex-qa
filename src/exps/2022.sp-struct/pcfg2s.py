@@ -38,12 +38,22 @@ def sch_tdpcfg2s():
     p.decoder_init_strategy = "avg_all"
     p.enc_attn = 'dot_product'
 
+    p.pcfg_preterminal_reduction = 'mean'   # mean, norm_score
+    p.pcfg_nonterminal_reduction = 'mean'   # mean, norm_score, root_score
+
     return p
 
 @Registry.hparamset()
 def sch_cpcfg2s():
     p = sch_tdpcfg2s()
     p.compound_encoder = 'cpcfg'
+    return p
+
+@Registry.hparamset()
+def sch_cpcfg2s_norm_reduction():
+    p = sch_cpcfg2s()
+    p.pcfg_preterminal_reduction = 'norm_score'   # mean, norm_score
+    p.pcfg_nonterminal_reduction = 'root_score'   # mean, norm_score, root_score
     return p
 
 

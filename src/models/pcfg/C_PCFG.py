@@ -1,4 +1,4 @@
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Literal, Union, List
 
 import torch
 import torch.nn as nn
@@ -16,6 +16,15 @@ def unit_norm(x, p=2, eps=1e-12):
     return x / x.norm(p=p, dim=-1, keepdim=True).clamp(min=eps)
 
 
+def _un(x: torch.Tensor, dims: Union[List[int], int]):
+    if isinstance(dims, int):
+        return x.unsqueeze(dims)
+    else:
+        for d in sorted(dims):
+            x = x.unsqueeze(d)
+        return x
+
+
 class CompoundPCFG(PCFGModule):
     def __init__(self,
                  num_nonterminal: int,
@@ -26,6 +35,8 @@ class CompoundPCFG(PCFGModule):
                  z_dim: Optional[int] = None,
                  encoding_dim: int = None,
                  padding_id: int = 0,
+                 preterminal_reduction: Literal['mean', 'norm_score'] = 'mean',
+                 nonterminal_reduction: Literal['mean', 'norm_score', 'root_score'] = 'mean',
                  ):
         super().__init__()
 
@@ -56,6 +67,9 @@ class CompoundPCFG(PCFGModule):
 
         self.NT_T = self.NT + self.T
         self.rule_mlp = nn.Linear(compound_sz, self.NT_T ** 2)
+
+        self.preterminal_reduction = preterminal_reduction
+        self.nonterminal_reduction = nonterminal_reduction
 
         # re-use the RNN and embeddings of the inference net, to build a new
         self.emb_enc = emb_enc
@@ -132,26 +146,11 @@ class CompoundPCFG(PCFGModule):
         # rules: (batch, NT, NT+T, NT+T)
         roots, term_logp, rule_logp = pcfg_params
         b, n = x.size()
-        score = x.new_full((b, n, n, self.NT_T), -1e9)  # the chart jointly saves nonterminals and preterminals
-        NTs = slice(0, self.NT)                         # NTs proceed all Ts
-        Ts = slice(self.NT, self.NT_T)
-        un_ = torch.unsqueeze    # alias, for brevity
+        NTs = slice(0, self.NT)  # NTs proceed all Ts
         tr_ = torch.arange
 
-        # 0, (batch, n, T)
-        level0 = un_(term_logp, 1).expand(b, n, self.T, self.V).gather(
-            index=un_(un_(x, -1).expand(b, n, self.T), -1), dim=-1,
-        ).squeeze(-1)
-        score[:, 0, :, Ts] = level0
-
-        emb_chart = None
-        if x_hid is not None:
-            emb_chart = x_hid.new_zeros(b, n, n, self.NT_T, self.encoding_dim)
-            term_hid = self.unary_composer_term(self.term_emb)  # (T, hid)
-            word_hid = self.unary_composer_word(x_hid)          # (b, n, hid)
-            emb_chart[:, 0, :, Ts] = unit_norm(un_(un_(term_hid, 0), 1) + un_(word_hid, 2))   # (b, n, T, hid)
-
-            a_hid = self.binary_composer_head(self.nonterm_emb)[None, None, :]  # (1, 1, NT, hid)
+        # score: (b, n, n, NT_T)
+        score, emb_chart, a_hid = self._chart_init(x, pcfg_params, x_hid)
 
         device = x.device
         for width in range(1, n):
@@ -162,43 +161,100 @@ class CompoundPCFG(PCFGModule):
             c_score = c_score.unsqueeze(-2)
 
             # score_arr: (batch, pos=(n-width), A=NT, arrangement=width, B=NT_T, C=NT_T)
-            score_arr = un_(b_score + c_score, 2) + un_(un_(rule_logp, 1), 3)
+            score_arr = _un(b_score + c_score, 2) + _un(_un(rule_logp, 1), 3)
             # a_score: (batch, pos, NT)
             a_score = torch.logsumexp(score_arr, dim=(3, 4, 5))
             score[:, width, :n - width, NTs] = a_score
 
-            if x_hid is not None:
-                # to save storage, the computation is factored into 3 parts
-                # recall score_arr: (batch, pos, A=NT, arrangement, B, C)
-
-                # b/c_hid: (batch, pos, 1, arrangement, B/C, hid)
-                b_repr, c_repr = self._inside_chart_select(emb_chart, coordinates)
-                b_hid = self.binary_composer_left(b_repr).unsqueeze(2)
-                c_hid = self.binary_composer_right(c_repr).unsqueeze(2)
-
-                # b/c_weight: (batch, pos, A, arrangement, B/C, 1)
-                b_weight = torch.logsumexp(score_arr, dim=(-1)).unsqueeze(-1)
-                c_weight = torch.logsumexp(score_arr, dim=(-2)).unsqueeze(-1)
-
-                # b/c_factor: (batch, pos, A, hid)
-                b_factor = (b_hid * b_weight.exp()).sum(dim=(3, 4))
-                c_factor = (c_hid * c_weight.exp()).sum(dim=(3, 4))
-
-                # a_hid: (1, 1, A, hid)
-                # a_score: (batch, pos, A)
-                a_factor = a_hid * un_(a_score, -1).exp()
-
-                normalized_abc = unit_norm(a_factor + b_factor + c_factor)
-                emb_chart[:, width, :n - width, NTs] = normalized_abc
+            reduced_abc = self._write_emb_chart(emb_chart, coordinates, pcfg_params,
+                                                score_arr=score_arr, a_score=a_score, a_hid=a_hid)
+            emb_chart[:, width, :n - width] = reduced_abc
 
         lengths = (x != self.padding).sum(-1)
         logPxs = score[tr_(b, device=device), lengths - 1, 0, NTs] + roots       # (b, NT)
         logPx = torch.logsumexp(logPxs, dim=1)  # sum out the start NT
         if x_hid is not None:
-            chart = emb_chart[:, 1:, :, NTs]     # (b, n - 1, n, NT, hid)
-            mem = (roots.reshape(b, 1, 1, self.NT, 1).exp() * chart).sum(3).reshape(b, (n - 1) * n, -1)
+            chart = emb_chart[:, 1:, :]     # (b, n - 1, n, hid)
+            # mem = (roots.reshape(b, 1, 1, self.NT, 1).exp() * chart).sum(3).reshape(b, (n - 1) * n, -1)
+            mem = chart.reshape(b, (n - 1) * n, self.encoding_dim)
             return logPx, mem
         return logPx
+
+    def _chart_init(self, x, pcfg_params, x_hid: Optional):
+        # x, x_mask: (batch, n)
+        # x_hid: (batch, n, hid), must be of the same length as x
+        # roots: (batch, NT)
+        # terms: (batch, T, V)
+        # rules: (batch, NT, NT+T, NT+T)
+        roots, term_logp, rule_logp = pcfg_params
+        b, n = x.size()
+        score = x.new_full((b, n, n, self.NT_T), -1e9)  # the chart jointly saves nonterminals and preterminals
+        un_ = torch.unsqueeze    # alias, for brevity
+
+        # 0, (batch, n, T, 1)
+        level0 = un_(term_logp, 1).expand(b, n, self.T, self.V).gather(
+            index=un_(un_(x, -1).expand(b, n, self.T), -1), dim=-1,
+        )
+        score[:, 0, :, self.NT:self.NT_T] = level0.squeeze(-1)
+
+        if x_hid is None:
+            return score, None, None
+
+        emb_chart = x_hid.new_zeros(b, n, n, self.encoding_dim)
+        term_hid = self.unary_composer_term(self.term_emb)  # (T, hid)
+        word_hid = self.unary_composer_word(x_hid)          # (b, n, hid)
+        wt_hid = unit_norm(un_(un_(term_hid, 0), 1) + un_(word_hid, 2))     # (b, n, T, hid)
+
+        if self.preterminal_reduction == 'mean':
+            l0_hid = wt_hid.mean(dim=-2)
+        elif self.preterminal_reduction == 'norm_score':
+            l0_hid = (wt_hid * level0.softmax(-2)).sum(dim=-2)  # softmax on the log-prob scale
+        else:
+            raise ValueError(f'unsupported preterminal reduction: {self.preterminal_reduction}')
+
+        emb_chart[:, 0, :] = l0_hid
+        a_hid = self.binary_composer_head(self.nonterm_emb)[None, None, :]  # (1, 1, NT, hid)
+
+        return score, emb_chart, a_hid
+
+    def _write_emb_chart(self, emb_chart, coordinates, pcfg_params, **ctx):
+        # to save storage, the computation is factored into 3 parts
+        # recall score_arr: (batch, pos, A=NT, arrangement, B, C)
+        score_arr, a_score, a_hid = ctx['score_arr'], ctx['a_score'], ctx['a_hid']
+        roots, _, _ = pcfg_params
+
+        # b/c_hid: (batch, pos, 1, arrangement, hid)
+        b_repr, c_repr = self._inside_chart_select(emb_chart, coordinates)
+        b_hid = self.binary_composer_left(b_repr).unsqueeze(2)
+        c_hid = self.binary_composer_right(c_repr).unsqueeze(2)
+        bc_hid = b_hid + c_hid
+
+        # bc_weight: (batch, pos, A, arrangement, 1)
+        bc_weigt = torch.logsumexp(score_arr, dim=(4, 5)).unsqueeze(-1)
+
+        # bc_factor: (batch, pos, A, hid)
+        bc_factor = (bc_weigt.exp() * bc_hid).sum(dim=3)
+
+        # a_hid: (1, 1, A, hid)
+        # a_score: (batch, pos, A)
+        a_factor = a_hid * a_score.unsqueeze(-1).exp()
+
+        # (batch, pos, A, hid)
+        normalized_abc = unit_norm(a_factor + bc_factor)
+        reduced_abc = self._nonterm_emb_reduction(normalized_abc, a_score, roots)
+        return reduced_abc
+
+    def _nonterm_emb_reduction(self, normalized_abc, a_score, roots):
+        if self.nonterminal_reduction == 'mean':
+            reduced_abc = normalized_abc.mean(dim=-2)
+        elif self.nonterminal_reduction == 'norm_score':
+            reduced_abc = (a_score.softmax(-1).unsqueeze(-1) * normalized_abc).sum(-2)
+        elif self.nonterminal_reduction == 'root_score':
+            # roots: (batch, NT) -> (batch, 1, NT, 1)
+            reduced_abc = (roots.unsqueeze(1).exp().unsqueeze(-1) * normalized_abc).sum(-2)
+        else:
+            raise ValueError(f'unrecognized nonterminal reduction: {self.nonterminal_reduction}')
+        return reduced_abc
 
     def _get_inside_coordinates(self, n: int, width: int, device):
         un_ = torch.unsqueeze
