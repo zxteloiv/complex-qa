@@ -44,6 +44,20 @@ def sch_tdpcfg2s():
     return p
 
 @Registry.hparamset()
+def sch_tdpcfg2s_small():
+    p = sch_tdpcfg2s()
+    p.num_pcfg_nt = 30
+    p.num_pcfg_pt = 60
+    return p
+
+@Registry.hparamset()
+def sch_tdpcfg2s_norm():
+    p = sch_tdpcfg2s()
+    p.pcfg_preterminal_reduction = 'norm_score'   # mean, norm_score
+    p.pcfg_nonterminal_reduction = 'root_score'   # mean, norm_score, root_score
+    return p
+
+@Registry.hparamset()
 def sch_cpcfg2s():
     p = sch_tdpcfg2s()
     p.num_pcfg_nt = 30
