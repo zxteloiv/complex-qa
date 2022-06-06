@@ -1,9 +1,9 @@
-from typing import Optional, List, Union, Tuple
+from typing import Optional, List, Union, Tuple, Literal
 
 import torch
 import torch.nn as nn
 
-from .C_PCFG import CompoundPCFG, unit_norm
+from .C_PCFG import CompoundPCFG, unit_norm, _un
 from .res import ResLayer
 from ..interfaces.encoder import EmbedAndEncode
 
@@ -19,9 +19,13 @@ class TNPCFG(CompoundPCFG):
                  z_dim: Optional[int] = None,
                  encoding_dim: int = None,
                  padding_id: int = 0,
+                 preterminal_reduction: Literal['mean', 'norm_score'] = 'mean',
+                 nonterminal_reduction: Literal['mean', 'norm_score', 'root_score'] = 'mean',
                  ):
         super(TNPCFG, self).__init__(num_nonterminal, num_preterminal, num_vocab_token,
-                                     hidden_sz, emb_enc, z_dim, encoding_dim, padding_id)
+                                     hidden_sz, emb_enc, z_dim, encoding_dim, padding_id,
+                                     preterminal_reduction=preterminal_reduction,
+                                     nonterminal_reduction=nonterminal_reduction)
         self.r = rank
 
         self.rule_mlp = None    # decomposed and set None
@@ -71,32 +75,9 @@ class TNPCFG(CompoundPCFG):
         # left/right: (batch, NT_T, r), normalized on dim=-2
         roots, term_logp, (head, left, right) = pcfg_params
         b, n = x.size()
-        score = x.new_full((b, n, n, self.NT_T), -1e9)  # the chart jointly saves nonterminals and preterminals
         NTs = slice(0, self.NT)                         # NTs proceed all Ts
-        Ts = slice(self.NT, self.NT_T)
 
-        def un_(x: torch.Tensor, dims: Union[List[int], int]):
-            if isinstance(dims, int):
-                return x.unsqueeze(dims)
-            else:
-                for d in sorted(dims):
-                    x = x.unsqueeze(d)
-                return x
-
-        # 0, (batch, n, T)
-        level0 = un_(term_logp, 1).expand(b, n, self.T, self.V).gather(
-            index=un_(un_(x, -1).expand(b, n, self.T), -1), dim=-1,
-        ).squeeze(-1)
-        score[:, 0, :, Ts] = level0
-
-        emb_chart = None
-        if x_hid is not None:
-            emb_chart = x_hid.new_zeros(b, n, n, self.NT_T, self.encoding_dim)
-            term_hid = self.unary_composer_term(self.term_emb)  # (T, hid)
-            word_hid = self.unary_composer_word(x_hid)          # (b, n, hid)
-            emb_chart[:, 0, :, Ts] = unit_norm(un_(un_(term_hid, 0), 1) + un_(word_hid, 2))   # (b, n, T, hid)
-
-            a_hid = self.binary_composer_head(self.nonterm_emb)[None, None, :]  # (1, 1, NT, hid)
+        score, emb_chart, a_hid = self._chart_init(x, pcfg_params, x_hid)
 
         device = x.device
         for width in range(1, n):
@@ -104,52 +85,63 @@ class TNPCFG(CompoundPCFG):
             # b/c_score: (batch, pos=(n - width), arrangement=width, NT_T)
             b_score, c_score = self._inside_chart_select(score, coordinates)
 
-            # left/right: (batch, 1, 1, NT_T, r, 1) <- (batch, NT_T, r)
+            # left/right: (batch, 1, 1, NT_T, r) <- (batch, NT_T, r)
             # vb/wc_score: (batch, pos, arr, r)
-            vb_score = (un_(left, [1, 2]) + un_(b_score, -1)).logsumexp(dim=-2)
-            wc_score = (un_(right, [1, 2]) + un_(c_score, -1)).logsumexp(dim=-2)
+            vb_score = (_un(left, [1, 2]) + _un(b_score, -1)).logsumexp(dim=-2)
+            wc_score = (_un(right, [1, 2]) + _un(c_score, -1)).logsumexp(dim=-2)
 
-            vbwc_score = (vb_score + wc_score).logsumexp(dim=-2).unsqueeze(2)   # (b, pos, 1, r)
-            uvbwc_score = un_(head, 1) + vbwc_score                             # (b, pos, NT, r)
-            a_score = uvbwc_score.logsumexp(-1)                                 # (b, pos, NT)
+            vbwc_score = vb_score + wc_score    # (b, pos, arr, r)
+            uvbwc_score = _un(head, 1) + vbwc_score.logsumexp(dim=2, keepdim=True)  # (b, pos, NT, r)
+            a_score = uvbwc_score.logsumexp(-1)                                     # (b, pos, NT)
             score[:, width, :n - width, NTs] = a_score
 
             if x_hid is not None:
-                # to save storage, the computation is factored into 3 parts
-                # recall score_arr: (batch, pos, A=NT, arrangement, B, C)
-
-                # b/c_hid: (batch, pos, arrangement, B/C, hid)
-                b_repr, c_repr = self._inside_chart_select(emb_chart, coordinates)
-                b_hid = un_(b_score, -1).exp() * self.binary_composer_left(b_repr)
-                c_hid = un_(c_score, -1).exp() * self.binary_composer_right(c_repr)
-
-                # left/right: (batch, 1, 1, NT_T, r, 1) <- (batch, NT_T, r)
-                vb_hid = (un_(left, [1, 2, 5]).exp() * un_(b_hid, -2)).sum(3)   # (batch, pos, arr, ~~B/C~~, r, hid)
-                wc_hid = (un_(right, [1, 2, 5]).exp() * un_(c_hid, -2)).sum(3)  # -> (batch, pos, arr,       r, hid)
-
-                # (batch, pos, ~~arr~~, r, hid)
-                vb_hid_wc = (vb_hid * un_(wc_score, -1).exp()).sum(2)
-                vb_wc_hid = (un_(vb_score, -1).exp() * wc_hid).sum(2)
-
-                # head: (batch, NT, r)
-                # b/c_factor: (batch, pos, r, hid)
-                bc_factor = torch.matmul(un_(head, 1).exp(), vb_hid_wc + vb_wc_hid)
-
-                # a_hid: (1, 1, A, hid)
-                # a_score: (batch, pos, A)
-                a_factor = a_hid * un_(a_score, -1).exp()
-
-                normalized_abc = unit_norm(a_factor + bc_factor)
-                emb_chart[:, width, :n - width, NTs] = normalized_abc
+                reduced_abc = self._write_emb_chart(emb_chart, coordinates, pcfg_params,
+                                                    vbwc_score=vbwc_score, a_score=a_score, a_hid=a_hid)
+                emb_chart[:, width, :n - width] = reduced_abc
 
         lengths = (x != self.padding).sum(-1)
         logPxs = score[torch.arange(b, device=device), lengths - 1, 0, NTs] + roots       # (b, NT)
         logPx = torch.logsumexp(logPxs, dim=1)  # sum out the start nonterm S
         if x_hid is not None:
-            chart = emb_chart[:, 1:, :, NTs]     # (b, n - 1, n, NT, hid)
-            mem = (roots.reshape(b, 1, 1, self.NT, 1).exp() * chart).sum(3).reshape(b, (n - 1) * n, -1)
+            chart = emb_chart[:, 1:, :]     # (b, n - 1, n, NT)
+            mem = chart.reshape(b, (n - 1) * n, self.encoding_dim)
             return logPx, mem
         return logPx
+
+    def _write_emb_chart(self, emb_chart, coordinates, pcfg_params, **ctx):
+        # to save storage, the computation is factored into 3 parts
+        # recall score_arr: (batch, pos, A=NT, arrangement, B, C)
+        roots, term, (head, left, right) = pcfg_params
+        # vbwc_score: (b, pos, arr, r)
+        # a_score: (b, pos, NT)
+        # a_hid: (1, 1, NT, hid)
+        vbwc_score, a_score, a_hid = list(map(ctx.get, ('vbwc_score', 'a_score', 'a_hid')))
+
+        # *_hid: (batch, pos, arrangement, hid)
+        b_repr, c_repr = self._inside_chart_select(emb_chart, coordinates)
+        b_hid = self.binary_composer_left(b_repr)
+        c_hid = self.binary_composer_right(c_repr)
+
+        # vbwc_t: (b, pos, r, arr)
+        vbwc_t = vbwc_score.transpose(-1, -2)
+        # bc_hid: (b, pos, arr, hid)
+        bc_hid = b_hid + c_hid
+
+        # bc_hid: (b, pos, 1, r, hid)
+        bc_hid_rs = torch.matmul(vbwc_t.exp(), bc_hid).unsqueeze(2)
+        # head: (batch, NT, r), normalized on dim=-1
+        # bc_factor: (b, pos, NT, ~~r~~, hid)
+        bc_factor = (_un(head, [1, 4]).exp() * bc_hid_rs).sum(-2)
+
+        # a_hid: (1, 1, A, hid)
+        # a_score: (batch, pos, A)
+        # a_factor: (b, pos, A, hid)
+        a_factor = a_hid * _un(a_score, -1).exp()
+
+        reduced_abc = self._nonterm_emb_reduction(a_factor + bc_factor, a_score, roots)
+        normalized_abc = self.binary_norm(reduced_abc)
+        return normalized_abc
 
     def _generate_next_nonterms(self,
                                 pcfg_params,    # (b, NT), (b, T, V), [(b, NT, r), (b, NT_T, r) * 2]

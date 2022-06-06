@@ -23,8 +23,8 @@ def sch_tdpcfg2s():
     p.tgt_namespace = 'sql'
     p.encoder = 'bilstm'
     p.compound_encoder = 'tdpcfg'
-    p.num_pcfg_nt = 30
-    p.num_pcfg_pt = 60
+    p.num_pcfg_nt = 150
+    p.num_pcfg_pt = 300
 
     p.emb_sz = 100
     p.hidden_sz = 200
@@ -46,6 +46,8 @@ def sch_tdpcfg2s():
 @Registry.hparamset()
 def sch_cpcfg2s():
     p = sch_tdpcfg2s()
+    p.num_pcfg_nt = 30
+    p.num_pcfg_pt = 60
     p.compound_encoder = 'cpcfg'
     return p
 
@@ -53,6 +55,28 @@ def sch_cpcfg2s():
 def sch_cpcfg2s_norm_reduction():
     p = sch_cpcfg2s()
     p.pcfg_preterminal_reduction = 'norm_score'   # mean, norm_score
+    p.pcfg_nonterminal_reduction = 'root_score'   # mean, norm_score, root_score
+    return p
+
+@Registry.hparamset()
+def sch_cpcfg2s_norm_norm_reduction():
+    p = sch_cpcfg2s()
+    p.pcfg_preterminal_reduction = 'norm_score'   # mean, norm_score
+    p.pcfg_nonterminal_reduction = 'norm_score'   # mean, norm_score, root_score
+    return p
+
+@Registry.hparamset()
+def sch_cpcfg2s_mean_root_reduction():
+    p = sch_cpcfg2s()
+    p.pcfg_preterminal_reduction = 'mean'         # mean, norm_score
+    p.pcfg_nonterminal_reduction = 'root_score'   # mean, norm_score, root_score
+    return p
+
+@Registry.hparamset()
+def sch_cpcfg2tranx_mean_root_reduction():
+    p = sch_cpcfg2s()
+    p.tgt_namespace = 'rule_seq'
+    p.pcfg_preterminal_reduction = 'mean'         # mean, norm_score
     p.pcfg_nonterminal_reduction = 'root_score'   # mean, norm_score, root_score
     return p
 

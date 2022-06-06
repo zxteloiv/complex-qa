@@ -84,6 +84,9 @@ class CompoundPCFG(PCFGModule):
             self.binary_composer_right = ResLayer(encoding_dim, encoding_dim)
             self.binary_composer_head = ResLayer(encoding_dim, encoding_dim)
 
+            self.unary_norm = nn.LayerNorm(encoding_dim)
+            self.binary_norm = nn.LayerNorm(encoding_dim)
+
         self._initialize()
 
     def _initialize(self):
@@ -175,7 +178,6 @@ class CompoundPCFG(PCFGModule):
         logPx = torch.logsumexp(logPxs, dim=1)  # sum out the start NT
         if x_hid is not None:
             chart = emb_chart[:, 1:, :]     # (b, n - 1, n, hid)
-            # mem = (roots.reshape(b, 1, 1, self.NT, 1).exp() * chart).sum(3).reshape(b, (n - 1) * n, -1)
             mem = chart.reshape(b, (n - 1) * n, self.encoding_dim)
             return logPx, mem
         return logPx
@@ -189,11 +191,10 @@ class CompoundPCFG(PCFGModule):
         roots, term_logp, rule_logp = pcfg_params
         b, n = x.size()
         score = x.new_full((b, n, n, self.NT_T), -1e9)  # the chart jointly saves nonterminals and preterminals
-        un_ = torch.unsqueeze    # alias, for brevity
 
         # 0, (batch, n, T, 1)
-        level0 = un_(term_logp, 1).expand(b, n, self.T, self.V).gather(
-            index=un_(un_(x, -1).expand(b, n, self.T), -1), dim=-1,
+        level0 = _un(term_logp, 1).expand(b, n, self.T, self.V).gather(
+            index=_un(_un(x, -1).expand(b, n, self.T), -1), dim=-1,
         )
         score[:, 0, :, self.NT:self.NT_T] = level0.squeeze(-1)
 
@@ -203,16 +204,16 @@ class CompoundPCFG(PCFGModule):
         emb_chart = x_hid.new_zeros(b, n, n, self.encoding_dim)
         term_hid = self.unary_composer_term(self.term_emb)  # (T, hid)
         word_hid = self.unary_composer_word(x_hid)          # (b, n, hid)
-        wt_hid = unit_norm(un_(un_(term_hid, 0), 1) + un_(word_hid, 2))     # (b, n, T, hid)
+        wt_hid = _un(term_hid, [0, 1]) + _un(word_hid, 2)   # (b, n, T, hid)
 
         if self.preterminal_reduction == 'mean':
-            l0_hid = wt_hid.mean(dim=-2)
+            reduced_wt = wt_hid.mean(dim=-2)
         elif self.preterminal_reduction == 'norm_score':
-            l0_hid = (wt_hid * level0.softmax(-2)).sum(dim=-2)  # softmax on the log-prob scale
+            reduced_wt = (wt_hid * level0.softmax(-2)).sum(dim=-2)  # softmax on the log-prob scale
         else:
             raise ValueError(f'unsupported preterminal reduction: {self.preterminal_reduction}')
 
-        emb_chart[:, 0, :] = l0_hid
+        emb_chart[:, 0, :] = self.unary_norm(reduced_wt)
         a_hid = self.binary_composer_head(self.nonterm_emb)[None, None, :]  # (1, 1, NT, hid)
 
         return score, emb_chart, a_hid
@@ -230,19 +231,19 @@ class CompoundPCFG(PCFGModule):
         bc_hid = b_hid + c_hid
 
         # bc_weight: (batch, pos, A, arrangement, 1)
-        bc_weigt = torch.logsumexp(score_arr, dim=(4, 5)).unsqueeze(-1)
+        bc_weight = torch.logsumexp(score_arr, dim=(4, 5)).unsqueeze(-1)
 
         # bc_factor: (batch, pos, A, hid)
-        bc_factor = (bc_weigt.exp() * bc_hid).sum(dim=3)
+        bc_factor = (bc_weight.exp() * bc_hid).sum(dim=3)
 
         # a_hid: (1, 1, A, hid)
         # a_score: (batch, pos, A)
         a_factor = a_hid * a_score.unsqueeze(-1).exp()
 
         # (batch, pos, A, hid)
-        normalized_abc = unit_norm(a_factor + bc_factor)
-        reduced_abc = self._nonterm_emb_reduction(normalized_abc, a_score, roots)
-        return reduced_abc
+        reduced_abc = self._nonterm_emb_reduction(a_factor + bc_factor, a_score, roots)
+        normalized_abc = self.binary_norm(reduced_abc)
+        return normalized_abc
 
     def _nonterm_emb_reduction(self, normalized_abc, a_score, roots):
         if self.nonterminal_reduction == 'mean':
