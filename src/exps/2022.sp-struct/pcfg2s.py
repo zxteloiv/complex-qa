@@ -44,6 +44,20 @@ def sch_tdpcfg2s():
     return p
 
 @Registry.hparamset()
+def sch_tdpcfg2s_big():
+    p = sch_tdpcfg2s()
+    p.encoder = 'lstm'
+    p.num_pcfg_nt = 250
+    p.num_pcfg_pt = 500
+    p.td_pcfg_rank = 50
+
+    p.emb_sz = 100
+    p.hidden_sz = 200
+    p.pcfg_hidden_dim = p.hidden_sz
+    p.pcfg_encoding_dim = 200
+    return p
+
+@Registry.hparamset()
 def sch_tdpcfg2s_small():
     p = sch_tdpcfg2s()
     p.num_pcfg_nt = 30
