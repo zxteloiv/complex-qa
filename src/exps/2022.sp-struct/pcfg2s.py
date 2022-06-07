@@ -23,8 +23,9 @@ def sch_tdpcfg2s():
     p.tgt_namespace = 'sql'
     p.encoder = 'bilstm'
     p.compound_encoder = 'tdpcfg'
-    p.num_pcfg_nt = 150
-    p.num_pcfg_pt = 300
+    p.num_pcfg_nt = 30
+    p.num_pcfg_pt = 60
+    p.td_pcfg_rank = 30
 
     p.emb_sz = 100
     p.hidden_sz = 200
@@ -44,31 +45,10 @@ def sch_tdpcfg2s():
     return p
 
 @Registry.hparamset()
-def sch_tdpcfg2s_big():
+def sch_tdpcfg2s_sum_reduction():
     p = sch_tdpcfg2s()
-    p.encoder = 'lstm'
-    p.num_pcfg_nt = 250
-    p.num_pcfg_pt = 500
-    p.td_pcfg_rank = 50
-
-    p.emb_sz = 100
-    p.hidden_sz = 200
-    p.pcfg_hidden_dim = p.hidden_sz
-    p.pcfg_encoding_dim = 200
-    return p
-
-@Registry.hparamset()
-def sch_tdpcfg2s_small():
-    p = sch_tdpcfg2s()
-    p.num_pcfg_nt = 30
-    p.num_pcfg_pt = 60
-    return p
-
-@Registry.hparamset()
-def sch_tdpcfg2s_norm():
-    p = sch_tdpcfg2s()
-    p.pcfg_preterminal_reduction = 'norm_score'   # mean, norm_score
-    p.pcfg_nonterminal_reduction = 'root_score'   # mean, norm_score, root_score
+    p.pcfg_preterminal_reduction = 'sum'   # mean, norm_score
+    p.pcfg_nonterminal_reduction = 'sum'   # mean, norm_score, root_score
     return p
 
 @Registry.hparamset()
@@ -80,24 +60,10 @@ def sch_cpcfg2s():
     return p
 
 @Registry.hparamset()
-def sch_cpcfg2s_norm_reduction():
+def sch_cpcfg2s_sum_reduction():
     p = sch_cpcfg2s()
-    p.pcfg_preterminal_reduction = 'norm_score'   # mean, norm_score
-    p.pcfg_nonterminal_reduction = 'root_score'   # mean, norm_score, root_score
-    return p
-
-@Registry.hparamset()
-def sch_cpcfg2s_norm_norm_reduction():
-    p = sch_cpcfg2s()
-    p.pcfg_preterminal_reduction = 'norm_score'   # mean, norm_score
-    p.pcfg_nonterminal_reduction = 'norm_score'   # mean, norm_score, root_score
-    return p
-
-@Registry.hparamset()
-def sch_cpcfg2s_mean_root_reduction():
-    p = sch_cpcfg2s()
-    p.pcfg_preterminal_reduction = 'mean'         # mean, norm_score
-    p.pcfg_nonterminal_reduction = 'root_score'   # mean, norm_score, root_score
+    p.pcfg_preterminal_reduction = 'sum'   # mean, norm_score
+    p.pcfg_nonterminal_reduction = 'sum'   # mean, norm_score, root_score
     return p
 
 @Registry.hparamset()

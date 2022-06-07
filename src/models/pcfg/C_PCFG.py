@@ -210,6 +210,8 @@ class CompoundPCFG(PCFGModule):
             reduced_wt = wt_hid.mean(dim=-2)
         elif self.preterminal_reduction == 'norm_score':
             reduced_wt = (wt_hid * level0.softmax(-2)).sum(dim=-2)  # softmax on the log-prob scale
+        elif self.preterminal_reduction == 'sum':
+            reduced_wt = wt_hid.sum(dim=-2)
         else:
             raise ValueError(f'unsupported preterminal reduction: {self.preterminal_reduction}')
 
@@ -253,6 +255,8 @@ class CompoundPCFG(PCFGModule):
         elif self.nonterminal_reduction == 'root_score':
             # roots: (batch, NT) -> (batch, 1, NT, 1)
             reduced_abc = (roots.unsqueeze(1).exp().unsqueeze(-1) * normalized_abc).sum(-2)
+        elif self.nonterminal_reduction == 'sum':
+            reduced_abc = normalized_abc.sum(dim=-2)
         else:
             raise ValueError(f'unrecognized nonterminal reduction: {self.nonterminal_reduction}')
         return reduced_abc
