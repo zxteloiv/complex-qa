@@ -170,7 +170,7 @@ class CompoundPCFG(PCFGModule):
                                                     score_arr=score_arr, a_score=a_score, cat_hids=cat_hids,
                                                     b_score=b_score, c_score=c_score,
                                                     )
-            emb_chart[:, width, :n - width] = chart_layer
+            emb_chart[:, width, :n - width] = unit_norm(chart_layer)
 
         lengths = (x != self.padding).sum(-1)
         logPxs = score[tr_(b), lengths - 1, 0, NTs] + roots       # (b, NT)
