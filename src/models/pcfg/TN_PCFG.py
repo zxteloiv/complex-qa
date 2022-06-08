@@ -19,13 +19,10 @@ class TNPCFG(CompoundPCFG):
                  z_dim: Optional[int] = None,
                  encoding_dim: int = None,
                  padding_id: int = 0,
-                 preterminal_reduction: Literal['mean', 'norm_score'] = 'mean',
-                 nonterminal_reduction: Literal['mean', 'norm_score', 'root_score'] = 'mean',
                  ):
         super(TNPCFG, self).__init__(num_nonterminal, num_preterminal, num_vocab_token,
                                      hidden_sz, emb_enc, z_dim, encoding_dim, padding_id,
-                                     preterminal_reduction=preterminal_reduction,
-                                     nonterminal_reduction=nonterminal_reduction)
+                                     )
         self.r = rank
 
         self.rule_mlp = None    # decomposed and set None
@@ -77,7 +74,10 @@ class TNPCFG(CompoundPCFG):
         b, n = x.size()
         NTs = slice(0, self.NT)                         # NTs proceed all Ts
 
-        score, emb_chart, a_hid = self._chart_init(x, pcfg_params, x_hid)
+        # score: (b, n, n, NT_T)
+        score, emb_chart = self._chart_init(x, pcfg_params, x_hid)
+        # cat_hids: [(NT, hid), (T, hid), (NT_T, hid)]
+        cat_hids = self._get_category_embeddings()
 
         device = x.device
         for width in range(1, n):
