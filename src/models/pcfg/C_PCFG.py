@@ -2,11 +2,9 @@ from typing import Optional, Tuple, Literal, Union, List
 
 import torch
 import torch.nn as nn
-from allennlp.nn.util import masked_max
 
 from .base_pcfg import PCFGMixin, PCFGModule
 from .res import ResLayer
-from torch.nn.utils.rnn import pad_packed_sequence, pack_padded_sequence
 from ..modules.batched_stack import TensorBatchStack
 
 from ..interfaces.encoder import EmbedAndEncode
@@ -31,12 +29,16 @@ class CompoundPCFG(PCFGModule):
                  num_preterminal: int,
                  num_vocab_token: int,
                  hidden_sz: int,
-                 emb_enc: EmbedAndEncode = None,
+                 encoder_input_dim: Optional[int],
                  z_dim: Optional[int] = None,
-                 encoding_dim: int = None,
+                 encoding_out_dim: int = None,
                  padding_id: int = 0,
                  ):
         super().__init__()
+        #
+        # For PCFG Params: (hidden_sz (embedding) + z_dim (external),) -> (start, binary, unary rules)
+        # For PCFG as an encoder: (encoder_input_dim,) -> (encoding_dim,)
+        #
 
         self.NT = num_nonterminal
         self.T = num_preterminal
@@ -45,7 +47,7 @@ class CompoundPCFG(PCFGModule):
 
         self.hidden_sz = hidden_sz
         self.z_dim = z_dim or hidden_sz
-        self.encoding_dim = encoding_dim or hidden_sz
+        self.encoding_out_dim = encoding_out_dim or hidden_sz
 
         self.term_emb = nn.Parameter(torch.randn(self.T, self.hidden_sz))
         self.nonterm_emb = nn.Parameter(torch.randn(self.NT, self.hidden_sz))
@@ -66,21 +68,18 @@ class CompoundPCFG(PCFGModule):
         self.NT_T = self.NT + self.T
         self.rule_mlp = nn.Linear(compound_sz, self.NT_T ** 2)
 
-        # re-use the RNN and embeddings of the inference net, to build a new
-        self.emb_enc = emb_enc
-        if emb_enc is not None:
-            self.infer_net = nn.Linear(emb_enc.get_output_dim(), self.z_dim * 2)
-
+        if encoder_input_dim is not None:   # otherwise no encoding is required, only for generation
             # compose embeddings according to unary and binary rules
-            self.unary_composer_word = nn.Sequential(nn.Linear(emb_enc.get_output_dim(), encoding_dim),
-                                                     ResLayer(encoding_dim, encoding_dim))
-            self.binary_left_nonterm = ResLayer(encoding_dim, encoding_dim)
-            self.binary_left_chart = ResLayer(encoding_dim, encoding_dim)
-            self.binary_right_nonterm = ResLayer(encoding_dim, encoding_dim)
-            self.binary_right_chart = ResLayer(encoding_dim, encoding_dim)
-            self.binary_head = ResLayer(encoding_dim, encoding_dim)
+            _hid_dim = encoding_out_dim
+            self.unary_composer_word = nn.Sequential(nn.Linear(encoder_input_dim, _hid_dim),
+                                                     ResLayer(_hid_dim, _hid_dim))
+            self.binary_left_nonterm = ResLayer(_hid_dim, _hid_dim)
+            self.binary_left_chart = ResLayer(_hid_dim, _hid_dim)
+            self.binary_right_nonterm = ResLayer(_hid_dim, _hid_dim)
+            self.binary_right_chart = ResLayer(_hid_dim, _hid_dim)
+            self.binary_head = ResLayer(_hid_dim, _hid_dim)
 
-            self.category_mapping = ResLayer(encoding_dim, encoding_dim)
+            self.category_mapping = ResLayer(_hid_dim, _hid_dim)
 
         self._initialize()
 
@@ -88,32 +87,6 @@ class CompoundPCFG(PCFGModule):
         for p in self.parameters():
             if p.dim() > 1:
                 torch.nn.init.xavier_uniform_(p)
-
-    def encode(self, x: torch.Tensor):
-        assert x is not None
-        # q_*: (batch, z_dim)
-        x_hid, q_mean, q_logvar = self.run_inference(x)
-
-        kl = self.kl(q_mean, q_logvar).sum(1)
-        z = self.reparameterized_sample(q_mean, q_logvar)
-        pcfg_params = self.get_pcfg_params(z)
-
-        logPx, mem = self.inside(x, pcfg_params, x_hid)
-        return logPx, kl, mem
-
-    def run_inference(self, x):
-        layered_state, state_mask = self.emb_enc(x)     # (b, N, d)
-        state = layered_state[-1]
-        pooled = masked_max(state, state_mask.bool().unsqueeze(-1), dim=1)     # (b, d)
-        q_mean, q_logvar = self.infer_net(pooled).split(self.z_dim, dim=1)
-        return state, q_mean, q_logvar
-
-    def reparameterized_sample(self, q_mean, q_logvar):
-        z = q_mean  # use q_mean to approximate during evaluation
-        if self.training:
-            noise = q_mean.new_zeros(q_mean.size()).normal_(0, 1)
-            z = q_mean + (.5 * q_logvar).exp() * noise  # z = u + sigma * noise
-        return z
 
     def get_pcfg_params(self, z):
         b = z.size()[0]     # the pcfg is dependent on z, which is differently sampled in the batch
@@ -150,15 +123,15 @@ class CompoundPCFG(PCFGModule):
         def tr_(*args, **kwargs):
             return torch.arange(*args, **kwargs, device=device)
 
-        # score: (b, n, n, NT_T)
-        score, emb_chart = self._chart_init(x, pcfg_params, x_hid)
+        score = self._score_chart_init(x, pcfg_params)              # (b, n, n, NT_T)
+        emb_chart = self._emb_chart_init(x, pcfg_params, x_hid)     # (b, n, n, ...)
         # cat_hids: [(NT, hid), (T, hid), (NT_T, hid)]
         cat_hids = self._get_category_embeddings()
 
         for width in range(1, n):
-            coordinates = self._get_inside_coordinates(n, width, device)
+            coordinates = self.get_inside_coordinates(n, width, device)
             # b/c_score: (batch, pos=(n - width), arrangement=width, NT_T)
-            b_score, c_score = self._inside_chart_select(score, coordinates)
+            b_score, c_score = self.inside_chart_select(score, coordinates)
 
             # score_arr: (batch, pos=(n-width), A=NT, arrangement=width, B=NT_T, C=NT_T)
             score_arr = _un(_un(b_score, -1) + _un(c_score, -2), 2) + _un(rule_logp, [1, 3])
@@ -178,13 +151,13 @@ class CompoundPCFG(PCFGModule):
         if x_hid is not None:
             # fixing the length layer embedding
             chart = emb_chart[:, 1:, :]     # (b, n - 1, n, hid)
-            mem = chart.reshape(b, (n - 1) * n, 1, self.encoding_dim)
+            mem = chart.reshape(b, (n - 1) * n, 1, self.encoding_out_dim)
             correction = _un(cat_hids[-1], [0, 1])
             corrected_mem = ((mem + correction) * _un(roots, [1, 3]).exp()).sum(dim=2)  # (b, n(n-1), hid)
             return logPx, corrected_mem
         return logPx
 
-    def _chart_init(self, x, pcfg_params, x_hid: Optional):
+    def _score_chart_init(self, x, pcfg_params):
         # x, x_mask: (batch, n)
         # x_hid: (batch, n, hid), must be of the same length as x
         # roots: (batch, NT)
@@ -199,13 +172,16 @@ class CompoundPCFG(PCFGModule):
             index=_un(_un(x, -1).expand(b, n, self.T), -1), dim=-1,
         )
         s_chart[:, 0, :, self.NT:self.NT_T] = level0.squeeze(-1)
+        return s_chart
 
+    def _emb_chart_init(self, x, pcfg_params, x_hid):
         if x_hid is None:
-            return s_chart, None
+            return None
 
-        emb_chart = x_hid.new_zeros(b, n, n, self.encoding_dim)
+        b, n = x.size()
+        emb_chart = x_hid.new_zeros(b, n, n, self.encoding_out_dim)
         emb_chart[:, 0] = self.unary_composer_word(x_hid)          # (b, n, hid)
-        return s_chart, emb_chart
+        return emb_chart
 
     def _get_category_embeddings(self):
         a_hid = self.binary_head(self.nonterm_emb)          # (NT, hid)
@@ -248,7 +224,7 @@ class CompoundPCFG(PCFGModule):
     def _get_cell_factor(self, emb_chart, coordinates, bc_weight):
         # 1. Cell factor. extend size to (b, pos, A, arr, hid), then multiply and sum
         # l/r_cell, cell_hid: (b, pos, arr, hid)
-        l_cell, r_cell = self._inside_chart_select(emb_chart, coordinates)
+        l_cell, r_cell = self.inside_chart_select(emb_chart, coordinates)
         cell_hid = self.binary_left_chart(l_cell) + self.binary_right_chart(r_cell)
         cell_hid_ex = _un(cell_hid, 2)              # (b, pos, 1, arr, hid)
 
@@ -282,22 +258,6 @@ class CompoundPCFG(PCFGModule):
         else:
             raise ValueError(f'unrecognized nonterminal reduction: {self.nonterminal_reduction}')
         return reduced_abc
-
-    def _get_inside_coordinates(self, n: int, width: int, device):
-        un_ = torch.unsqueeze
-        tr_ = torch.arange
-        lvl_b = un_(tr_(width, device=device), 0)  # (pos=1, sublvl)
-        pos_b = un_(tr_(n - width, device=device), 1)  # (pos, subpos=1)
-        lvl_c = un_(tr_(width - 1, -1, -1, device=device), 0)  # (pos=1, sublvl), reversed lvl_b
-        pos_c = un_(tr_(1, width + 1, device=device), 0) + pos_b  # (pos=(n-width), subpos=width))
-        return lvl_b, pos_b, lvl_c, pos_c
-
-    def _inside_chart_select(self, score_chart, coordinates):
-        lvl_b, pos_b, lvl_c, pos_c = coordinates
-        # *_score: (batch, pos=(n - width), arrangement=width, NT_T)
-        b_score = score_chart[:, lvl_b, pos_b].clone()
-        c_score = score_chart[:, lvl_c, pos_c].clone()
-        return b_score, c_score
 
     @torch.no_grad()
     def generate(self, pcfg_params, max_steps=80):
@@ -333,12 +293,6 @@ class CompoundPCFG(PCFGModule):
         buffer, mask = output.dump()
         return buffer, mask
 
-    @staticmethod
-    def kl(mean, logvar):
-        # mean, logvar: (batch, z_dim)
-        result = -0.5 * (logvar - torch.pow(mean, 2) - torch.exp(logvar) + 1)
-        return result
-
     def _generate_next_term(self, pcfg_params, token, term_mask) -> torch.LongTensor:
         roots, terms, _ = pcfg_params
         batch_sz, _, vocab_sz = terms.size()
@@ -359,3 +313,5 @@ class CompoundPCFG(PCFGModule):
 
         return rhs_b, rhs_c     # (batch, 1), (batch, 1)
 
+    def get_encoder_output_size(self):
+        return self.encoding_out_dim

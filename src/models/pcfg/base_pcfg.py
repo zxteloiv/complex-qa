@@ -15,7 +15,7 @@ class PCFGModule(torch.nn.Module):
     def inference(self, x):
         raise NotImplementedError
 
-    def encode(self, x):
+    def get_pcfg_params(self, z):
         raise NotImplementedError
 
     def set_condition(self, conditions):
@@ -23,6 +23,30 @@ class PCFGModule(torch.nn.Module):
 
     def generate(self, pcfg_params):
         raise NotImplementedError
+
+    def inside(self, x, pcfg_params, x_hid=None):
+        raise NotImplementedError
+
+    def get_encoder_output_size(self):
+        raise NotImplementedError
+
+    @staticmethod
+    def get_inside_coordinates(n: int, width: int, device):
+        un_ = torch.unsqueeze
+        tr_ = torch.arange
+        lvl_b = un_(tr_(width, device=device), 0)  # (pos=1, sublvl)
+        pos_b = un_(tr_(n - width, device=device), 1)  # (pos, subpos=1)
+        lvl_c = un_(tr_(width - 1, -1, -1, device=device), 0)  # (pos=1, sublvl), reversed lvl_b
+        pos_c = un_(tr_(1, width + 1, device=device), 0) + pos_b  # (pos=(n-width), subpos=width))
+        return lvl_b, pos_b, lvl_c, pos_c
+
+    @staticmethod
+    def inside_chart_select(score_chart, coordinates):
+        lvl_b, pos_b, lvl_c, pos_c = coordinates
+        # *_score: (batch, pos=(n - width), arrangement=width, NT_T)
+        b_score = score_chart[:, lvl_b, pos_b].clone()
+        c_score = score_chart[:, lvl_c, pos_c].clone()
+        return b_score, c_score
 
 
 class PCFGMixin:

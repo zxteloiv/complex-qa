@@ -221,30 +221,38 @@ class EmbEncBundleMixin:
 
     def get_seq_compound_bundle(self, emb_enc: EmbedAndEncode):
         p, vocab = self.p, self.vocab
+        # a compound EmbEnc is an EmbEnc that depends on another EmbEnc.
         compound_emb_enc = getattr(p, 'compound_encoder', None)
-        if compound_emb_enc == 'cpcfg':
-            from ..pcfg.pcfg_emb_enc import PCFGEmbedEncode, CompoundPCFG
-            return PCFGEmbedEncode(CompoundPCFG(
-                num_nonterminal=p.num_pcfg_nt,
-                num_preterminal=p.num_pcfg_pt,
-                num_vocab_token=vocab.get_vocab_size(p.src_namespace),
-                hidden_sz=getattr(p, 'pcfg_hidden_dim', p.hidden_sz),
-                emb_enc=emb_enc,
-                encoding_dim=getattr(p, 'pcfg_encoding_dim', p.hidden_sz),
-            ))
-        elif compound_emb_enc == 'tdpcfg':
-            from ..pcfg.pcfg_emb_enc import PCFGEmbedEncode
-            from ..pcfg.TN_PCFG import TNPCFG
-            return PCFGEmbedEncode(TNPCFG(
-                rank=getattr(p, 'td_pcfg_rank', p.num_pcfg_nt // 10),
-                num_nonterminal=p.num_pcfg_nt,
-                num_preterminal=p.num_pcfg_pt,
-                num_vocab_token=vocab.get_vocab_size(p.src_namespace),
-                hidden_sz=getattr(p, 'pcfg_hidden_dim', p.hidden_sz),
-                emb_enc=emb_enc,
-                encoding_dim=getattr(p, 'pcfg_encoding_dim', p.hidden_sz),
-            ))
 
+        if compound_emb_enc == 'cpcfg':
+            from ..pcfg.pcfg_emb_enc import CompoundPCFGEmbedEncode
+            from ..pcfg.C_PCFG import CompoundPCFG
+            return CompoundPCFGEmbedEncode(
+                pcfg=CompoundPCFG(
+                    num_nonterminal=p.num_pcfg_nt,
+                    num_preterminal=p.num_pcfg_pt,
+                    num_vocab_token=vocab.get_vocab_size(p.src_namespace),
+                    hidden_sz=getattr(p, 'pcfg_hidden_dim', p.hidden_sz),
+                    encoder_input_dim=emb_enc.get_output_dim(),
+                    encoding_out_dim=getattr(p, 'pcfg_encoding_dim', p.hidden_sz),
+                ),
+                emb_enc=emb_enc,
+                z_dim=getattr(p, 'pcfg_hidden_dim', p.hidden_sz),
+            )
+        elif compound_emb_enc == 'tdpcfg':
+            from ..pcfg.pcfg_emb_enc import CompoundPCFGEmbedEncode
+            from ..pcfg.TN_PCFG import TNPCFG
+            return CompoundPCFGEmbedEncode(
+                pcfg=TNPCFG(
+                    rank=getattr(p, 'td_pcfg_rank', p.num_pcfg_nt // 10),
+                    num_nonterminal=p.num_pcfg_nt,
+                    num_preterminal=p.num_pcfg_pt,
+                    num_vocab_token=vocab.get_vocab_size(p.src_namespace),
+                    hidden_sz=getattr(p, 'pcfg_hidden_dim', p.hidden_sz),
+                    encoding_dim=getattr(p, 'pcfg_encoding_dim', p.hidden_sz),
+                ),
+                emb_enc=emb_enc,
+            )
 
         return emb_enc
 
