@@ -1,3 +1,5 @@
+from typing import Tuple
+
 import torch
 from .fn import stripe, diagonal_copy_, diagonal, checkpoint
 
@@ -18,12 +20,6 @@ class PCFGModule(torch.nn.Module):
     def get_pcfg_params(self, z):
         raise NotImplementedError
 
-    def set_condition(self, conditions):
-        raise NotImplementedError
-
-    def generate(self, pcfg_params):
-        raise NotImplementedError
-
     def inside(self, x, pcfg_params, x_hid=None):
         raise NotImplementedError
 
@@ -41,12 +37,60 @@ class PCFGModule(torch.nn.Module):
         return lvl_b, pos_b, lvl_c, pos_c
 
     @staticmethod
-    def inside_chart_select(score_chart, coordinates):
+    def inside_chart_select(score_chart, coordinates, detach: bool = False):
         lvl_b, pos_b, lvl_c, pos_c = coordinates
         # *_score: (batch, pos=(n - width), arrangement=width, NT_T)
-        b_score = score_chart[:, lvl_b, pos_b].clone()
-        c_score = score_chart[:, lvl_c, pos_c].clone()
+        if detach:
+            b_score = score_chart[:, lvl_b, pos_b].detach()
+            c_score = score_chart[:, lvl_c, pos_c].detach()
+        else:
+            b_score = score_chart[:, lvl_b, pos_b].clone()
+            c_score = score_chart[:, lvl_c, pos_c].clone()
         return b_score, c_score
+
+    def set_condition(self, conditions):
+        raise NotImplementedError
+
+    @torch.no_grad()
+    def generate(self, pcfg_params, max_steps: int):
+        from ..modules.batched_stack import TensorBatchStack
+        # roots: (b, NT)
+        # terms: (b, T, V)
+        # rules: (b, NT, NT_T, NT_T)
+        roots, terms, rules = pcfg_params
+        batch_sz, _, vocab_sz = terms.size()
+
+        stack = TensorBatchStack(batch_sz, self.NT, 1, dtype=torch.long, device=roots.device)
+        output = TensorBatchStack(batch_sz, self.NT, 1, dtype=torch.long, device=roots.device)
+
+        succ = stack.push(roots.argmax(-1, keepdim=True), push_mask=None)
+        step: int = 0
+        stack_not_empty: torch.BoolTensor = stack.top()[1] > 0    # (batch,)
+        while succ.bool().any() and stack_not_empty.any() and step < max_steps:
+            # (batch, 1), (batch,)
+            token, pop_succ = stack.pop(stack_not_empty * succ)   # only nonterm tokens stored on the stack
+            succ *= pop_succ
+            lhs_is_nt = (token < self.NT).squeeze()
+            lhs_not_nt = ~lhs_is_nt
+
+            words = self.generate_next_term(pcfg_params, token, lhs_not_nt * succ)
+            output.push(words, push_mask=lhs_not_nt * succ)
+
+            rhs_b, rhs_c = self.generate_next_nonterms(pcfg_params, token, lhs_is_nt * succ)
+            succ *= stack.push(rhs_c, lhs_is_nt * succ)
+            succ *= stack.push(rhs_b, lhs_is_nt * succ)
+
+            stack_not_empty: torch.BoolTensor = stack.top()[1] > 0    # (batch,)
+            step += 1
+
+        buffer, mask = output.dump()
+        return buffer, mask
+
+    def generate_next_term(self, pcfg_params, token, term_mask) -> torch.LongTensor:
+        raise NotImplementedError
+
+    def generate_next_nonterms(self, pcfg_params, token, nonterm_mask) -> Tuple[torch.LongTensor, torch.LongTensor]:
+        raise NotImplementedError
 
 
 class PCFGMixin:

@@ -12,7 +12,7 @@ class CompoundPCFGEmbedEncode(EmbedAndEncode):
     def __init__(self,
                  pcfg: PCFGModule,
                  emb_enc: EmbedAndEncode,
-                 z_dim: int = None,
+                 z_dim: int,
                  padding: int = 0,
                  ):
         super().__init__()

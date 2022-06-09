@@ -233,6 +233,7 @@ class EmbEncBundleMixin:
                     num_preterminal=p.num_pcfg_pt,
                     num_vocab_token=vocab.get_vocab_size(p.src_namespace),
                     hidden_sz=getattr(p, 'pcfg_hidden_dim', p.hidden_sz),
+                    z_dim=getattr(p, 'pcfg_hidden_dim', p.hidden_sz),
                     encoder_input_dim=emb_enc.get_output_dim(),
                     encoding_out_dim=getattr(p, 'pcfg_encoding_dim', p.hidden_sz),
                 ),
@@ -249,9 +250,12 @@ class EmbEncBundleMixin:
                     num_preterminal=p.num_pcfg_pt,
                     num_vocab_token=vocab.get_vocab_size(p.src_namespace),
                     hidden_sz=getattr(p, 'pcfg_hidden_dim', p.hidden_sz),
-                    encoding_dim=getattr(p, 'pcfg_encoding_dim', p.hidden_sz),
+                    z_dim=getattr(p, 'pcfg_hidden_dim', p.hidden_sz),
+                    encoder_input_dim=emb_enc.get_output_dim(),
+                    emb_chart_dim=getattr(p, 'pcfg_encoding_dim', p.hidden_sz),
                 ),
                 emb_enc=emb_enc,
+                z_dim=getattr(p, 'pcfg_hidden_dim', p.hidden_sz),
             )
 
         return emb_enc
