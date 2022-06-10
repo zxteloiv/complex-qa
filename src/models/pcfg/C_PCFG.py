@@ -136,18 +136,15 @@ class CompoundPCFG(PCFGModule):
             # rule_logp: (b, A, B, C)
             b_score, c_score = self.inside_chart_select(score, coordinates)
 
-            # (b, pos, ~~arr~~, B, C)
-            bc_score = (_un(b_score, -1) + _un(c_score, -2)).logsumexp(dim=2, keepdim=True)
-
-            # (b, pos, A, ~~B~~, ~~C~~) <-- (b, 1, A, B, C) + (b, pos, 1, B, C)
-            a_score = (_un(rule_logp, 1) + bc_score).logsumexp(dim=(3, 4))
+            # (b, pos, A, arr, B, C)
+            score_arr = _un(_un(b_score, -1) + _un(c_score, -2), 2) + _un(rule_logp, [1, 3])
+            # (b, pos, A)
+            a_score = score_arr.logsumexp(dim=(3, 4, 5))
             score[:, width, :n - width, NTs] = a_score
 
             if x_hid is not None:
                 chart_layer = self._get_emb_chart_layer(emb_chart, coordinates, pcfg_params,
-                                                        b_score=b_score, c_score=c_score,
-                                                        a_score=a_score, a_hid=a_hid,
-                                                        )
+                                                        score_arr=score_arr, a_score=a_score, a_hid=a_hid,)
                 emb_chart[:, width, :n - width, NTs] = unit_norm(chart_layer)
 
         lengths = (x != self.padding).sum(-1)
@@ -196,39 +193,29 @@ class CompoundPCFG(PCFGModule):
     def _get_emb_chart_layer(self, emb_chart, coordinates, pcfg_params, **ctx):
         # a_hid: (A=NT, hid)
         a_hid = ctx['a_hid']
-        # a_score: (b, pos, A), b/c_score: (b, pos, arr, B/C)
-        a_score, b_score, c_score = ctx['a_score'], ctx['b_score'], ctx['c_score']
-        # roots: (batch, A)
-        # terms: (batch, T, V)
-        # rules: (batch, A, B, C)
-        roots, terms, rules = pcfg_params
+        # a_score: (b, pos, A), score_arr: (b, pos, A, arr, B, C)
+        a_score, score_arr = ctx['a_score'], ctx['score_arr']
 
-        # l/r_cell, b/c_hid: (b, pos, arr, B/C=NT_T, hid)
+        # l/r_cell: (b, pos, arr, B/C=NT_T, hid)
         l_cell, r_cell = self.inside_chart_select(emb_chart, coordinates)
-        b_hid = self.binary_left(l_cell)
-        c_hid = self.binary_right(r_cell)
 
-        # (b, pos, arr, 1, B/C, hid)
-        b_factor = (b_hid * _un(b_score, -1).exp()).unsqueeze(3)
-        c_factor = (c_hid * _un(c_score, -1).exp()).unsqueeze(3)
+        # b/c_hid: (b, pos, 1, arr, B/C=NT_T, hid)
+        b_hid = self.binary_left(l_cell).unsqueeze(2)
+        c_hid = self.binary_right(r_cell).unsqueeze(2)
 
-        # (b, pos, arr, A, B, 1) <--
-        #          (b, 1, 1, A, B, C)  + (b, pos, arr, 1, 1, C)
-        b_weight = (_un(rules, [1, 2]) + _un(c_score, [3, 4])).logsumexp(dim=5, keepdim=True).exp()
+        # (b, pos, A, arr, B/C, 1)
+        b_weight = score_arr.logsumexp(dim=-1, keepdim=True)
+        c_weight = score_arr.logsumexp(dim=-2).unsqueeze(-1)
 
-        # (b, pos, arr, A, C, 1) <-- (note the difference of sum on B@dim4, instead of C@dim5 above
-        #          (b, 1, 1, A, B, C)  + (b, pos, arr, 1, B, 1)
-        c_weight = (_un(rules, [1, 2]) + _un(b_score, [3, 5])).logsumexp(dim=4).unsqueeze(-1).exp()
-
-        # (b, pos, ~~arr~~, A, ~~B/C~~, hid)
-        b_item = (b_factor * b_weight).sum(dim=(2, 4))
-        c_item = (c_factor * c_weight).sum(dim=(2, 4))
+        # (b, pos, A, ~~arr~~, ~~B/C~~, hid)
+        b_factor = (b_weight.exp() * b_hid).sum(dim=(3, 4))
+        c_factor = (c_weight.exp() * c_hid).sum(dim=(3, 4))
 
         # (b, pos, A, 1)
         a_score_ex = _un(a_score, -1).exp()
 
         # (b, pos, A, hid)
-        chart_layer = (b_item + c_item) / (a_score_ex + 1e-30) + _un(a_hid, [0, 1])
+        chart_layer = (b_factor + c_factor) / (a_score_ex + 1e-30) + _un(a_hid, [0, 1])
         return chart_layer
 
     def generate_next_term(self, pcfg_params, token, term_mask) -> torch.LongTensor:

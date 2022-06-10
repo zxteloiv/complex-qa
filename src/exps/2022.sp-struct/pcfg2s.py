@@ -44,8 +44,8 @@ def sch_tdpcfg2s():
 @Registry.hparamset()
 def sch_cpcfg2s():
     p = sch_tdpcfg2s()
-    p.num_pcfg_nt = 20
-    p.num_pcfg_pt = 40
+    p.num_pcfg_nt = 30
+    p.num_pcfg_pt = 60
     p.compound_encoder = 'cpcfg'
     return p
 
