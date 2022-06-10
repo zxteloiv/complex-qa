@@ -30,7 +30,7 @@ class CompoundPCFG(PCFGModule):
                  hidden_sz: int,
                  encoder_input_dim: Optional[int],
                  z_dim: Optional[int] = None,
-                 encoding_out_dim: int = None,
+                 emb_chart_dim: int = None,
                  padding_id: int = 0,
                  ):
         super().__init__()
@@ -46,7 +46,8 @@ class CompoundPCFG(PCFGModule):
 
         self.hidden_sz = hidden_sz
         self.z_dim = z_dim or hidden_sz
-        self.encoding_out_dim = encoding_out_dim or hidden_sz
+        self.emb_chart_dim = emb_chart_dim or hidden_sz
+        self.encoder_input_dim = encoder_input_dim
 
         self.term_emb = nn.Parameter(torch.randn(self.T, self.hidden_sz))
         self.nonterm_emb = nn.Parameter(torch.randn(self.NT, self.hidden_sz))
@@ -68,19 +69,21 @@ class CompoundPCFG(PCFGModule):
         self.rule_mlp = nn.Linear(compound_sz, self.NT_T ** 2)
 
         if encoder_input_dim is not None:   # otherwise no encoding is required, only for generation
-            # compose embeddings according to unary and binary rules
-            _hid_dim = encoding_out_dim
-            self.unary_composer_word = nn.Sequential(nn.Linear(encoder_input_dim, _hid_dim),
-                                                     ResLayer(_hid_dim, _hid_dim))
-            self.binary_left_nonterm = ResLayer(_hid_dim, _hid_dim)
-            self.binary_left_chart = ResLayer(_hid_dim, _hid_dim)
-            self.binary_right_nonterm = ResLayer(_hid_dim, _hid_dim)
-            self.binary_right_chart = ResLayer(_hid_dim, _hid_dim)
-            self.binary_head = ResLayer(_hid_dim, _hid_dim)
-
-            self.category_mapping = ResLayer(_hid_dim, _hid_dim)
+            self._init_encoder_modules()
 
         self._initialize()
+
+    def _init_encoder_modules(self):
+        chart_dim = self.emb_chart_dim
+        self.unary_word = nn.Sequential(nn.Linear(self.encoder_input_dim, chart_dim),
+                                        ResLayer(chart_dim, chart_dim))
+        # term embedding to chart dim
+        self.unary_preterm = nn.Sequential(nn.Linear(self.hidden_sz, chart_dim),
+                                           ResLayer(chart_dim, chart_dim))
+        self.binary_head = nn.Sequential(nn.Linear(self.hidden_sz, chart_dim),
+                                         ResLayer(chart_dim, chart_dim))
+        self.binary_left = ResLayer(chart_dim, chart_dim)
+        self.binary_right = ResLayer(chart_dim, chart_dim)
 
     def _initialize(self):
         for p in self.parameters():
@@ -122,38 +125,40 @@ class CompoundPCFG(PCFGModule):
         def tr_(*args, **kwargs):
             return torch.arange(*args, **kwargs, device=device)
 
-        score = self._score_chart_init(x, pcfg_params)              # (b, n, n, NT_T)
-        emb_chart = self._emb_chart_init(x, pcfg_params, x_hid)     # (b, n, n, ...)
-        # cat_hids: [(NT, hid), (T, hid), (NT_T, hid)]
-        cat_hids = self._get_category_embeddings()
+        score = self._score_chart_init(x, pcfg_params)           # (b, n, n, NT_T)
+        emb_chart = self._emb_chart_init(x_hid, pcfg_params)     # (b, n, n, NT_T, hid)
+        # a_hid: (NT, hid)
+        a_hid = self._get_category_embeddings()
 
         for width in range(1, n):
             coordinates = self.get_inside_coordinates(n, width, device)
             # b/c_score: (batch, pos=(n - width), arrangement=width, NT_T)
+            # rule_logp: (b, A, B, C)
             b_score, c_score = self.inside_chart_select(score, coordinates)
 
-            # score_arr: (batch, pos=(n-width), A=NT, arrangement=width, B=NT_T, C=NT_T)
-            score_arr = _un(_un(b_score, -1) + _un(c_score, -2), 2) + _un(rule_logp, [1, 3])
-            # a_score: (batch, pos, NT)
-            a_score = torch.logsumexp(score_arr, dim=(3, 4, 5))
+            # (b, pos, ~~arr~~, B, C)
+            bc_score = (_un(b_score, -1) + _un(c_score, -2)).logsumexp(dim=2, keepdim=True)
+
+            # (b, pos, A, ~~B~~, ~~C~~) <-- (b, 1, A, B, C) + (b, pos, 1, B, C)
+            a_score = (_un(rule_logp, 1) + bc_score).logsumexp(dim=(3, 4))
             score[:, width, :n - width, NTs] = a_score
 
-            chart_layer = self._get_emb_chart_layer(emb_chart, coordinates, pcfg_params,
-                                                    score_arr=score_arr, a_score=a_score, cat_hids=cat_hids,
-                                                    b_score=b_score, c_score=c_score,
-                                                    )
-            emb_chart[:, width, :n - width] = unit_norm(chart_layer)
+            if x_hid is not None:
+                chart_layer = self._get_emb_chart_layer(emb_chart, coordinates, pcfg_params,
+                                                        b_score=b_score, c_score=c_score,
+                                                        a_score=a_score, a_hid=a_hid,
+                                                        )
+                emb_chart[:, width, :n - width, NTs] = unit_norm(chart_layer)
 
         lengths = (x != self.padding).sum(-1)
         logPxs = score[tr_(b), lengths - 1, 0, NTs] + roots       # (b, NT)
         logPx = torch.logsumexp(logPxs, dim=1)  # sum out the start NT
         if x_hid is not None:
             # fixing the length layer embedding
-            chart = emb_chart[:, 1:, :]     # (b, n - 1, n, hid)
-            mem = chart.reshape(b, (n - 1) * n, 1, self.encoding_out_dim)
-            correction = _un(cat_hids[-1], [0, 1])
-            corrected_mem = ((mem + correction) * _un(roots, [1, 3]).exp()).sum(dim=2)  # (b, n(n-1), hid)
-            return logPx, corrected_mem
+            chart = emb_chart[:, 1:, :, NTs]     # (b, n - 1, n, A, hid)
+            chart_rs = chart.reshape(b, (n - 1) * n, self.NT, self.emb_chart_dim)
+            mem = (chart_rs * _un(roots, [1, 3]).exp()).sum(dim=2)  # (b, n(n-1), hid)
+            return logPx, mem
         return logPx
 
     def _score_chart_init(self, x, pcfg_params):
@@ -173,90 +178,58 @@ class CompoundPCFG(PCFGModule):
         s_chart[:, 0, :, self.NT:self.NT_T] = level0.squeeze(-1)
         return s_chart
 
-    def _emb_chart_init(self, x, pcfg_params, x_hid):
+    def _emb_chart_init(self, x_hid, pcfg_params):
         if x_hid is None:
             return None
 
-        b, n = x.size()
-        emb_chart = x_hid.new_zeros(b, n, n, self.encoding_out_dim)
-        emb_chart[:, 0] = self.unary_composer_word(x_hid)          # (b, n, hid)
+        b, n = x_hid.size()[:2]
+        emb_chart = x_hid.new_zeros(b, n, n, self.NT_T, self.emb_chart_dim)
+        word = self.unary_word(x_hid)                   # (b, n,    hid)
+        preterm = self.unary_preterm(self.term_emb)     #       (P, hid)
+        emb_chart[:, 0, :, self.NT:self.NT_T] = unit_norm(_un(word, 2) + _un(preterm, [0, 1]))
         return emb_chart
 
     def _get_category_embeddings(self):
         a_hid = self.binary_head(self.nonterm_emb)          # (NT, hid)
-        a_corr = self.category_mapping(self.nonterm_emb)    # (NT, hid)
-
-        cat_emb = torch.cat([self.term_emb, self.nonterm_emb], dim=0)
-        cat_corr = self.category_mapping(cat_emb)           # (NT_T, hid)
-
-        b_hid = self.binary_left_nonterm(cat_corr)           # (NT_T, hid)
-        c_hid = self.binary_right_nonterm(cat_corr)          # (NT_T, hid)
-        return a_hid, b_hid, c_hid, a_corr
+        return a_hid
 
     def _get_emb_chart_layer(self, emb_chart, coordinates, pcfg_params, **ctx):
-        #                      0     1    2         3       4  5
-        # recall score_arr: (batch, pos, A=NT, arrangement, B, C)
-        score_arr = ctx['score_arr']
-        # a_hid/corr: (A=NT, hid), b/c_hid: (B/C=NT_T, hid)
-        a_hid, b_hid, c_hid, a_corr = ctx['cat_hids']
+        # a_hid: (A=NT, hid)
+        a_hid = ctx['a_hid']
         # a_score: (b, pos, A), b/c_score: (b, pos, arr, B/C)
         a_score, b_score, c_score = ctx['a_score'], ctx['b_score'], ctx['c_score']
-        roots, _, _ = pcfg_params
+        # roots: (batch, A)
+        # terms: (batch, T, V)
+        # rules: (batch, A, B, C)
+        roots, terms, rules = pcfg_params
 
-        # prepare weights for different factors
-        b_weight = score_arr.logsumexp(dim=5)       # (b, pos, A, arr, B)
-        c_weight = score_arr.logsumexp(dim=4)       # (b, pos, A, arr, C)
-        cell_weight = b_weight.logsumexp(dim=4)     # (b, pos, A, arr)
+        # l/r_cell, b/c_hid: (b, pos, arr, B/C=NT_T, hid)
+        l_cell, r_cell = self.inside_chart_select(emb_chart, coordinates)
+        b_hid = self.binary_left(l_cell)
+        c_hid = self.binary_right(r_cell)
 
-        cell_factor = self._get_cell_factor(emb_chart, coordinates, cell_weight)    # (b, pos, A, hid)
-        b_factor = self._get_b_or_c_factor(b_hid, b_score, b_weight)
-        c_factor = self._get_b_or_c_factor(c_hid, c_score, c_weight)
-        a_factor = _un(a_hid, [0, 1]) * _un(a_score, -1).exp()
+        # (b, pos, arr, 1, B/C, hid)
+        b_factor = (b_hid * _un(b_score, -1).exp()).unsqueeze(3)
+        c_factor = (c_hid * _un(c_score, -1).exp()).unsqueeze(3)
+
+        # (b, pos, arr, A, B, 1) <--
+        #          (b, 1, 1, A, B, C)  + (b, pos, arr, 1, 1, C)
+        b_weight = (_un(rules, [1, 2]) + _un(c_score, [3, 4])).logsumexp(dim=5, keepdim=True).exp()
+
+        # (b, pos, arr, A, C, 1) <-- (note the difference of sum on B@dim4, instead of C@dim5 above
+        #          (b, 1, 1, A, B, C)  + (b, pos, arr, 1, B, 1)
+        c_weight = (_un(rules, [1, 2]) + _un(b_score, [3, 5])).logsumexp(dim=4).unsqueeze(-1).exp()
+
+        # (b, pos, ~~arr~~, A, ~~B/C~~, hid)
+        b_item = (b_factor * b_weight).sum(dim=(2, 4))
+        c_item = (c_factor * c_weight).sum(dim=(2, 4))
+
+        # (b, pos, A, 1)
+        a_score_ex = _un(a_score, -1).exp()
 
         # (b, pos, A, hid)
-        layer_by_a = a_factor + b_factor + c_factor + cell_factor
-
-        # add correction
-        layer = (layer_by_a - _un(a_corr, [0, 1])).mean(dim=2)
-        return layer    # (b, pos, hid)
-
-    def _get_cell_factor(self, emb_chart, coordinates, bc_weight):
-        # 1. Cell factor. extend size to (b, pos, A, arr, hid), then multiply and sum
-        # l/r_cell, cell_hid: (b, pos, arr, hid)
-        l_cell, r_cell = self.inside_chart_select(emb_chart, coordinates)
-        cell_hid = self.binary_left_chart(l_cell) + self.binary_right_chart(r_cell)
-        cell_hid_ex = _un(cell_hid, 2)              # (b, pos, 1, arr, hid)
-
-        # bc_weight: (b, pos, A, arr)
-        bc_weight_ex = _un(bc_weight, -1).exp()     # (b, pos, A, arr, 1)
-        cell_factor = (cell_hid_ex * bc_weight_ex).sum(dim=-2)  # (b, pos, A, hid)
-        return cell_factor  # (b, pos, A, hid)
-
-    def _get_b_or_c_factor(self, cat_hid, cell_score, weight):
-        # 2. B/C factor. extend size to (0b, 1pos, 2A, 3arr, 4B/C, 5hd), then multiply and sum
-        # cat_hid: (B/C=NT_T, hid)
-        # cell_score: (b, pos, arr, B/C)
-        # weight: (b, pos, A, arr, B/C)
-        cat_hid_ex = _un(cat_hid, [0, 1, 2, 3])
-        score_ex = _un(cell_score, [2, 5]).exp()
-        weight_ex = _un(weight, -1).exp()
-
-        factor = (cat_hid_ex * score_ex * weight_ex).sum(dim=(3, 4))
-        return factor   # (b, pos, A, hid)
-
-    def _nonterm_emb_reduction(self, normalized_abc, a_score, roots):
-        if self.nonterminal_reduction == 'mean':
-            reduced_abc = normalized_abc.mean(dim=-2)
-        elif self.nonterminal_reduction == 'norm_score':
-            reduced_abc = (a_score.softmax(-1).unsqueeze(-1) * normalized_abc).sum(-2)
-        elif self.nonterminal_reduction == 'root_score':
-            # roots: (batch, NT) -> (batch, 1, NT, 1)
-            reduced_abc = (roots.unsqueeze(1).exp().unsqueeze(-1) * normalized_abc).sum(-2)
-        elif self.nonterminal_reduction == 'sum':
-            reduced_abc = normalized_abc.sum(dim=-2)
-        else:
-            raise ValueError(f'unrecognized nonterminal reduction: {self.nonterminal_reduction}')
-        return reduced_abc
+        chart_layer = (b_item + c_item) / (a_score_ex + 1e-30) + _un(a_hid, [0, 1])
+        return chart_layer
 
     def generate_next_term(self, pcfg_params, token, term_mask) -> torch.LongTensor:
         roots, terms, _ = pcfg_params
@@ -279,4 +252,4 @@ class CompoundPCFG(PCFGModule):
         return rhs_b, rhs_c     # (batch, 1), (batch, 1)
 
     def get_encoder_output_size(self):
-        return self.encoding_out_dim
+        return self.emb_chart_dim
