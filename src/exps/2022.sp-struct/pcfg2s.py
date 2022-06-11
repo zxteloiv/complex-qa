@@ -23,9 +23,9 @@ def sch_tdpcfg2s():
     p.tgt_namespace = 'sql'
     p.encoder = 'bilstm'
     p.compound_encoder = 'tdpcfg'
-    p.num_pcfg_nt = 30
-    p.num_pcfg_pt = 60
-    p.td_pcfg_rank = 30
+    p.num_pcfg_nt = 20
+    p.num_pcfg_pt = 40
+    p.td_pcfg_rank = 20
 
     p.emb_sz = 100
     p.hidden_sz = 200
@@ -39,6 +39,40 @@ def sch_tdpcfg2s():
     p.decoder_init_strategy = "avg_all"
     p.enc_attn = 'dot_product'
 
+    return p
+
+@Registry.hparamset()
+def sch_tdpcfg2s_small():
+    p = sch_tdpcfg2s()
+    p.num_pcfg_nt = 10
+    p.num_pcfg_pt = 20
+    p.td_pcfg_rank = 10
+    return p
+
+@Registry.hparamset()
+def sch_tdpcfg2s_big():
+    p = sch_tdpcfg2s()
+    p.num_pcfg_nt = 30
+    p.num_pcfg_pt = 60
+    p.td_pcfg_rank = 30
+    return p
+
+@Registry.hparamset()
+def sch_tdpcfg2tranx():
+    p = sch_tdpcfg2s()
+    p.tgt_namespace = 'rule_seq'
+    return p
+
+@Registry.hparamset()
+def sch_tdpcfg2tranx_small():
+    p = sch_tdpcfg2s_small()
+    p.tgt_namespace = 'rule_seq'
+    return p
+
+@Registry.hparamset()
+def sch_tdpcfg2tranx_big():
+    p = sch_tdpcfg2s_big()
+    p.tgt_namespace = 'rule_seq'
     return p
 
 @Registry.hparamset()
