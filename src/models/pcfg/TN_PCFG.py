@@ -33,6 +33,7 @@ class TNPCFG(PCFGModule):
         self.hidden_sz = hidden_sz
         self.z_dim = z_dim or hidden_sz
         self.emb_chart_dim = emb_chart_dim or hidden_sz
+        self.encoder_input_dim = encoder_input_dim
 
         self.term_emb = nn.Parameter(torch.randn(self.T, self.hidden_sz))
         self.nonterm_emb = nn.Parameter(torch.randn(self.NT, self.hidden_sz))
@@ -57,24 +58,27 @@ class TNPCFG(PCFGModule):
         )
 
         if encoder_input_dim is not None:   # otherwise no encoding is required, only for generation
-            # compose embeddings according to unary and binary rules
-            _hid_dim = emb_chart_dim
-            self.unary_word = nn.Sequential(nn.Linear(encoder_input_dim, _hid_dim),
-                                            ResLayer(_hid_dim, _hid_dim))
-
-            self.unary_term = nn.Sequential(nn.Linear(hidden_sz, _hid_dim),
-                                            ResLayer(_hid_dim, _hid_dim))
-
-            self.binary_left = ResLayer(_hid_dim, _hid_dim)
-            self.binary_right = ResLayer(_hid_dim, _hid_dim)
-            self.binary_head = nn.Sequential(nn.Linear(hidden_sz, _hid_dim),
-                                             ResLayer(_hid_dim, _hid_dim))
+            self._init_encoder_modules()
         self._initialize()
 
     def _initialize(self):
         for p in self.parameters():
             if p.dim() > 1:
                 torch.nn.init.xavier_uniform_(p)
+
+    def _init_encoder_modules(self):
+        # compose embeddings according to unary and binary rules
+        chart_dim = self.emb_chart_dim
+        self.unary_word = nn.Sequential(nn.Linear(self.encoder_input_dim, chart_dim),
+                                        ResLayer(chart_dim, chart_dim))
+
+        self.unary_term = nn.Sequential(nn.Linear(self.hidden_sz, chart_dim),
+                                        ResLayer(chart_dim, chart_dim))
+
+        self.binary_left = ResLayer(chart_dim, chart_dim)
+        self.binary_right = ResLayer(chart_dim, chart_dim)
+        self.binary_head = nn.Sequential(nn.Linear(self.hidden_sz, chart_dim),
+                                         ResLayer(chart_dim, chart_dim))
 
     def get_pcfg_params(self, z):
         b = z.size()[0]

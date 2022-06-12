@@ -125,5 +125,41 @@ def sch_rcpcfg2tranx_big():
     p.compound_encoder = 'reduced_cpcfg'
     return p
 
+@Registry.hparamset()
+def sch_rtdpcfg2s():
+    p = sch_tdpcfg2s()
+    p.compound_encoder = 'reduced_tdpcfg'
+    return p
+
+@Registry.hparamset()
+def sch_rtdpcfg2tranx():
+    p = sch_tdpcfg2tranx()
+    p.compound_encoder = 'reduced_tdpcfg'
+    return p
+
+@Registry.hparamset()
+def sch_rtdpcfg2s_small():
+    p = sch_tdpcfg2s_small()
+    p.compound_encoder = 'reduced_tdpcfg'
+    return p
+
+@Registry.hparamset()
+def sch_rtdpcfg2tranx_small():
+    p = sch_tdpcfg2tranx_small()
+    p.compound_encoder = 'reduced_tdpcfg'
+    return p
+
+@Registry.hparamset()
+def sch_rtdpcfg2s_big():
+    p = sch_tdpcfg2s_big()
+    p.compound_encoder = 'reduced_tdpcfg'
+    return p
+
+@Registry.hparamset()
+def sch_rtdpcfg2tranx_big():
+    p = sch_tdpcfg2tranx_big()
+    p.compound_encoder = 'reduced_tdpcfg'
+    return p
+
 if __name__ == '__main__':
     main()
