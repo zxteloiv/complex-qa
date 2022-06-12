@@ -78,8 +78,8 @@ def sch_tdpcfg2tranx_big():
 @Registry.hparamset()
 def sch_cpcfg2s():
     p = sch_tdpcfg2s()
-    p.num_pcfg_nt = 30
-    p.num_pcfg_pt = 60
+    p.num_pcfg_nt = 20
+    p.num_pcfg_pt = 40
     p.compound_encoder = 'cpcfg'
     return p
 
@@ -89,6 +89,41 @@ def sch_cpcfg2tranx():
     p.tgt_namespace = 'rule_seq'
     return p
 
+@Registry.hparamset()
+def sch_rcpcfg2s():
+    p = sch_tdpcfg2s()
+    p.compound_encoder = 'reduced_cpcfg'
+    return p
+
+@Registry.hparamset()
+def sch_rcpcfg2tranx():
+    p = sch_tdpcfg2tranx()
+    p.compound_encoder = 'reduced_cpcfg'
+    return p
+
+@Registry.hparamset()
+def sch_rcpcfg2s_small():
+    p = sch_tdpcfg2s_small()
+    p.compound_encoder = 'reduced_cpcfg'
+    return p
+
+@Registry.hparamset()
+def sch_rcpcfg2tranx_small():
+    p = sch_tdpcfg2tranx_small()
+    p.compound_encoder = 'reduced_cpcfg'
+    return p
+
+@Registry.hparamset()
+def sch_rcpcfg2s_big():
+    p = sch_tdpcfg2s_big()
+    p.compound_encoder = 'reduced_cpcfg'
+    return p
+
+@Registry.hparamset()
+def sch_rcpcfg2tranx_big():
+    p = sch_tdpcfg2tranx_big()
+    p.compound_encoder = 'reduced_cpcfg'
+    return p
 
 if __name__ == '__main__':
     main()

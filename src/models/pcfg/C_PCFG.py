@@ -128,7 +128,7 @@ class CompoundPCFG(PCFGModule):
         score = self._score_chart_init(x, pcfg_params)           # (b, n, n, NT_T)
         emb_chart = self._emb_chart_init(x_hid, pcfg_params)     # (b, n, n, NT_T, hid)
         # a_hid: (NT, hid)
-        a_hid = self._get_category_embeddings()
+        cat_hid = self._get_category_embeddings()
 
         for width in range(1, n):
             coordinates = self.get_inside_coordinates(n, width, device)
@@ -144,17 +144,15 @@ class CompoundPCFG(PCFGModule):
 
             if x_hid is not None:
                 chart_layer = self._get_emb_chart_layer(emb_chart, coordinates, pcfg_params,
-                                                        score_arr=score_arr, a_score=a_score, a_hid=a_hid,)
-                emb_chart[:, width, :n - width, NTs] = unit_norm(chart_layer)
+                                                        score_arr=score_arr, a_score=a_score,
+                                                        cat_hid=cat_hid,)
+                self._set_emb_chart_layer(emb_chart, n, width, chart_layer)
 
         lengths = (x != self.padding).sum(-1)
         logPxs = score[tr_(b), lengths - 1, 0, NTs] + roots       # (b, NT)
         logPx = torch.logsumexp(logPxs, dim=1)  # sum out the start NT
         if x_hid is not None:
-            # fixing the length layer embedding
-            chart = emb_chart[:, 1:, :, NTs]     # (b, n - 1, n, A, hid)
-            chart_rs = chart.reshape(b, (n - 1) * n, self.NT, self.emb_chart_dim)
-            mem = (chart_rs * _un(roots, [1, 3]).exp()).sum(dim=2)  # (b, n(n-1), hid)
+            mem = self._get_attention_memory(emb_chart, pcfg_params)
             return logPx, mem
         return logPx
 
@@ -192,7 +190,7 @@ class CompoundPCFG(PCFGModule):
 
     def _get_emb_chart_layer(self, emb_chart, coordinates, pcfg_params, **ctx):
         # a_hid: (A=NT, hid)
-        a_hid = ctx['a_hid']
+        a_hid = ctx['cat_hid']
         # a_score: (b, pos, A), score_arr: (b, pos, A, arr, B, C)
         a_score, score_arr = ctx['a_score'], ctx['score_arr']
 
@@ -217,6 +215,18 @@ class CompoundPCFG(PCFGModule):
         # (b, pos, A, hid)
         chart_layer = (b_factor + c_factor) / (a_score_ex + 1e-30) + _un(a_hid, [0, 1])
         return chart_layer
+
+    def _set_emb_chart_layer(self, emb_chart, n, width, chart_layer):
+        emb_chart[:, width, :n - width, :self.NT] = unit_norm(chart_layer)
+
+    def _get_attention_memory(self, emb_chart, pcfg_params):
+        b, n = emb_chart.size()[:2]
+        roots = pcfg_params[0]
+        # fixing the length layer embedding
+        chart = emb_chart[:, 1:, :, :self.NT]  # (b, n - 1, n, A, hid)
+        chart_rs = chart.reshape(b, (n - 1) * n, self.NT, self.emb_chart_dim)
+        mem = (chart_rs * _un(roots, [1, 3]).exp()).sum(dim=2)  # (b, n(n-1), hid)
+        return mem
 
     def generate_next_term(self, pcfg_params, token, term_mask) -> torch.LongTensor:
         roots, terms, _ = pcfg_params
