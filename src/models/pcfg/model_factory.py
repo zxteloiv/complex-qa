@@ -33,6 +33,7 @@ class Seq2PCFGBuilder(EmbeddingMxin,
                 num_vocab_token=vocab.get_vocab_size(p.tgt_namespace),
                 hidden_sz=getattr(p, 'pcfg_hidden_dim', p.hidden_sz),
                 z_dim=z_dim,
+                encoder_input_dim=None,
             )
 
         elif decoder == 'tdpcfg':
@@ -43,6 +44,7 @@ class Seq2PCFGBuilder(EmbeddingMxin,
                 num_vocab_token=vocab.get_vocab_size(p.tgt_namespace),
                 hidden_sz=getattr(p, 'pcfg_hidden_dim', p.hidden_sz),
                 z_dim=z_dim,
+                encoder_input_dim=None,
             )
 
         else:

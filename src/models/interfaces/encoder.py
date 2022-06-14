@@ -59,3 +59,8 @@ class EmbedAndEncode(torch.nn.Module, ABC):
 
     def get_output_dim(self) -> int:
         raise NotImplementedError
+
+
+class EmbedAndGraphEncode(EmbedAndEncode, ABC):
+    def set_graph(self, graph):
+        raise NotImplementedError

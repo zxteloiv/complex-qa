@@ -118,7 +118,8 @@ class BaseSeq2Seq(torch.nn.Module):
 
     def forward(self,
                 source_tokens: torch.LongTensor,
-                target_tokens: torch.LongTensor = None
+                target_tokens: torch.LongTensor = None,
+                **kwargs,
                 ) -> Dict[str, torch.Tensor]:
         self._reset_variational_dropouts()
 

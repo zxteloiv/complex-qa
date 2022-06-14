@@ -2,7 +2,7 @@ from trialbot.training import Registry
 from trialbot.data.translator import FieldAwareTranslator
 from trialbot.data.fields import SeqField
 from trialbot.data.translators import KnownFieldTranslator
-from .cg_bundle_fields import TerminalRuleSeqField, ProcessedSentField, RNNGField
+from .cg_bundle_fields import TerminalRuleSeqField, ProcessedSentField, RNNGField, BeNeParField
 from .cfq_fields import TreeTraversalField, TutorBuilderField
 from .cfq_fields import PolicyValidity
 
@@ -13,6 +13,16 @@ class SQLSeq(FieldAwareTranslator):
         super().__init__(field_list=[
             SeqField(source_key='sql', renamed_key="target_tokens",),
             SeqField(source_key='sent', renamed_key='source_tokens', add_start_end_toks=False,)
+        ])
+
+
+@Registry.translator('syn2s')
+class SynSeq(FieldAwareTranslator):
+    def __init__(self):
+        super().__init__(field_list=[
+            BeNeParField(source_key='sent', token_key='source_tokens', graph_key='source_graph',
+                         preprocess_hooks=[ProcessedSentField.process_sentence],),
+            SeqField(source_key='sql', renamed_key="target_tokens", ),
         ])
 
 

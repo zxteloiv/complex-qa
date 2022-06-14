@@ -5,8 +5,9 @@ import torch
 from torch import nn
 from trialbot.data.ns_vocabulary import NSVocabulary
 from ..interfaces.unified_rnn import UnifiedRNN
-from ..interfaces.encoder import EncoderStack, EmbedAndEncode
+from ..interfaces.encoder import EncoderStack, EmbedAndEncode, EmbedAndGraphEncode
 from .base_seq2seq import BaseSeq2Seq
+from .syngraph2seq import SynGraph2Seq
 from .stacked_encoder import StackedEncoder, ExtLSTM
 from models.transformer.encoder import TransformerEncoder
 from ..modules.attention_wrapper import get_wrapped_attention
@@ -186,11 +187,14 @@ class EncoderStackMixin(RNNListMixin):
                                for rnn, brnn in zip(rnns, b_rnns)],
                               input_dropout=dropout)
 
-    def get_encoder_stack(self) -> EncoderStack:
+    def get_encoder_stack(self) -> Optional[EncoderStack]:
         p = self.p
         dropout = getattr(p, 'enc_dropout', getattr(p, 'dropout', 0.))
         hid_sz = getattr(p, 'enc_out_dim', p.hidden_sz)
         num_heads = getattr(p, 'num_heads', 16 if hid_sz % 16 == 0 else 10)
+
+        if 'syn_gcn' == p.encoder:  # syn_gcn doesn't require a stack encoder but only a bundle
+            return None
 
         if 'diora' in p.encoder:
             concat = getattr(p, 'diora_concat_outside', False)
@@ -206,10 +210,20 @@ class EncoderStackMixin(RNNListMixin):
 
 
 class EmbEncBundleMixin:
-    def get_embed_encoder_bundle(self, emb, enc: EncoderStack, padding_idx) -> EmbedAndEncode:
+    def get_embed_encoder_bundle(self, emb, enc: Optional[EncoderStack], padding_idx=0) -> EmbedAndEncode:
         p, vocab = self.p, self.vocab
+        hid_sz = getattr(p, 'enc_out_dim', p.hidden_sz)
+        dropout = getattr(p, 'enc_dropout', getattr(p, 'dropout', 0.))
+
+        # bundles that do not require an encoder (thus enc=None is fine)
+        if p.encoder == 'syn_gcn':
+            from .seq_graph_emb_enc import GraphEmbedEncoder
+            gcn_act = getattr(p, 'syn_gcn_activation', 'mish')
+            emb_enc = GraphEmbedEncoder(emb, p.emb_sz, hid_sz, p.num_enc_layers, gcn_act, enc_dropout=dropout)
+            return emb_enc
+
         enc_dropout = getattr(p, 'enc_dropout', getattr(p, 'dropout', 0.))
-        if p.encoder == 'diora':
+        if 'diora' in p.encoder:
             from ..diora.diora_bundle import SeqEmbedAndDiora
             return SeqEmbedAndDiora(emb, enc, padding_idx, enc_dropout,
                                     use_diora_loss=getattr(p, 'diora_loss_enabled', False))
@@ -387,13 +401,17 @@ class Seq2SeqBuilder(EmbeddingMxin,
         source_embedding, target_embedding = self.get_embeddings()
         encoder = self.get_encoder_stack()
         embed_and_encoder = self.get_embed_encoder_bundle(source_embedding, encoder, padding_idx=0)
+        if isinstance(embed_and_encoder, EmbedAndGraphEncode):
+            cls = SynGraph2Seq
+        else:
+            cls = BaseSeq2Seq
 
         enc_out_dim = embed_and_encoder.get_output_dim()
         dec_in_dim = getattr(p, 'dec_in_dim', p.hidden_sz)
         dec_out_dim = getattr(p, 'dec_out_dim', p.hidden_sz)
         proj_in_dim = getattr(p, 'proj_in_dim', p.hidden_sz)
 
-        trans_module, _usages = self._get_transformation_module(encoder.is_bidirectional(), enc_out_dim, dec_out_dim)
+        trans_module, _usages = self._get_transformation_module(embed_and_encoder.is_bidirectional(), enc_out_dim, dec_out_dim)
         trans_usage_string = self._get_trans_usage_string(trans_module, _usages)
 
         # Initialize attentions. And compute the dimension requirements for all attention modules
@@ -417,7 +435,7 @@ class Seq2SeqBuilder(EmbeddingMxin,
 
         word_proj = self.get_word_projection(proj_in_dim, target_embedding)
 
-        model = BaseSeq2Seq(
+        model = cls(
             vocab=vocab,
             embed_encoder=embed_and_encoder,
             decoder=decoder,

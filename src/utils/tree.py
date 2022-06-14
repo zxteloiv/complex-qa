@@ -73,7 +73,7 @@ class PreorderTraverse(Traversal):
 class Tree:
     EPS_TOK: str = "%%EPS%%"
 
-    def __init__(self, label: str, is_terminal: bool = False, children: list = None, payload = None):
+    def __init__(self, label: str, is_terminal: bool = False, children: list = None, payload=None):
         self.label = label
         self.node_id: int = 0
 
@@ -97,6 +97,7 @@ class Tree:
         self.is_terminal = is_terminal
         self.children: List[Tree] = children or []
         self.payload = payload
+        self.parent: Optional['Tree'] = None
 
     def __str__(self):
         if len(self.children) == 0:
@@ -125,6 +126,11 @@ class Tree:
         for i, x in enumerate(traversal(self)):
             x.node_id = i
         return self
+
+    def build_parent_link(self):
+        for c in self.children:
+            c.parent = self
+            c.build_parent_link()
 
 
 if __name__ == '__main__':
