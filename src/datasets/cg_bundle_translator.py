@@ -26,6 +26,17 @@ class SynSeq(FieldAwareTranslator):
         ])
 
 
+@Registry.translator('syn2tranx')
+class SynTranX(FieldAwareTranslator):
+    def __init__(self):
+        super().__init__(field_list=[
+            BeNeParField(source_key='sent', token_key='source_tokens', graph_key='source_graph',
+                         preprocess_hooks=[ProcessedSentField.process_sentence],),
+            TerminalRuleSeqField(no_preterminals=True,
+                                 source_key='sql_tree', renamed_key="target_tokens", namespace="rule_seq", ),
+        ])
+
+
 @Registry.translator('tranx')
 class NoTermTranXTranslator(FieldAwareTranslator):
     def __init__(self):

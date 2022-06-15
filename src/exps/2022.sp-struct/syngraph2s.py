@@ -12,8 +12,7 @@ def main():
     cg_bundle.install_parsed_qa_datasets(Registry._datasets)
     import datasets.cg_bundle_translator
 
-    bot = setup_common_bot(args=setup_cli(translator='syn2s', seed=2021, device=0,
-                                          hparamset='syn2s'))
+    bot = setup_common_bot(args=setup_cli(translator='syn2s', seed=2021, device=0))
     bot.run()
 
 
@@ -25,7 +24,7 @@ def syn2s():
     p.src_namespace = 'sent'
     p.tgt_namespace = 'sql'
     p.batch_sz = 16
-    p.TRAINING_LIMIT = 400
+    p.TRAINING_LIMIT = 150
     p.enc_out_dim = 200
     p.encoder = 'syn_gcn'
     p.syn_gcn_activation = 'mish'
@@ -35,6 +34,20 @@ def syn2s():
     p.decoder_init_strategy = "avg_all"
     p.enc_dec_trans_usage = 'consistent'
     p.enc_attn = "dot_product"
+    return p
+
+
+@Registry.hparamset()
+def syn2onlstm():
+    p = syn2s()
+    p.decoder = 'onlstm'
+    return p
+
+
+@Registry.hparamset()
+def syn2tranx():
+    p = syn2s()
+    p.tgt_namespace = 'rule_seq'
     return p
 
 
