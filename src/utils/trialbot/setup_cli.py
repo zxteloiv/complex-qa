@@ -6,6 +6,7 @@ import argparse
 
 
 def augment_parser(parser: argparse.ArgumentParser):
+    parser.add_argument('--log-to-file', '-L', action='store_true')
     return parser
 
 
@@ -16,12 +17,12 @@ def setup(**default_args):
     :return:
     """
     argv = sys.argv[1:].copy()
+    defaults = []
     for argname, argval in default_args.items():
-        if f'--{argname}' not in argv:
-            argv += [f'--{argname}', str(argval)]
+        defaults += [f'--{argname}', str(argval)]
 
     parser = augment_parser(TrialBot.get_default_parser())
-    args = parser.parse_args(argv)
+    args = parser.parse_args(defaults + argv)
     handle_common_args(args)
     return args
 
@@ -39,6 +40,17 @@ def setup_null_argv(**kwargs):
 
 
 def handle_common_args(args):
+    if args.log_to_file:
+        print('log to file set')
+        def name_norm(s: str):
+            import re
+            return re.sub('[^a-zA-Z0-9_]', '_', s)
+
+        hp = name_norm(args.hparamset)
+        ds = name_norm(args.dataset)
+        logfile_name = f'log.{ds}.{hp}.s{args.seed}'
+        logging.basicConfig(filename=logfile_name, force=True)  # reset the handlers for each exp
+
     if args.debug:
         logging.getLogger().setLevel(logging.DEBUG)
     elif args.quiet:
