@@ -19,6 +19,9 @@ import os.path as osp
 class EmbeddingMxin:
     def get_source_embedding(self):
         p, vocab = self.p, self.vocab
+        if p.src_namespace is None:
+            return None
+
         src_pretrain_file = getattr(p, 'src_emb_pretrained_file', None)
         if src_pretrain_file is None:
             source_embedding = nn.Embedding(num_embeddings=vocab.get_vocab_size(p.src_namespace),
@@ -195,6 +198,8 @@ class EncoderStackMixin(RNNListMixin):
 
         if 'syn_gcn' == p.encoder:  # syn_gcn doesn't require a stack encoder but only a bundle
             return None
+        elif p.encoder.startswith('plm:'):  # encoder is a pretrained huggingface model
+            return None
 
         if 'diora' in p.encoder:
             concat = getattr(p, 'diora_concat_outside', False)
@@ -222,6 +227,9 @@ class EmbEncBundleMixin:
             emb_enc = GraphEmbedEncoder(emb, p.emb_sz, hid_sz, p.num_enc_layers, gcn_act, enc_dropout=dropout)
             return emb_enc
 
+        elif p.encoder.startswith('plm:'):
+            return self.get_pretrained_model_bundle()
+
         enc_dropout = getattr(p, 'enc_dropout', getattr(p, 'dropout', 0.))
         if 'diora' in p.encoder:
             from ..diora.diora_bundle import SeqEmbedAndDiora
@@ -231,6 +239,15 @@ class EmbEncBundleMixin:
         from .seq_embed_encode import SeqEmbedEncoder
         emb_enc = SeqEmbedEncoder(emb, enc, padding_idx, enc_dropout)
         emb_enc = self.get_seq_compound_bundle(emb_enc)
+        return emb_enc
+
+    def get_pretrained_model_bundle(self):
+        logging.getLogger().info('Using pretrained encoder model, thus the source embedding is'
+                                 'not used and never shared with the target embedding.')
+        from .seq_plm_emb_enc import SeqPLMEmbedEncoder
+        p = self.p
+        model_name: str = p.encoder[4:]     # excluding the prefix 'plm:'
+        emb_enc = SeqPLMEmbedEncoder(model_name)
         return emb_enc
 
     def get_seq_compound_bundle(self, emb_enc: EmbedAndEncode):

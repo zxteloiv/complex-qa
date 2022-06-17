@@ -117,7 +117,7 @@ class BaseSeq2Seq(torch.nn.Module):
         return output_dict
 
     def forward(self,
-                source_tokens: torch.LongTensor,
+                source_tokens: Union[torch.LongTensor, dict],
                 target_tokens: torch.LongTensor = None,
                 **kwargs,
                 ) -> Dict[str, torch.Tensor]:
@@ -126,6 +126,9 @@ class BaseSeq2Seq(torch.nn.Module):
         layer_states, state_mask = self._embed_encoder(source_tokens)
         hx, enc_attn_fn, start = self._prepare_dec(layer_states, state_mask.long())
         preds, logits = self._forward_dec(target_tokens, start, enc_attn_fn, hx)
+
+        if not isinstance(source_tokens, torch.Tensor):
+            source_tokens = source_tokens['input_ids']  # if the source token is a UserDict for PLM models
 
         output = {'source': source_tokens}
         if self.training:

@@ -147,6 +147,43 @@ class ProcessedSentField(SeqField):
         return " ".join(correct_tokens)
 
 
+class PretrainedLMAutoField(Field):
+    def batch_tensor_by_key(self, tensors_by_keys: Mapping[str, List[NullableTensor]]) -> Mapping[str, torch.Tensor]:
+        sent_list = tensors_by_keys.get(self.renamed_key)
+        plm_inputs = self.tokenizer(sent_list, padding=self.use_padding, return_tensors="pt")
+        plm_inputs = plm_inputs.data    # use the real dict instead of the UserDict
+        return {self.renamed_key: plm_inputs}
+
+    def generate_namespace_tokens(self, example) -> Generator[Tuple[str, str], None, None]:
+        # for PLM, pretrained tokenizers can replace anything and do not require a vocab for the field
+        yield from []
+
+    def to_tensor(self, example) -> Mapping[str, Union[NullableTensor, str]]:
+        sent = example.get(self.source_key)
+        if sent is None:
+            return {self.renamed_key: None}
+
+        for hook in self.preprocess_hooks:
+            sent = hook(sent)
+
+        return {self.renamed_key: sent}
+
+    def __init__(self,
+                 source_key: str,
+                 pretrained_name: str = 'bert-base-uncased',
+                 renamed_key: str = 'model_inputs',
+                 use_padding: bool = True,
+                 preprocess_hooks: Optional[List[Callable[[str], str]]] = None,
+                 ):
+        super().__init__()
+        from transformers import AutoTokenizer
+        self.source_key = source_key
+        self.renamed_key = renamed_key
+        self.tokenizer = AutoTokenizer.from_pretrained(pretrained_name)
+        self.use_padding = use_padding
+        self.preprocess_hooks = preprocess_hooks or []
+
+
 class BeNeParField(Field):
     def batch_tensor_by_key(self, tensors_by_keys: Mapping[str, List[NullableTensor]]) -> Mapping[str, torch.Tensor]:
         tokens_batch = tensors_by_keys[self.token_key]

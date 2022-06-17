@@ -2,7 +2,7 @@ from trialbot.training import Registry
 from trialbot.data.translator import FieldAwareTranslator
 from trialbot.data.fields import SeqField
 from trialbot.data.translators import KnownFieldTranslator
-from .cg_bundle_fields import TerminalRuleSeqField, ProcessedSentField, RNNGField, BeNeParField
+from .cg_bundle_fields import TerminalRuleSeqField, ProcessedSentField, RNNGField, BeNeParField, PretrainedLMAutoField
 from .cfq_fields import TreeTraversalField, TutorBuilderField
 from .cfq_fields import PolicyValidity
 
@@ -13,6 +13,27 @@ class SQLSeq(FieldAwareTranslator):
         super().__init__(field_list=[
             SeqField(source_key='sql', renamed_key="target_tokens",),
             SeqField(source_key='sent', renamed_key='source_tokens', add_start_end_toks=False,)
+        ])
+
+
+@Registry.translator('plm2s')
+class PLMSeq(FieldAwareTranslator):
+    def __init__(self, model_name: str = 'bert-base-uncased'):
+        super().__init__(field_list=[
+            PretrainedLMAutoField(source_key='sent', pretrained_name=model_name, renamed_key='source_tokens',
+                                  preprocess_hooks=[ProcessedSentField.process_sentence]),
+            SeqField(source_key='sql', renamed_key="target_tokens", ),
+        ])
+
+
+@Registry.translator('plm2tranx')
+class PLMTranX(FieldAwareTranslator):
+    def __init__(self, model_name: str = 'bert-base-uncased'):
+        super().__init__(field_list=[
+            PretrainedLMAutoField(source_key='sent', pretrained_name=model_name, renamed_key='source_tokens',
+                                  preprocess_hooks=[ProcessedSentField.process_sentence]),
+            TerminalRuleSeqField(no_preterminals=True,
+                                 source_key='sql_tree', renamed_key="target_tokens", namespace="rule_seq", ),
         ])
 
 

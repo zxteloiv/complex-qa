@@ -114,6 +114,27 @@ def encoder_decorators():
     _add_encoder(small_cpcfg)
     _add_encoder(small_rcpcfg)
     _add_encoder(syn)
+
+    def plm(p):
+        p.src_namespace = None
+        p.decoder_init_strategy = "avg_all"
+        p.lr_scheduler_kwargs = None
+        return p
+
+    def electra(p):
+        p = plm(p)
+        p.TRANSLATOR_KWARGS = {"model_name": "google/electra-base-discriminator"}
+        p.encoder = 'plm:google/electra-base-discriminator'
+        return p
+
+    def bert(p):
+        p = plm(p)
+        p.TRANSLATOR_KWARGS = {"model_name": "bert-base-uncased"}
+        p.encoder = 'plm:bert-base-uncased'
+        return p
+
+    _add_encoder(electra)
+    _add_encoder(bert)
     return encoders
 
 
@@ -142,11 +163,16 @@ def decoder_decorators():
 def guess_translator(pname: str) -> str:
     tranx_dec = pname.endswith('tranx')
     syn_parse_enc = pname.startswith('syn')
+    plm_enc = any(ename in pname for ename in ('electra', 'bert'))
 
     if tranx_dec and syn_parse_enc:
         return 'syn2tranx'
+    elif tranx_dec and plm_enc:
+        return 'plm2tranx'
     elif syn_parse_enc:
         return 'syn2s'
+    elif plm_enc:
+        return 'plm2s'
     elif tranx_dec:
         return 'tranx'
     else:
