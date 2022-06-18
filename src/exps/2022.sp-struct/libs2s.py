@@ -78,7 +78,8 @@ def setup_common_bot(args: argparse.Namespace, get_model_func=None):
         bot.add_event_handler(Events.ITERATION_COMPLETED, end_with_nan_loss, 100)
         bot.add_event_handler(Events.EPOCH_COMPLETED, evaluation_on_dev_every_epoch, 90)
         bot.add_event_handler(Events.EPOCH_COMPLETED, evaluation_on_dev_every_epoch, 80, on_test_data=True)
-        bot.add_event_handler(Events.EPOCH_COMPLETED, every_epoch_model_saver, 100)
+        if args.seed == 2021 or args.seed == '2021':
+            bot.add_event_handler(Events.EPOCH_COMPLETED, every_epoch_model_saver, 100)
         bot.add_event_handler(Events.EPOCH_COMPLETED, get_metrics, 100, prefix="Training Metrics: ")
         bot.updater = get_updater(bot)
     else:
