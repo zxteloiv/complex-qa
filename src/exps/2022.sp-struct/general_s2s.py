@@ -12,10 +12,10 @@ def main():
     cg_bundle.install_parsed_qa_datasets(Registry._datasets)
     import datasets.cg_bundle_translator
 
-    install_hparamsets()
-
     args = setup_cli(seed=2021, device=0)
     args.translator = guess_translator(args.hparamset)
+
+    install_hparamsets(args)
     bot = setup_common_bot(args=args)
     bot.run()
 
@@ -138,6 +138,23 @@ def encoder_decorators():
     return encoders
 
 
+def atis_adv_encoder_decorators():
+    encoders = encoder_decorators()
+
+    def reset_num_epochs(func):
+        def new_func(p):
+            p = func(p)
+            p.TRAINING_LIMIT = 40
+            return p
+
+        return new_func
+
+    for ename, efunc in encoders.items():
+        encoders[ename] = reset_num_epochs(efunc)
+
+    return encoders
+
+
 def decoder_decorators():
     def seq(p):
         p.tgt_namespace = 'sql'
@@ -190,7 +207,7 @@ def _compose_hp_func(funcname, efunc, dfunc):
     return _func
 
 
-def install_hparamsets():
+def install_hparamsets(args=None):
     encoders = encoder_decorators()
     decoders = decoder_decorators()
 
