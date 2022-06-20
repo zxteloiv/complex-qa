@@ -58,11 +58,18 @@ class RNNListMixin:
     @staticmethod
     def get_stacked_rnns(cell_type: str, inp_sz: int, hid_sz: int, num_layers: int,
                          h_dropout: float, onlstm_chunk_sz: int = 10,
+                         bidirectional: bool = False,
                          ) -> List[UnifiedRNN]:
         from ..modules.torch_rnn_wrapper import TorchRNNWrapper as RNNWrapper
         from ..modules.variational_dropout import VariationalDropout
 
-        def _get_cell_in(floor): return inp_sz if floor == 0 else hid_sz
+        def _get_cell_in(floor):
+            if floor == 0:
+                return inp_sz
+            if bidirectional:
+                return hid_sz * 2
+            return hid_sz
+
         def _get_h_vd(d): return VariationalDropout(d, on_the_fly=False) if d > 0 else None
 
         rnns = cls = None
@@ -111,23 +118,29 @@ class EncoderStackMixin(RNNListMixin):
         from allennlp.modules.seq2seq_encoders import AugmentedLstmSeq2SeqEncoder
         from allennlp.modules.seq2seq_encoders import StackedBidirectionalLstmSeq2SeqEncoder
 
-        def _get_inp_sz(floor: int): return inp_sz if floor == 0 else hid_sz
+        def _get_inp_sz(floor: int, bidirectional=False):
+            if floor == 0:
+                return inp_sz
+            elif bidirectional:
+                return hid_sz * 2
+            else:
+                return hid_sz
 
         enc_classes = dict(
             lstm=lambda floor: PTRNNWrapper(nn.LSTM(_get_inp_sz(floor), hid_sz, batch_first=True)),
             gru=lambda floor: PTRNNWrapper(nn.GRU(_get_inp_sz(floor), hid_sz, batch_first=True)),
-            bilstm=lambda floor: PTRNNWrapper(nn.LSTM(_get_inp_sz(floor), hid_sz, batch_first=True,
+            bilstm=lambda floor: PTRNNWrapper(nn.LSTM(_get_inp_sz(floor, True), hid_sz, batch_first=True,
                                                       bidirectional=True)),
-            bigru=lambda floor: PTRNNWrapper(nn.GRU(_get_inp_sz(floor), hid_sz, batch_first=True,
+            bigru=lambda floor: PTRNNWrapper(nn.GRU(_get_inp_sz(floor, True), hid_sz, batch_first=True,
                                                     bidirectional=True)),
-            torch_bilstm=lambda floor: ExtLSTM(nn.LSTM(_get_inp_sz(floor), hid_sz, batch_first=True,
+            torch_bilstm=lambda floor: ExtLSTM(nn.LSTM(_get_inp_sz(floor, True), hid_sz, batch_first=True,
                                                        bidirectional=True)),
             aug_lstm=lambda floor: AugmentedLstmSeq2SeqEncoder(
                 _get_inp_sz(floor), hid_sz,
                 recurrent_dropout_probability=dropout, use_highway=True,
             ),
             aug_bilstm=lambda floor: StackedBidirectionalLstmSeq2SeqEncoder(
-                _get_inp_sz(floor), hid_sz, num_layers=1,
+                _get_inp_sz(floor, True), hid_sz, num_layers=1,
                 recurrent_dropout_probability=dropout, use_highway=True,
             ),
             transformer=lambda floor: TransformerEncoder(

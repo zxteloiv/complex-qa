@@ -9,11 +9,14 @@ from utils.nn import add_positional_features, add_depth_features_to_single_posit
 
 from .multi_head_attention import MaskedMultiHeadSelfAttention, MultiHeadAttention
 
+
 class TransformerDecoder(torch.nn.Module):
     def __init__(self,
                  input_dim: int,  # input embedding dimension
+                 hidden_dim: int = None,
                  num_layers: int = 6,
                  num_heads: int = 8,
+                 attend_to_dim: int = None,
                  feedforward_hidden_dim: int = None,
                  feedforward_hidden_activation: str = "mish",
                  feedforward_dropout: float = 0.1,
@@ -39,7 +42,12 @@ class TransformerDecoder(torch.nn.Module):
         self._feedforward_layers: List[FeedForward] = []
         self._feedforward_norm_layers: List[LayerNorm] = []
 
-        hidden_dim = input_dim  # the hidden states dimension outputted by the decoder module
+        hidden_dim = hidden_dim or input_dim  # the hidden states dimension outputted by the decoder module
+        attend_to_dim = attend_to_dim or hidden_dim
+        if hidden_dim != input_dim:
+            self._emb_mapper = torch.nn.Linear(input_dim, hidden_dim)
+        else:
+            self._emb_mapper = None
 
         attention_dim = attention_dim or (hidden_dim // num_heads)
         value_dim = value_dim or (hidden_dim // num_heads)
@@ -60,7 +68,7 @@ class TransformerDecoder(torch.nn.Module):
 
             attention = MultiHeadAttention(num_heads,
                                            hidden_dim,
-                                           hidden_dim,
+                                           attend_to_dim,
                                            attention_dim * num_heads,
                                            value_dim * num_heads,
                                            attention_dropout=attention_dropout)
@@ -104,7 +112,11 @@ class TransformerDecoder(torch.nn.Module):
         :param source_mask: (batch, max_source_len)
         :return: (batch, max_target_len, output_embedding_dim)
         """
-        output_tensor = add_positional_features(target) if self._use_positional_embedding else target
+        output_tensor = target
+        if self._emb_mapper is not None:
+            output_tensor = self._emb_mapper(output_tensor)
+        if self._use_positional_embedding:
+            output_tensor = add_positional_features(output_tensor)
 
         for (masked_attention,
              masked_attention_norm,
@@ -134,9 +146,11 @@ class TransformerDecoder(torch.nn.Module):
 
         return output_tensor
 
+
 class UniversalTransformerDecoder(torch.nn.Module):
     def __init__(self,
                  input_dim: int,  # input embedding dimension
+                 hidden_dim: int = None,
                  num_layers: int = 6,
                  num_heads: int = 8,
                  feedforward_hidden_dim: int = None,
@@ -156,7 +170,8 @@ class UniversalTransformerDecoder(torch.nn.Module):
         """
         super().__init__()
 
-        hidden_dim = input_dim  # the hidden states dimension outputted by the decoder module
+        hidden_dim = hidden_dim or input_dim  # the hidden states dimension outputted by the decoder module
+        self._emb_mapper = None if hidden_dim == input_dim else torch.nn.Linear(input_dim, hidden_dim)
 
         attention_dim = attention_dim or (hidden_dim // num_heads)
         value_dim = value_dim or (hidden_dim // num_heads)
@@ -210,6 +225,8 @@ class UniversalTransformerDecoder(torch.nn.Module):
         :return: (batch, max_target_len, output_embedding_dim)
         """
         output_tensor = target
+        if self._emb_mapper is not None:
+            output_tensor = self._emb_mapper(output_tensor)
 
         for i in range(self.num_layers):
             output_tensor = add_depth_features_to_single_position(output_tensor, i)

@@ -1,5 +1,7 @@
 from typing import Dict, List, Tuple, Optional
 # denote the type that can be None, but must be specified and does not come with a default value.
+from models.interfaces.encoder import EmbedAndGraphEncode, EmbedAndEncode
+
 Nullable = Optional
 
 import numpy
@@ -11,12 +13,12 @@ from utils.nn import prepare_input_mask, seq_cross_ent, seq_likelihood
 from utils.seq_collector import SeqCollector
 from utils.text_tool import make_human_readable_text
 
+
 class ParallelSeq2Seq(nn.Module):
     def __init__(self,
                  vocab: NSVocabulary,
-                 encoder: torch.nn.Module,
+                 embed_encoder: EmbedAndEncode,
                  decoder: torch.nn.Module,
-                 source_embedding: nn.Embedding,
                  target_embedding: nn.Embedding,
                  word_projection: nn.Module,
                  src_namespace: str,
@@ -33,9 +35,8 @@ class ParallelSeq2Seq(nn.Module):
                  ):
         super().__init__()
         self.vocab = vocab
-        self._encoder = encoder
+        self._embed_encoder = embed_encoder
         self._decoder = decoder
-        self._src_embedding = source_embedding
         self._tgt_embedding = target_embedding
 
         self.start_id = start_id
@@ -55,6 +56,9 @@ class ParallelSeq2Seq(nn.Module):
 
         self.ppl = Perplexity()
         self.err = Average()
+        self.src_len = Average()
+        self.tgt_len = Average()
+        self.item_count = 0
 
         self._beam_size = beam_size
         self._diversity_factor = diversity_factor
@@ -62,26 +66,36 @@ class ParallelSeq2Seq(nn.Module):
 
     def forward(self,
                 source_tokens: torch.LongTensor,
-                target_tokens: Optional[torch.LongTensor] = None) -> dict:
+                target_tokens: Optional[torch.LongTensor] = None,
+                **kwargs,
+                ) -> dict:
         """Run the network, and dispatch work to helper functions based on the runtime"""
         # source: (batch, source_length), containing the input word IDs
         # target: (batch, target_length), containing the output IDs
 
-        source, source_mask = prepare_input_mask(source_tokens, self.pad_id)
-        state = self._encode(source, source_mask)
+        if kwargs.get('source_graph') is not None:
+            assert isinstance(self._embed_encoder, EmbedAndGraphEncode)
+            self._embed_encoder.set_graph(kwargs['source_graph'])
+
+        layered_states, state_mask = self._embed_encoder(source_tokens)
+        state = layered_states[-1]  # transformer decoder only attends to top layer only
 
         output = dict()
         target, target_mask = prepare_input_mask(target_tokens, self.pad_id)
         if self.training:
-            predictions, logits = self._forward_training(state, target[:, :-1], source_mask, target_mask[:, :-1])
+            predictions, logits = self._forward_training(state, target[:, :-1],
+                                                         state_mask, target_mask[:, :-1])
             loss = seq_cross_ent(logits, target[:, 1:].contiguous(), target_mask[:, 1:].float())
             if self.flooding_bias > 0:
                 loss = (loss - self.flooding_bias).abs() + self.flooding_bias
             output['loss'] = loss
 
         else:
-            decoding_len = None if target_tokens is None else (target.size()[-1] - 1)
-            predictions, logits = self._forward_prediction(state, source_mask, decoding_len=decoding_len)
+            if target_tokens is not None:
+                predictions, logits = self._forward_training(state, target[:, :-1],
+                                                             state_mask, target_mask[:, :-1])
+            else:
+                predictions, logits = self._forward_prediction(state, state_mask, decoding_len=None)
 
         if target_tokens is not None:
             self._compute_metrics(logits, predictions, target[:, 1:].contiguous(), target_mask[:, 1:].float())
@@ -107,6 +121,11 @@ class ParallelSeq2Seq(nn.Module):
         err = ((prediction != target) * target_mask).sum(-1) > 0
         for instance_err in err:
             self.err(instance_err)
+
+        for l in target_mask.sum(1):
+            self.tgt_len(l)
+
+        self.item_count += prediction.size()[0]
 
     def revert_tensor_to_string(self, output_dict: dict) -> dict:
         """Convert the predicted word ids into discrete tokens"""
@@ -143,7 +162,7 @@ class ParallelSeq2Seq(nn.Module):
     def _forward_training(self,
                           state: torch.Tensor,
                           target: torch.LongTensor,
-                          source_mask: Nullable[torch.LongTensor],
+                          state_mask: Nullable[torch.LongTensor],
                           target_mask: Nullable[torch.LongTensor]
                           ) -> Tuple[torch.Tensor, torch.FloatTensor]:
         """
@@ -155,7 +174,7 @@ class ParallelSeq2Seq(nn.Module):
         # logits:           (batch, max_target_length, vocab_size)
         # predictions:      (batch, max_target_length)
         target_embedding = self._tgt_embedding(target)
-        target_hidden = self._decoder(target_embedding, target_mask, state, source_mask)
+        target_hidden = self._decoder(target_embedding, target_mask, state, state_mask)
         logits = self._word_proj(target_hidden)
         predictions = torch.argmax(logits, dim=-1)
 
@@ -311,104 +330,14 @@ class ParallelSeq2Seq(nn.Module):
         all_metrics: Dict[str, float] = {}
         if self.bleu:
             all_metrics.update(self.bleu.get_metric(reset=reset))
-        all_metrics.update(PPL=self.ppl.get_metric(True))
-        all_metrics.update(ERR=self.err.get_metric(True))
+        all_metrics.update(PPL=self.ppl.get_metric(reset))
+        all_metrics.update(ERR=self.err.get_metric(reset))
+        all_metrics.update(SLEN=self.src_len.get_metric(reset))
+        all_metrics.update(TLEN=self.tgt_len.get_metric(reset))
+        all_metrics.update(COUNT=self.item_count)
+        if reset:
+            self.item_count = 0
         return all_metrics
 
     get_metric = get_metrics
-
-    @classmethod
-    def from_param_and_vocab(cls, p, vocab: NSVocabulary):
-        """
-        Example hyperparameter set:
-
-        p.batch_sz = 128
-        p.src_namespace = 'source_tokens'
-        p.tgt_namespace = 'target_tokens'
-
-        p.predictor = 'quant' # mos, quant
-        # used for mos predictor
-        p.num_mixture = 10
-        # used for quant predictor
-        p.tied_tgt_predictor = False
-        p.quant_crit = "projection" # distance, projection, dot_product
-
-        p.emb_sz = 300
-        p.num_enc_layers = 6
-        p.num_dec_layers = 6
-        p.num_heads = 6
-        p.dropout = .2
-        p.nonlinear_activation = "mish"
-
-        p.max_decoding_len = 30
-        p.ADAM_LR = 1e-4
-        p.TRAINING_LIMIT = 20
-        p.beam_size = 1
-        p.diversity_factor = 0.
-        p.acc_factor = 1.
-        """
-        from trialbot.data import START_SYMBOL, END_SYMBOL, PADDING_TOKEN
-        from torch import nn
-        from .encoder import TransformerEncoder, UniversalTransformerEncoder
-        from .decoder import TransformerDecoder, UniversalTransformerDecoder
-        from ..modules.mixture_softmax import MoSProjection
-        from ..modules.quantized_token_predictor import QuantTokenPredictor
-        emb_sz = p.emb_sz
-        source_embedding = nn.Embedding(num_embeddings=vocab.get_vocab_size(p.src_namespace), embedding_dim=emb_sz)
-        if p.src_namespace == p.tgt_namespace:
-            target_embedding = source_embedding
-        else:
-            target_embedding = nn.Embedding(num_embeddings=vocab.get_vocab_size(p.tgt_namespace), embedding_dim=emb_sz)
-
-        if p.predictor == 'mos':
-            predictor = MoSProjection(p.num_mixture, emb_sz, vocab.get_vocab_size(p.tgt_namespace))
-        else:
-            predictor = QuantTokenPredictor(vocab.get_vocab_size(p.tgt_namespace), emb_sz,
-                                            shared_embedding=target_embedding.weight if p.tied_tgt_predictor else None,
-                                            quant_criterion=p.quant_crit)
-
-        if getattr(p, 'model_arch', None) == "universal_transformer":
-            enc_cls = UniversalTransformerEncoder
-            dec_cls = UniversalTransformerDecoder
-        else:
-            enc_cls = TransformerEncoder
-            dec_cls = TransformerDecoder
-
-        model = ParallelSeq2Seq(
-            vocab=vocab,
-            encoder=enc_cls(input_dim=emb_sz,
-                            num_layers=p.num_enc_layers,
-                            num_heads=p.num_heads,
-                            feedforward_hidden_dim=p.emb_sz,
-                            feedforward_dropout=p.dropout,
-                            residual_dropout=p.dropout,
-                            attention_dropout=getattr(p, 'attention_dropout', 0.),
-                            feedforward_hidden_activation=p.nonlinear_activation,
-                            ),
-            decoder=dec_cls(input_dim=emb_sz,
-                            num_layers=p.num_dec_layers,
-                            num_heads=p.num_heads,
-                            feedforward_hidden_dim=emb_sz,
-                            feedforward_dropout=p.dropout,
-                            residual_dropout=p.dropout,
-                            attention_dropout=getattr(p, 'attention_dropout', 0.),
-                            feedforward_hidden_activation=p.nonlinear_activation,
-                            ),
-            source_embedding=source_embedding,
-            target_embedding=target_embedding,
-            word_projection=predictor,
-            src_namespace=p.src_namespace,
-            tgt_namespace=p.tgt_namespace,
-            start_id=vocab.get_token_index(START_SYMBOL, namespace=p.tgt_namespace),
-            end_id=vocab.get_token_index(END_SYMBOL, namespace=p.tgt_namespace),
-            pad_id=vocab.get_token_index(PADDING_TOKEN, namespace=p.tgt_namespace),
-            max_decoding_step=p.max_decoding_len,
-            beam_size=getattr(p, 'beam_size', 1),
-            diversity_factor=getattr(p, 'diversity_factor', 0.),
-            accumulation_factor=getattr(p, 'acc_factor', 1.),
-            use_bleu=getattr(p, 'use_bleu', False),
-            flooding_bias=getattr(p, 'flooding_bias', -1),
-        )
-
-        return model
 

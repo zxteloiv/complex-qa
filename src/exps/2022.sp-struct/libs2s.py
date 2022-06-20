@@ -44,11 +44,12 @@ def get_updater(bot: TrialBot):
     return updater
 
 
-def setup_common_bot(args: argparse.Namespace, get_model_func=None):
+def setup_common_bot(args: argparse.Namespace, get_model_func=None, trialname: str = None):
     assert args is not None
     from models.base_s2s.model_factory import Seq2SeqBuilder
     get_model_func = get_model_func or Seq2SeqBuilder.from_param_and_vocab
-    bot = TrialBot(trial_name=f'enc2dec-{args.hparamset}', get_model_func=get_model_func, args=args, clean_engine=True)
+    trialname = trialname or f'enc2dec-{args.hparamset}'
+    bot = TrialBot(trial_name=trialname, get_model_func=get_model_func, args=args, clean_engine=True)
 
     from utils.trialbot.extensions import print_hyperparameters
     from utils.trialbot.extensions import get_metrics, print_models

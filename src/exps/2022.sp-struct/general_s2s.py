@@ -1,8 +1,4 @@
 from trialbot.training import Registry
-from trialbot.training.hparamset import HyperParamSet
-from trialbot.utils.root_finder import find_root
-import sys
-sys.path.insert(0, find_root('.SRC'))
 
 
 def main():
@@ -202,4 +198,7 @@ def install_hparamsets():
 
 
 if __name__ == '__main__':
+    import sys
+    from trialbot.utils.root_finder import find_root
+    sys.path.insert(0, find_root('.SRC'))
     main()
