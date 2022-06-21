@@ -11,8 +11,8 @@ from .cfq_fields import PolicyValidity
 class SQLSeq(FieldAwareTranslator):
     def __init__(self):
         super().__init__(field_list=[
-            SeqField(source_key='sql', renamed_key="target_tokens",),
-            SeqField(source_key='sent', renamed_key='source_tokens', add_start_end_toks=False,)
+            SeqField(source_key='sql', renamed_key="target_tokens", max_seq_len=200),
+            SeqField(source_key='sent', renamed_key='source_tokens', add_start_end_toks=False, max_seq_len=20)
         ])
 
 
@@ -22,7 +22,7 @@ class PLMSeq(FieldAwareTranslator):
         super().__init__(field_list=[
             PretrainedLMAutoField(source_key='sent', pretrained_name=model_name, renamed_key='source_tokens',
                                   preprocess_hooks=[ProcessedSentField.process_sentence]),
-            SeqField(source_key='sql', renamed_key="target_tokens", ),
+            SeqField(source_key='sql', renamed_key="target_tokens", max_seq_len=200),
         ])
 
 
@@ -32,8 +32,8 @@ class PLMTranX(FieldAwareTranslator):
         super().__init__(field_list=[
             PretrainedLMAutoField(source_key='sent', pretrained_name=model_name, renamed_key='source_tokens',
                                   preprocess_hooks=[ProcessedSentField.process_sentence]),
-            TerminalRuleSeqField(no_preterminals=True,
-                                 source_key='sql_tree', renamed_key="target_tokens", namespace="rule_seq", ),
+            TerminalRuleSeqField(no_preterminals=True, source_key='sql_tree', renamed_key="target_tokens",
+                                 namespace="rule_seq", max_seq_len=280),
         ])
 
 
@@ -43,7 +43,7 @@ class SynSeq(FieldAwareTranslator):
         super().__init__(field_list=[
             BeNeParField(source_key='sent', token_key='source_tokens', graph_key='source_graph',
                          preprocess_hooks=[ProcessedSentField.process_sentence],),
-            SeqField(source_key='sql', renamed_key="target_tokens", ),
+            SeqField(source_key='sql', renamed_key="target_tokens", max_seq_len=200),
         ])
 
 
@@ -52,9 +52,9 @@ class SynTranX(FieldAwareTranslator):
     def __init__(self):
         super().__init__(field_list=[
             BeNeParField(source_key='sent', token_key='source_tokens', graph_key='source_graph',
-                         preprocess_hooks=[ProcessedSentField.process_sentence],),
-            TerminalRuleSeqField(no_preterminals=True,
-                                 source_key='sql_tree', renamed_key="target_tokens", namespace="rule_seq", ),
+                         preprocess_hooks=[ProcessedSentField.process_sentence]),
+            TerminalRuleSeqField(no_preterminals=True, source_key='sql_tree', renamed_key="target_tokens",
+                                 namespace="rule_seq", max_seq_len=280),
         ])
 
 
@@ -62,9 +62,9 @@ class SynTranX(FieldAwareTranslator):
 class NoTermTranXTranslator(FieldAwareTranslator):
     def __init__(self):
         super().__init__(field_list=[
-            ProcessedSentField(source_key='sent', renamed_key='source_tokens', add_start_end_toks=False,),
-            TerminalRuleSeqField(no_preterminals=True,
-                                 source_key='sql_tree', renamed_key="target_tokens", namespace="rule_seq", ),
+            ProcessedSentField(source_key='sent', renamed_key='source_tokens', add_start_end_toks=False, max_seq_len=20),
+            TerminalRuleSeqField(no_preterminals=True, source_key='sql_tree', renamed_key="target_tokens",
+                                 namespace="rule_seq", max_seq_len=280),
         ])
 
 
