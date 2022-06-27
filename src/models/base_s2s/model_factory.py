@@ -269,9 +269,9 @@ class EmbEncBundleMixin:
         compound_emb_enc = getattr(p, 'compound_encoder', None)
 
         if compound_emb_enc == 'cpcfg':
-            from ..pcfg.pcfg_emb_enc import CompoundPCFGEmbedEncode
+            from ..pcfg.pcfg_emb_enc import PCFGEmbedEncode
             from ..pcfg.C_PCFG import CompoundPCFG
-            return CompoundPCFGEmbedEncode(
+            return PCFGEmbedEncode(
                 pcfg=CompoundPCFG(
                     num_nonterminal=p.num_pcfg_nt,
                     num_preterminal=p.num_pcfg_pt,
@@ -285,9 +285,9 @@ class EmbEncBundleMixin:
                 z_dim=getattr(p, 'pcfg_hidden_dim', p.hidden_sz),
             )
         elif compound_emb_enc == 'reduced_cpcfg':
-            from ..pcfg.pcfg_emb_enc import CompoundPCFGEmbedEncode
-            from ..pcfg.reduced_c_pcfg import ReducedCPCFG
-            return CompoundPCFGEmbedEncode(
+            from ..pcfg.pcfg_emb_enc import PCFGEmbedEncode
+            from ..pcfg.C_PCFG import ReducedCPCFG
+            return PCFGEmbedEncode(
                 pcfg=ReducedCPCFG(
                     num_nonterminal=p.num_pcfg_nt,
                     num_preterminal=p.num_pcfg_pt,
@@ -301,9 +301,9 @@ class EmbEncBundleMixin:
                 z_dim=getattr(p, 'pcfg_hidden_dim', p.hidden_sz),
             )
         elif compound_emb_enc == 'tdpcfg':
-            from ..pcfg.pcfg_emb_enc import CompoundPCFGEmbedEncode
+            from ..pcfg.pcfg_emb_enc import PCFGEmbedEncode
             from ..pcfg.TN_PCFG import TNPCFG
-            return CompoundPCFGEmbedEncode(
+            return PCFGEmbedEncode(
                 pcfg=TNPCFG(
                     rank=getattr(p, 'td_pcfg_rank', p.num_pcfg_nt // 10),
                     num_nonterminal=p.num_pcfg_nt,
@@ -318,9 +318,9 @@ class EmbEncBundleMixin:
                 z_dim=getattr(p, 'pcfg_hidden_dim', p.hidden_sz),
             )
         elif compound_emb_enc == 'reduced_tdpcfg':
-            from ..pcfg.pcfg_emb_enc import CompoundPCFGEmbedEncode
-            from ..pcfg.reduced_td_pcfg import ReducedTDPCFG
-            return CompoundPCFGEmbedEncode(
+            from ..pcfg.pcfg_emb_enc import PCFGEmbedEncode
+            from ..pcfg.TN_PCFG import ReducedTDPCFG
+            return PCFGEmbedEncode(
                 pcfg=ReducedTDPCFG(
                     rank=getattr(p, 'td_pcfg_rank', p.num_pcfg_nt // 10),
                     num_nonterminal=p.num_pcfg_nt,

@@ -11,7 +11,7 @@ def main():
     import datasets.comp_gen_bundle as cg_bundle
     cg_bundle.install_parsed_qa_datasets(Registry._datasets)
     import datasets.cg_bundle_translator
-    from models.pcfg.model_factory import Seq2PCFGBuilder
+    from models.pcfg.seq2pcfg_factory import Seq2PCFGBuilder
 
     bot = setup_common_bot(
         args=setup_cli(translator='seq2pcfg', seed=2021, device=0),
