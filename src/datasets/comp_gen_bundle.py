@@ -22,6 +22,7 @@ import logging
 import re
 
 ROOT = find_root()
+SRC_PATH = find_root('.SRC')
 CG_DATA_PATH = join(ROOT, 'data', 'CompGen', 'sql data')
 CG_DATA_REG = dict()
 
@@ -207,7 +208,7 @@ def install_parsed_sql_datasets(reg: dict = None):
 
     domains = ["atis", "geo", "advising", "scholar"]
     path_names = ["atis", "geography", "advising", "scholar"]
-    grammar_path = join('..', '..', 'statics', 'grammar')
+    grammar_path = join(SRC_PATH, 'statics', 'grammar')
     for domain, path in zip(domains, path_names):
         grammars = [join(grammar_path, x) for x in ('MySQL.lark', 'SQLite.lark', 'sql_handcrafted.lark')]
         for g in grammars:
@@ -242,10 +243,12 @@ def install_parsed_qa_datasets(reg: dict = None):
     domains = ["atis", "geo", "advising", "scholar"]
     path_names = ["atis", "geography", "advising", "scholar"]
     for domain, path_name in zip(domains, path_names):
-        grammar_path = join('..', '..', 'statics', 'grammar')
+        grammar_path = join(SRC_PATH, 'statics', 'grammar')
         grammars = [join(grammar_path, x) for x in ('MySQL.lark', 'SQLite.lark', 'sql_handcrafted.lark')]
-        if osp.exists('./run'):
-            grammars += list(join('run', f) for f in os.listdir('./run') if f.endswith('.lark') and f.startswith(domain))
+        run_path = join(SRC_PATH, 'run')
+        if osp.exists(run_path):
+            grammars += list(join(run_path, f) for f in os.listdir(run_path)
+                             if f.endswith('.lark') and f.startswith(domain))
         for g in grammars:
             tag = _get_grammar_tag_by_filename(g)
             reg[domain + '_iid.' + tag] = partial(_get_parsed_ds, path_name, use_iid=True, grammar_file=g, sql_only=False)
