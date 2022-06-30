@@ -10,11 +10,10 @@ def main():
     install_hparamsets()
 
     args = setup_cli(seed=2021, device=0)
-    args.translator = guess_translator(args.hparamset)
+    if not hasattr(args, 'translator') or not args.translator:
+        args.translator = guess_translator(args.hparamset)
     bot = setup_common_bot(args=args)
-
-    training_limit = 30 if 'atis' in args.dataset or 'advising' in args.dataset else 0
-    bot.run(training_limit)     # override the hparamset.TRAINING_LIMIT config
+    bot.run()
 
 
 def encoder_decorators():
