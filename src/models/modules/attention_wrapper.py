@@ -1,5 +1,5 @@
-from typing import Optional, Tuple, Literal
-from allennlp.modules.attention import Attention
+from typing import Optional, Tuple
+from allennlp.modules.attention import Attention as AllenAttention
 from allennlp.nn.util import masked_softmax
 from ..transformer.multi_head_attention import GeneralMultiHeadAttention
 from ..interfaces.attention import Attention as IAttn
@@ -11,16 +11,22 @@ class AllenNLPAttentionWrapper(IAttn):
     A wrapper for matrix attention in allennlp, fitting the interface of the multi-headed attention
     defined in models.transformer.multi_head_attention
     """
-    def __init__(self, attn: Attention, attn_dropout: float = 0.,
+    def get_latest_attn_weights(self) -> torch.Tensor:
+        if self._attn_weights is None:
+            raise ValueError('Attention weight is None.')
+        return self._attn_weights
+
+    def __init__(self, attn: AllenAttention, attn_dropout: float = 0.,
                  init_tau: float = 1., min_tau: float = .05):
         super(AllenNLPAttentionWrapper, self).__init__()
-        self._attn: Attention = attn
+        self._attn: AllenAttention = attn
         self._dropout = torch.nn.Dropout(attn_dropout)
         self.tau = init_tau
         self.init_tau = init_tau
         self.min_tau = min_tau
         # manually normalize in the forward pass of the wrapper
         self._attn._normalize = False
+        self._attn_weights = None
 
     def forward(self,
                 inputs: torch.Tensor,
@@ -46,15 +52,24 @@ class AllenNLPAttentionWrapper(IAttn):
         else:
             temperature = self.min_tau
         weights = masked_softmax(attn / temperature, attend_mask.bool(), dim=-1)
+        self._attn_weights = weights    # (batch, max_attend_length)
 
         # context: (batch, attend_dim)
         context = (self._dropout(weights.unsqueeze(-1)) * attend_over).sum(1)
         return context
 
+
 class SingleTokenMHAttentionWrapper(IAttn):
-    def __init__(self, attn: GeneralMultiHeadAttention):
+    def get_latest_attn_weights(self) -> torch.Tensor:
+        if self._attn_weights is None:
+            raise ValueError("Attention Weight is None")
+        return self._attn_weights
+
+    def __init__(self, attn: GeneralMultiHeadAttention, mean_reduction_heads: bool = False):
         super(SingleTokenMHAttentionWrapper, self).__init__()
         self._attn = attn
+        self._attn_weights = None
+        self._mean_on_heads = mean_reduction_heads
 
     def forward(self, inputs, attend_over, attend_mask = None, structural_mask = None):
         """
@@ -71,12 +86,17 @@ class SingleTokenMHAttentionWrapper(IAttn):
         # inputs: (batch, 1, input_dim)
         inputs = inputs.unsqueeze(1)
 
-        # a: (batch, max_input_length, max_attend_length)
+        # c: (batch, 1, output_dim)
+        # a: (batch, 1, num_heads, max_attend_length)
         c, a = self._attn(inputs, attend_over, attend_mask, structural_mask)
 
         c = c.squeeze(1)
-        # a = a.squeeze(1)
+        a = a.squeeze(1)
 
+        if self._mean_on_heads:
+            self._attn_weights = a.mean(1)  # (b, max_attend_length)
+        else:
+            self._attn_weights = a  # (b, num_heads, max_attend_length)
         return c
 
 
@@ -129,7 +149,7 @@ def get_wrapped_attention(attn_type: str,
                                          attend_to_dim=matrix_dim,
                                          output_dim=matrix_dim,
                                          attention_dropout=attention_dropout,)
-        attn = SingleTokenMHAttentionWrapper(attn)
+        attn = SingleTokenMHAttentionWrapper(attn, mean_reduction_heads=kwargs.get('mha_mean_weight', False))
 
     elif attn_type == "seq_mha":
         from ..transformer.multi_head_attention import GeneralMultiHeadAttention

@@ -335,4 +335,10 @@ def assign_stacked_states(src_agg: List[torch.Tensor], num_layers: int, strategy
 
 def expand_tensor_size_at_dim(t: torch.Tensor, size: int, dim: int =-2) -> torch.Tensor:
     old_size = t.size()
-    return t.unsqueeze(dim=dim).expand(*old_size[:dim + 1], size, *old_size[dim + 1:])
+    t = t.unsqueeze(dim=dim)
+    if dim == -1:
+        return t.expand(*old_size, size)
+    elif dim < 0:
+        return t.expand(*old_size[:dim + 1], size, *old_size[dim + 1:])
+    else:
+        return t.expand(*old_size[:dim], size, *old_size[dim:])

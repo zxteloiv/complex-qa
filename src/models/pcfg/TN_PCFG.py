@@ -1,12 +1,11 @@
-from typing import Optional, List, Union, Tuple, Literal
+from typing import Tuple
 
 import torch
-import torch.nn as nn
 from torch import nn as nn
 
 from .fn import unit_norm, _un
 from .base_pcfg import PCFGModule
-from .res import ResLayer
+from models.modules.res import ResLayer
 
 
 class TNPCFG(PCFGModule):

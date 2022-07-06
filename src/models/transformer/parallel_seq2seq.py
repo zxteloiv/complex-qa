@@ -1,17 +1,15 @@
 from typing import Dict, List, Tuple, Optional
 # denote the type that can be None, but must be specified and does not come with a default value.
 from models.interfaces.encoder import EmbedAndGraphEncode, EmbedAndEncode
-
-Nullable = Optional
-
-import numpy
 import torch
 import torch.nn as nn
 from trialbot.data.ns_vocabulary import NSVocabulary
 from allennlp.training.metrics import BLEU, Perplexity, Average
-from utils.nn import prepare_input_mask, seq_cross_ent, seq_likelihood
+from utils.nn import prepare_input_mask, seq_cross_ent
 from utils.seq_collector import SeqCollector
 from utils.text_tool import make_human_readable_text
+
+Nullable = Optional
 
 
 class ParallelSeq2Seq(nn.Module):

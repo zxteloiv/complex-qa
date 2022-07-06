@@ -55,7 +55,13 @@ class GeneralizedDotProductAttention(Attention):
         # context: (...a..., ...b..., attn_dim)
         context = rs_context.reshape(*attn_prefix_dims, *input_suffix_dims, -1)
 
+        self._last_attn_weights = attn_weights.reshape(*attn_prefix_dims, *input_suffix_dims, -1)
         return context
+
+    def get_latest_attn_weights(self) -> torch.Tensor:
+        if self._last_attn_weights is None:
+            raise ValueError('Attention module has never been applied.')
+        return self._last_attn_weights
 
 
 class GeneralizedBilinearAttention(Attention):
