@@ -11,9 +11,8 @@ def select_optim(p, params):
         optim = AdSGD(params, lr=p.SGD_LR, weight_decay=p.WEIGHT_DECAY,
                       **getattr(p, 'optim_kwargs', dict()), )
     elif name == "radam":
-        from radam import RAdam
-        optim = RAdam(params, lr=p.ADAM_LR, betas=p.ADAM_BETAS, weight_decay=p.WEIGHT_DECAY,
-                      **getattr(p, 'optim_kwargs', dict()),)
+        optim = torch.optim.RAdam(params, lr=p.ADAM_LR, betas=p.ADAM_BETAS, weight_decay=p.WEIGHT_DECAY,
+                                  **getattr(p, 'optim_kwargs', dict()),)
     elif name == "adamw":
         optim = torch.optim.AdamW(params, p.ADAM_LR, p.ADAM_BETAS, weight_decay=p.WEIGHT_DECAY,
                                   **getattr(p, 'optim_kwargs', dict()),)
@@ -33,17 +32,6 @@ def select_optim(p, params):
                           weight_decay=p.WEIGHT_DECAY,
                           print_change_log=False,
                           **getattr(p, 'optim_kwargs', dict()))
-    elif name == 'mod_adabelief':
-        from optim.ModAdaBelief import AdaBelief
-        optim = AdaBelief(params, p.ADAM_LR, p.ADAM_BETAS,
-                          weight_decay=p.WEIGHT_DECAY,
-                          **getattr(p, 'optim_kwargs', dict()))
-    elif name == "ranger_adabelief":
-        from ranger_adabelief import RangerAdaBelief
-        optim = RangerAdaBelief(params, p.ADAM_LR,
-                                betas=p.ADAM_BETAS,
-                                weight_decay=p.WEIGHT_DECAY,
-                                **getattr(p, 'optim_kwargs', dict()))
     elif name == "adam":
         optim = torch.optim.Adam(params, p.ADAM_LR, p.ADAM_BETAS, weight_decay=p.WEIGHT_DECAY,
                                  **getattr(p, 'optim_kwargs', dict()))

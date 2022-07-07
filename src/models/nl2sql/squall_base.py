@@ -65,6 +65,7 @@ class SquallBaseParser(nn.Module):
         self.word_num = Average()
         self.col_num = Average()
         self.tgt_len = Average()
+        self.mean_loss = Average()
         self.item_count = 0
 
     def get_metrics(self, reset=False):
@@ -72,6 +73,7 @@ class SquallBaseParser(nn.Module):
                   "WORDS": self.word_num.get_metric(reset),
                   "COLUMNS": self.col_num.get_metric(reset),
                   "TLEN": self.tgt_len.get_metric(reset),
+                  "AVG_LOSS": self.mean_loss.get_metric(reset),
                   "COUNT": self.item_count,
                   }
         if reset:
@@ -117,9 +119,9 @@ class SquallBaseParser(nn.Module):
                                                  tgt_literal_begin[:, 1:], tgt_literal_end[:, 1:],
                                                  align_ws_word, align_ws_sql)
         losses.append(0.2 * loss_aux)
-        self.compute_metrics(word_pivot, col_pivot, matches, tgt_type[:, 1:])
-
         final_loss = sum(losses)
+
+        self.compute_metrics(word_pivot, col_pivot, matches, tgt_type[:, 1:], final_loss)
 
         output = {"src_id": src_ids, "src_type": src_types, "tgt_type": tgt_type,
                   "tgt_keyword": tgt_keyword, "tgt_col_id": tgt_col_id, "tgt_col_type": tgt_col_type,
@@ -128,7 +130,7 @@ class SquallBaseParser(nn.Module):
                   }
         return output
 
-    def compute_metrics(self, word_pivot, col_pivot, matches, tgt_type):
+    def compute_metrics(self, word_pivot, col_pivot, matches, tgt_type, final_loss):
         for n in word_pivot.sum(-1):
             self.word_num(n)
         for n in col_pivot.sum(-1):
@@ -138,6 +140,7 @@ class SquallBaseParser(nn.Module):
         for n in (tgt_type == self.ttype_map['pad']).sum(-1):
             self.tgt_len(n)
         self.item_count += word_pivot.size()[0]
+        self.mean_loss(final_loss)
 
     def get_training_loss(self, mem: SeqCollector, gold_type: torch.LongTensor,
                           gold_keyword, gold_col_id, gold_col_type,
@@ -155,7 +158,7 @@ class SquallBaseParser(nn.Module):
             return torch.log_softmax(logits, dim=-1)
 
         def log(prob):
-            return (prob + 1e-13).log()
+            return prob.clamp(min=1e-20).log()
 
         def _append_loss(logprob, target, mask: torch.BoolTensor):
             losses.append(-masked_reducing_gather(logprob, target, mask.float(), 'batch'))
@@ -214,8 +217,8 @@ class SquallBaseParser(nn.Module):
 
         align_mask = (align_word > 0)
 
-        col_loss = - ((col_probs + 1e-13).log() * align_mask).sum(-1).mean()
-        word_loss = - ((word_probs + 1e-13).log() * align_mask).sum(-1).mean()
+        col_loss = - (col_probs.clamp(min=1e-20).log() * align_mask).sum(-1).mean()
+        word_loss = - (word_probs.clamp(min=1e-20).log() * align_mask).sum(-1).mean()
         return col_loss + word_loss
 
     def init_decoder(self, states, state_mask):

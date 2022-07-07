@@ -55,6 +55,8 @@ class SquallAllInOneField(Field):
         # the token types are enumerable as the TgtType class above.
         # Therefore, only the keywords and column types require a predefined vocabulary for predictions.
         sql = example['sql']
+        yield self.ns_keyword, START_SYMBOL
+        yield self.ns_keyword, END_SYMBOL
         for tok_type, value, span in sql:
             if tok_type == "Keyword":
                 yield self.ns_keyword, value
