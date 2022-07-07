@@ -13,7 +13,7 @@ class GeneralMultiHeadAttention(torch.nn.Module):
                  total_value_dim: int,
                  attend_to_dim: Optional[int] = None,
                  output_dim: Optional[int] = None,
-                 attention_dropout: float = 0.1,
+                 attention_dropout: float = 0.,
                  use_future_blinding: bool = False,
                  temperature: Optional[float] = None,
                  ):
@@ -186,7 +186,7 @@ class MultiHeadSelfAttention(torch.nn.Module):
                  input_dim: int,
                  total_attention_dim: int,
                  total_value_dim: int,
-                 attention_dropout: float = 0.1,
+                 attention_dropout: float = 0.,
                  temperature: Optional[float] = None,
                  ):
         super(MultiHeadSelfAttention, self).__init__()
@@ -219,7 +219,7 @@ class MaskedMultiHeadSelfAttention(torch.nn.Module):
                  input_dim: int,
                  total_attention_dim: int,
                  total_value_dim: int,
-                 attention_dropout: float = 0.1,
+                 attention_dropout: float = 0.,
                  temperature: Optional[float] = None,
                  ):
         super(MaskedMultiHeadSelfAttention, self).__init__()
@@ -253,7 +253,7 @@ class MultiHeadAttention(torch.nn.Module):
                  attend_to_dim: int,
                  total_attention_dim: int,
                  total_value_dim: int,
-                 attention_dropout: float = 0.1,
+                 attention_dropout: float = 0.,
                  temperature: Optional[float] = None,
                  ):
         super(MultiHeadAttention, self).__init__()

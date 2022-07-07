@@ -104,6 +104,7 @@ class RNNListMixin:
 
 
 class EncoderStackMixin(RNNListMixin):
+    """Static method for different kinds of encoders, and an instance method"""
     @staticmethod
     def get_stacked_rnn_encoder(encoder_type: str, inp_sz, hid_sz, num_layers, dropout,
                                 num_heads=12) -> EncoderStack:
@@ -186,19 +187,14 @@ class EncoderStackMixin(RNNListMixin):
         enc = PerturbParseEncoder(inp_sz, hid_sz, num_layers)
         return enc
 
-    def get_stacked_cell_encoder(self) -> EncoderStack:
-        p = self.p
-        dropout = getattr(p, 'enc_dropout', getattr(p, 'dropout', 0.))
-        hid_sz = getattr(p, 'enc_out_dim', p.hidden_sz)
-        bid_cell = getattr(p, 'cell_encoder_is_bidirectional', False)
-        use_pseq = getattr(p, 'cell_encoder_uses_packed_sequence', False)
-
-        rnns = self.get_stacked_rnns(p.encoder, p.emb_sz, hid_sz, p.num_enc_layers, dropout)
-        b_rnns = self.get_stacked_rnns(p.encoder, p.emb_sz, hid_sz, p.num_enc_layers, dropout)
-
+    @classmethod
+    def get_stacked_cell_encoder(cls, enc_type, inp_sz, hid_sz, num_layers, dropout,
+                                 use_bid=False, use_pseq=False) -> EncoderStack:
+        rnns = cls.get_stacked_rnns(enc_type, inp_sz, hid_sz, num_layers, dropout)
+        b_rnns = cls.get_stacked_rnns(enc_type, inp_sz, hid_sz, num_layers, dropout)
         from .cell_encoder import CellEncoder
         return StackedEncoder([CellEncoder(rnn, brnn, use_pseq)
-                               if bid_cell else
+                               if use_bid else
                                CellEncoder(rnn, None, use_pseq)
                                for rnn, brnn in zip(rnns, b_rnns)],
                               input_dropout=dropout)
@@ -222,7 +218,9 @@ class EncoderStackMixin(RNNListMixin):
             return self.get_perturb_parse_gcn_encoder(p.emb_sz, hid_sz, p.num_enc_layers)
 
         if getattr(p, 'use_cell_based_encoder', False):
-            return self.get_stacked_cell_encoder()
+            return self.get_stacked_cell_encoder(p.encoder, p.emb_sz, hid_sz, p.num_enc_layers, dropout,
+                                                 getattr(p, 'cell_encoder_is_bidirectional', False),
+                                                 getattr(p, 'cell_encoder_uses_packed_sequence', False))
 
         return self.get_stacked_rnn_encoder(p.encoder, p.emb_sz, hid_sz, p.num_enc_layers, dropout, num_heads)
 
