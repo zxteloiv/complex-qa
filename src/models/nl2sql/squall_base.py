@@ -3,6 +3,7 @@ from allennlp.training.metrics import Average
 from torch import nn
 
 from models.interfaces.attention import Attention as IAttn
+from models.interfaces.encoder import Encoder
 from models.interfaces.unified_rnn import RNNStack
 from models.modules.variational_dropout import VariationalDropout
 from models.transformer.multi_head_attention import MultiHeadSelfAttention
@@ -16,6 +17,7 @@ class SquallBaseParser(nn.Module):
                  plm_model,
                  hidden_sz: int,
                  plm2hidden: nn.Module,
+                 hidden_enc: Encoder,
 
                  kwd_embedding: nn.Module,
                  col2input: nn.Module,
@@ -39,9 +41,10 @@ class SquallBaseParser(nn.Module):
         super().__init__()
         self.pretrained_model = plm_model
         self.plm2hidden = plm2hidden
+        self.hidden_enc = hidden_enc
 
-        self.aux_col = MultiHeadSelfAttention(1, hidden_sz, hidden_sz, hidden_sz, 0)
-        self.aux_word = MultiHeadSelfAttention(1, hidden_sz, hidden_sz, hidden_sz, 0)
+        self.word_att_col = MultiHeadSelfAttention(1, hidden_sz, hidden_sz, hidden_sz)
+        self.col_att_word = MultiHeadSelfAttention(1, hidden_sz, hidden_sz, hidden_sz)
 
         self.sql_word_attn = sql_word_attn
         self.sql_col_attn = sql_col_attn
@@ -69,11 +72,13 @@ class SquallBaseParser(nn.Module):
         self.item_count = 0
 
     def get_metrics(self, reset=False):
-        metric = {"ACC(EM)": self.acc.get_metric(reset),
-                  "WORDS": self.word_num.get_metric(reset),
-                  "COLUMNS": self.col_num.get_metric(reset),
-                  "TLEN": self.tgt_len.get_metric(reset),
-                  "AVG_LOSS": self.mean_loss.get_metric(reset),
+        def rf6(f): return round(float(f), 6)
+
+        metric = {"ACC(EM)": rf6(self.acc.get_metric(reset)),
+                  "WORDS": rf6(self.word_num.get_metric(reset)),
+                  "COLUMNS": rf6(self.col_num.get_metric(reset)),
+                  "TLEN": rf6(self.tgt_len.get_metric(reset)),
+                  "AVG_LOSS": rf6(self.mean_loss.get_metric(reset)),
                   "COUNT": self.item_count,
                   }
         if reset:
@@ -96,13 +101,10 @@ class SquallBaseParser(nn.Module):
                 **kwargs
                 ):
         self._reset_variational_dropouts()
-        enc_states, state_mask = self.encode(src_ids, src_types, src_plm_type_ids)
+        enc_states, state_mask, word_pivot, col_pivot, xattn_weights = self.encode(src_ids, src_types, src_plm_type_ids)
         hx = self.init_decoder(enc_states, state_mask)
 
-        col_pivot = (src_types == self.stype_map['col_pivot']).long()
-        word_pivot = (src_types == self.stype_map['word_pivot']).long()
-
-        loss_aux = self.aux_pred(enc_states, word_pivot, col_pivot, align_wc_word, align_wc_col)
+        loss_aux = self.aux_loss(*xattn_weights, align_wc_word, align_wc_col)
 
         mem = SeqCollector()
         for i in range(tgt_type.size()[1] - 1):
@@ -185,12 +187,12 @@ class SquallBaseParser(nn.Module):
 
         # attention-based losses with gold alignments
         # (b, tgt_len, src_len)
-        word_attn_logp = log(mem.get_stacked_tensor('word_attn'))
+        word_attn = mem.get_stacked_tensor('word_attn')
         batch = torch.arange(gold_type.size()[0], device=gold_type.device).unsqueeze(-1)
         # attention as supervision but not prediction targets
-        align_mask = ws_word > 0    # (b, num_alignments)
-        losses.append(- (word_attn_logp[batch, ws_sql, ws_word] * align_mask).sum(-1).mean())
-
+        dup_sql_num = (ws_sql.unsqueeze(-1) == ws_sql.unsqueeze(-2)).sum(-1)
+        word_prob = word_attn[batch, ws_sql, ws_word]
+        losses.append(((word_prob - dup_sql_num.reciprocal()) ** 2 / 2).sum(-1).mean()) # sum alignments, mean batch
         return losses, matches
 
     def encode(self, src_ids, src_types: torch.Tensor, plm_type_ids):
@@ -200,26 +202,45 @@ class SquallBaseParser(nn.Module):
                                         attention_mask=state_mask.float())
         enc_states = enc_out.last_hidden_state
         states = self.plm2hidden(enc_states)
-        return states, state_mask
 
-    def aux_pred(self, states: torch.Tensor, word_pivot, col_pivot, align_word, align_col):
-        # states: (b, n, hid)
-        # preds: (b, n, 1, attend_length)
-        _, col_preds = self.aux_col.forward(states, col_pivot)
-        _, word_preds = self.aux_word.forward(states, word_pivot)
+        def st_is(k: str):
+            return src_types == self.stype_map[k]
 
-        batch = torch.arange(states.size()[0], device=states.device).unsqueeze(-1)
+        col_pivot = st_is('col_pivot')      # use ctx word
+        word_pivot = st_is('word_pivot')    # use ctx col
+        is_special = st_is('special')       # use 0
+        is_pad = st_is('pad')               # use 0
+        is_word = st_is('word')             # use col
+        is_col = st_is('column')            # use word
+
+        # ctx: (b, n, hid)
+        # attn: (b, n, num_heads=1, attend_length=n)
+        col_ctx, col_attn = self.word_att_col.forward(states, col_pivot)
+        word_ctx, word_attn = self.col_att_word.forward(states, word_pivot)
+
+        overall_ctx = ((is_word + word_pivot).unsqueeze(-1) * col_ctx
+                       + (is_col + col_pivot).unsqueeze(-1) * word_ctx
+                       + (is_special + is_pad).unsqueeze(-1) * torch.zeros_like(word_ctx))
+
+        encoded_states = self.hidden_enc(torch.cat([states, overall_ctx], dim=-1), state_mask)
+
+        return encoded_states, state_mask, word_pivot, col_pivot, (col_attn, word_attn)
+
+    def aux_loss(self, col_attn, word_attn, align_word, align_col):
+        # attn: (b, n, 1, attend_length)
+        batch = torch.arange(align_word.size()[0], device=align_word.device).unsqueeze(-1)
 
         # align_word/col: (b, num_alignments)
         # (batch, num_alignments)
-        col_probs = col_preds[batch, align_word, 0, align_col]
-        word_probs = word_preds[batch, align_col, 0, align_word]
+        col_probs = col_attn[batch, align_word, 0, align_col]   # each word to col distribution
+        word_probs = word_attn[batch, align_col, 0, align_word] # each col to words distribution
 
-        align_mask = (align_word > 0)
+        dup_word_num = (align_word.unsqueeze(-1) == align_word.unsqueeze(-2)).sum(-1)
+        dup_col_num = (align_col.unsqueeze(-1) == align_col.unsqueeze(-2)).sum(-1)
 
-        col_loss = - (col_probs.clamp(min=1e-20).log() * align_mask).sum(-1).mean()
-        word_loss = - (word_probs.clamp(min=1e-20).log() * align_mask).sum(-1).mean()
-        return col_loss + word_loss
+        col_loss = (col_probs - dup_word_num.reciprocal()) ** 2 / 2
+        word_loss = (word_probs - dup_col_num.reciprocal()) ** 2 / 2
+        return (col_loss + word_loss).sum(-1).mean()
 
     def init_decoder(self, states, state_mask):
         agg_src = aggregate_layered_state([states], state_mask, self._strategy)

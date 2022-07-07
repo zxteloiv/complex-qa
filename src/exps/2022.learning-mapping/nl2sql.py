@@ -43,11 +43,10 @@ def base_param():
     p.word_ctx_attn = 'dot_product'
     p.col_ctx_attn = 'dot_product'
 
-    # p.num_heads = 10  # for Multi-Head Attention only
-
-    p.col_copy = 'bilinear'
-    p.span_begin = 'bilinear'
-    p.span_end = 'bilinear'
+    p.num_heads = 10  # for Multi-Head Attention only
+    p.col_copy = 'mha'
+    p.span_begin = 'mha'
+    p.span_end = 'mha'
 
     p.decoder_init = 'avg_all'
     return p
@@ -83,7 +82,7 @@ def setup_bot(args, get_model_func=None, trialname='base'):
         bot.add_event_handler(Events.ITERATION_STARTED, collect_garbage, 100)
         bot.add_event_handler(Events.ITERATION_COMPLETED, end_with_nan_loss, 100)
         # bot.add_event_handler(Events.EPOCH_COMPLETED, every_epoch_model_saver, 100)
-        # bot.add_event_handler(Events.EPOCH_COMPLETED, evaluation_on_dev_every_epoch, 90)
+        bot.add_event_handler(Events.EPOCH_COMPLETED, evaluation_on_dev_every_epoch, 90, skip_first_epochs=5)
         # bot.add_event_handler(Events.EPOCH_COMPLETED, evaluation_on_dev_every_epoch, 80, on_test_data=True)
         bot.add_event_handler(Events.EPOCH_COMPLETED, get_metrics, 100, prefix="Training Metrics: ")
         bot.updater = get_updater(bot)
@@ -147,16 +146,25 @@ def foo():
         # field.to_tensor(ex)
 
         from tqdm import tqdm
-        for i, example in enumerate(tqdm(test)):
+        for i, example in enumerate(tqdm(train)):
             try:
                 ex = translator.to_tensor(example)
+                inspect_ex(example, ex, field)
                 # print(ex)
                 batch = translator.batch_tensor([ex])
                 # print(batch)
             except:
                 print(i)
                 raise RuntimeError('huh')
+            break
         break
+
+
+def inspect_ex(example, ex, field):
+    from datasets.squall_translator import SquallAllInOneField
+    field: SquallAllInOneField
+    print(f'nl_toks: {" ".join(f"({i}){x}" for i, x in enumerate(example["nl"]))}')
+    print(f'sql_toks: {" ".join(f"({i}){x}" for i, x in enumerate(example["sql"]))}')
 
 
 if __name__ == '__main__':
