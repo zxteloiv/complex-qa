@@ -1,4 +1,3 @@
-import datetime
 import sys
 
 from trialbot.training import TrialBot, Registry
@@ -25,7 +24,7 @@ def base_param():
     p.TRAINING_LIMIT = 30
     p.WEIGHT_DECAY = 0.
     p.OPTIM = "adabelief"
-    p.ADAM_LR = 2e-3
+    p.ADAM_LR = 1e-3
     p.ADAM_BETAS = (0.9, 0.999)
     p.batch_sz = 16
     p.emb_sz = 256
@@ -118,63 +117,5 @@ def get_updater(bot: TrialBot):
     return updater
 
 
-def foo():
-    from trialbot.data import NSVocabulary
-    from datasets.squall import install_squall_datasets
-    import datasets.squall_translator
-    install_squall_datasets()
-    for ds_name, ds_func in Registry._datasets.items():
-        print(ds_name)
-        train, dev, test = ds_func()
-        print('lengths:', len(train), len(dev), len(test))
-        from trialbot.data.translator import FieldAwareTranslator
-        translator: FieldAwareTranslator = Registry.get_translator('squall-base')
-        from utils.vocab_builder import get_ns_counter
-        vocab = NSVocabulary(get_ns_counter(train, translator))
-        print(vocab)
-        translator.index_with_vocab(vocab)
-
-        from datasets.squall_translator import SquallAllInOneField
-        field: SquallAllInOneField = translator.fields[0]
-
-        # ex = train[26]
-        # print(ex)
-        # print(' '.join(ex['nl']))
-        # print(' '.join(t[0] for t in ex['sql']))
-        # print('------' * 20)
-        # wsc_graph = field.get_connectivity_graph(ex)
-        # print(wsc_graph)
-        # field.to_tensor(ex)
-
-        from tqdm import tqdm
-        for i, example in enumerate(tqdm(train)):
-            try:
-                ex = translator.to_tensor(example)
-                inspect_ex(example, ex, field)
-                # print(ex)
-                batch = translator.batch_tensor([ex])
-                # print(batch)
-            except:
-                print(i)
-                raise RuntimeError('huh')
-            break
-        break
-
-
-def inspect_ex(example, ex, field):
-    from datasets.squall_translator import SquallAllInOneField
-    field: SquallAllInOneField
-    nl, sql = example['nl'], example['sql']
-    print(f'nl_toks: {" ".join(f"({i}){x}" for i, x in enumerate(nl))}')
-    print(f'sql_toks: {" ".join(f"({i}){x[1]}" for i, x in enumerate(sql))}')
-    print('aligns:')
-    for (srcspan, tgtspan) in example['align']:
-        srcwords = ' '.join(nl[i] for i in srcspan)
-        tgtwords = ' '.join(str(sql[i][1]) for i in tgtspan)
-        print(f"    {srcwords} <-->  {tgtwords}")
-
-
-
 if __name__ == '__main__':
-    # foo()
     main()
