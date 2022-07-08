@@ -51,6 +51,13 @@ def handle_common_args(args):
         logfile_name = f'log.{ds}.{hp}.s{args.seed}'
         logging.basicConfig(filename=logfile_name, force=True)  # reset the handlers for each exp
 
+    if isinstance(args.device, int) and args.device >= 0:
+        # by setting this environ, the args.device will be mapped as device 0, and the move_to_device will fail.
+        # import os
+        # os.environ["CUDA_VISIBLE_DEVICES"] = str(args.device)
+        import torch
+        torch.cuda.set_device(args.device)
+
     if args.debug:
         logging.getLogger().setLevel(logging.DEBUG)
     elif args.quiet:

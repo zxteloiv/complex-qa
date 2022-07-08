@@ -25,6 +25,7 @@ def base_param():
     p.TRAINING_LIMIT = 30
     p.WEIGHT_DECAY = 0.
     p.OPTIM = "adabelief"
+    p.ADAM_LR = 2e-3
     p.ADAM_BETAS = (0.9, 0.999)
     p.batch_sz = 16
     p.emb_sz = 256
@@ -163,8 +164,15 @@ def foo():
 def inspect_ex(example, ex, field):
     from datasets.squall_translator import SquallAllInOneField
     field: SquallAllInOneField
-    print(f'nl_toks: {" ".join(f"({i}){x}" for i, x in enumerate(example["nl"]))}')
-    print(f'sql_toks: {" ".join(f"({i}){x}" for i, x in enumerate(example["sql"]))}')
+    nl, sql = example['nl'], example['sql']
+    print(f'nl_toks: {" ".join(f"({i}){x}" for i, x in enumerate(nl))}')
+    print(f'sql_toks: {" ".join(f"({i}){x[1]}" for i, x in enumerate(sql))}')
+    print('aligns:')
+    for (srcspan, tgtspan) in example['align']:
+        srcwords = ' '.join(nl[i] for i in srcspan)
+        tgtwords = ' '.join(str(sql[i][1]) for i in tgtspan)
+        print(f"    {srcwords} <-->  {tgtwords}")
+
 
 
 if __name__ == '__main__':
