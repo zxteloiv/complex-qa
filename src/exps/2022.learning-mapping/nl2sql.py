@@ -82,7 +82,7 @@ def setup_bot(args, get_model_func=None, trialname='base'):
         from utils.trialbot.extensions import evaluation_on_dev_every_epoch, collect_garbage
         bot.add_event_handler(Events.ITERATION_STARTED, collect_garbage, 100)
         bot.add_event_handler(Events.ITERATION_COMPLETED, end_with_nan_loss, 100)
-        # bot.add_event_handler(Events.EPOCH_COMPLETED, every_epoch_model_saver, 100)
+        bot.add_event_handler(Events.EPOCH_COMPLETED, every_epoch_model_saver, 100)
         bot.add_event_handler(Events.EPOCH_COMPLETED, evaluation_on_dev_every_epoch, 90, skip_first_epochs=5)
         # bot.add_event_handler(Events.EPOCH_COMPLETED, evaluation_on_dev_every_epoch, 80, on_test_data=True)
         bot.add_event_handler(Events.EPOCH_COMPLETED, get_metrics, 100, prefix="Training Metrics: ")
