@@ -121,6 +121,11 @@ def get_wrapped_attention(attn_type: str,
         attn = BilinearAttention(vector_dim=vector_dim, matrix_dim=matrix_dim)
         attn = AllenNLPAttentionWrapper(attn, attention_dropout)
 
+    elif attn_type == 'cosine':
+        from allennlp.modules.attention import CosineAttention
+        attn = CosineAttention(vector_dim=vector_dim, matrix_dim=matrix_dim)
+        attn = AllenNLPAttentionWrapper(attn)
+
     elif attn_type == "generalized_bilinear":
         from .generalized_attention import GeneralizedBilinearAttention
         from torch import nn

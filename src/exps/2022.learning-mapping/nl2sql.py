@@ -52,6 +52,54 @@ def base_param():
     return p
 
 
+# @Registry.hparamset()
+# def squall_ex1():
+#     p = base_param()
+#     p.WEIGHT_DECAY = 0.
+#     p.word_ctx_attn = 'dot_product'
+#     p.col_ctx_attn = 'dot_product'
+#     p.col_copy = 'dot_product'
+#     p.span_begin = 'dot_product'
+#     p.span_end = 'dot_product'
+#     return p
+
+
+@Registry.hparamset()
+def squall_ex2():
+    p = base_param()
+    p.WEIGHT_DECAY = 0.
+    p.word_ctx_attn = 'bilinear'
+    p.col_ctx_attn = 'bilinear'
+    p.col_copy = 'bilinear'
+    p.span_begin = 'bilinear'
+    p.span_end = 'bilinear'
+    return p
+
+
+# @Registry.hparamset()
+# def squall_ex3():
+#     p = base_param()
+#     p.WEIGHT_DECAY = 0.
+#     p.word_ctx_attn = 'cosine'
+#     p.col_ctx_attn = 'cosine'
+#     p.col_copy = 'cosine'
+#     p.span_begin = 'cosine'
+#     p.span_end = 'cosine'
+#     return p
+
+
+@Registry.hparamset()
+def squall_ex4():
+    p = base_param()
+    p.WEIGHT_DECAY = 1e-3
+    p.word_ctx_attn = 'dot_product'
+    p.col_ctx_attn = 'dot_product'
+    p.col_copy = 'bilinear'
+    p.span_begin = 'bilinear'
+    p.span_end = 'bilinear'
+    return p
+
+
 def setup_bot(args, get_model_func=None, trialname='base'):
     from trialbot.training import Events
     from models.nl2sql.squall_base_factory import SquallBaseBuilder
