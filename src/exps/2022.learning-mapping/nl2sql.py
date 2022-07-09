@@ -21,8 +21,8 @@ def base_param():
     from trialbot.training.hparamset import HyperParamSet
     from trialbot.utils.root_finder import find_root
     p = HyperParamSet.common_settings(find_root())
-    p.TRAINING_LIMIT = 30
-    p.WEIGHT_DECAY = 0.
+    p.TRAINING_LIMIT = 60
+    p.WEIGHT_DECAY = 1e-3
     p.OPTIM = "adabelief"
     p.ADAM_LR = 1e-3
     p.ADAM_BETAS = (0.9, 0.999)
@@ -42,56 +42,66 @@ def base_param():
 
     p.word_ctx_attn = 'dot_product'
     p.col_ctx_attn = 'dot_product'
+    p.plm_encoder = 'lstm'
+    p.plm_enc_out = p.hidden_sz
+    p.decoder_init = 'avg_all'
 
     p.num_heads = 10  # for Multi-Head Attention only
     p.col_copy = 'mha'
     p.span_begin = 'mha'
     p.span_end = 'mha'
 
-    p.decoder_init = 'avg_all'
     return p
 
 
-# @Registry.hparamset()
-# def squall_ex1():
-#     p = base_param()
-#     p.WEIGHT_DECAY = 0.
-#     p.word_ctx_attn = 'dot_product'
-#     p.col_ctx_attn = 'dot_product'
-#     p.col_copy = 'dot_product'
-#     p.span_begin = 'dot_product'
-#     p.span_end = 'dot_product'
-#     return p
+@Registry.hparamset()
+def squall_ex1():
+    p = base_param()
+    p.plm_encoder = 'bilstm'
+    p.plm_enc_out = p.hidden_sz // 2
+    p.decoder_init = 'avg_all'
+    p.word_ctx_attn = 'cosine'
+    p.col_ctx_attn = 'cosine'
+    p.col_copy = 'mha'
+    p.span_begin = 'mha'
+    p.span_end = 'mha'
+    return p
 
 
 @Registry.hparamset()
 def squall_ex2():
     p = base_param()
-    p.WEIGHT_DECAY = 0.
-    p.word_ctx_attn = 'bilinear'
-    p.col_ctx_attn = 'bilinear'
+    p.plm_encoder = 'bilstm'
+    p.plm_enc_out = p.hidden_sz // 2
+    p.decoder_init = 'avg_all'
+    p.word_ctx_attn = 'cosine'
+    p.col_ctx_attn = 'cosine'
     p.col_copy = 'bilinear'
     p.span_begin = 'bilinear'
     p.span_end = 'bilinear'
     return p
 
 
-# @Registry.hparamset()
-# def squall_ex3():
-#     p = base_param()
-#     p.WEIGHT_DECAY = 0.
-#     p.word_ctx_attn = 'cosine'
-#     p.col_ctx_attn = 'cosine'
-#     p.col_copy = 'cosine'
-#     p.span_begin = 'cosine'
-#     p.span_end = 'cosine'
-#     return p
+@Registry.hparamset()
+def squall_ex3():
+    p = base_param()
+    p.plm_encoder = 'bilstm'
+    p.plm_enc_out = p.hidden_sz // 2
+    p.decoder_init = 'avg_all'
+    p.word_ctx_attn = 'dot_product'
+    p.col_ctx_attn = 'dot_product'
+    p.col_copy = 'mha'
+    p.span_begin = 'mha'
+    p.span_end = 'mha'
+    return p
 
 
 @Registry.hparamset()
 def squall_ex4():
     p = base_param()
-    p.WEIGHT_DECAY = 1e-3
+    p.plm_encoder = 'bilstm'
+    p.plm_enc_out = p.hidden_sz // 2
+    p.decoder_init = 'avg_all'
     p.word_ctx_attn = 'dot_product'
     p.col_ctx_attn = 'dot_product'
     p.col_copy = 'bilinear'
@@ -130,7 +140,7 @@ def setup_bot(args, get_model_func=None, trialname='base'):
         bot.add_event_handler(Events.ITERATION_STARTED, collect_garbage, 100)
         bot.add_event_handler(Events.ITERATION_COMPLETED, end_with_nan_loss, 100)
         bot.add_event_handler(Events.EPOCH_COMPLETED, every_epoch_model_saver, 100)
-        bot.add_event_handler(Events.EPOCH_COMPLETED, evaluation_on_dev_every_epoch, 90, skip_first_epochs=5)
+        bot.add_event_handler(Events.EPOCH_COMPLETED, evaluation_on_dev_every_epoch, 90)
         # bot.add_event_handler(Events.EPOCH_COMPLETED, evaluation_on_dev_every_epoch, 80, on_test_data=True)
         bot.add_event_handler(Events.EPOCH_COMPLETED, get_metrics, 100, prefix="Training Metrics: ")
         bot.updater = get_updater(bot)

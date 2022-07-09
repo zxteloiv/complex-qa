@@ -17,6 +17,7 @@ class AllenNLPAttentionWrapper(IAttn):
         return self._attn_weights
 
     def __init__(self, attn: AllenAttention, attn_dropout: float = 0.,
+                 use_temperature_schedule: bool = False,
                  init_tau: float = 1., min_tau: float = .05):
         super(AllenNLPAttentionWrapper, self).__init__()
         self._attn: AllenAttention = attn
@@ -24,8 +25,10 @@ class AllenNLPAttentionWrapper(IAttn):
         self.tau = init_tau
         self.init_tau = init_tau
         self.min_tau = min_tau
-        # manually normalize in the forward pass of the wrapper
-        self._attn._normalize = False
+        self.use_schedule = use_temperature_schedule
+        if use_temperature_schedule:
+            # manually normalize in the forward pass of the wrapper
+            self._attn._normalize = False
         self._attn_weights = None
 
     def forward(self,
@@ -45,13 +48,15 @@ class AllenNLPAttentionWrapper(IAttn):
 
         # attn, weights: (batch, max_attend_length)
         attn = self._attn(inputs, attend_over, attend_mask)
-        if self.training or abs(self.init_tau - self.tau) < self.min_tau:
-            # if the tau has never been significantly changed, then it suggests the tau
-            # is not bounded with any schedule, so it should be fixed even for evaluation
-            temperature = max(self.tau, self.min_tau)
+        if self.use_schedule:
+            if self.training:
+                temperature = max(self.tau, self.min_tau)
+            else:
+                temperature = self.min_tau
+            weights = masked_softmax(attn / temperature, attend_mask.bool(), dim=-1)
         else:
-            temperature = self.min_tau
-        weights = masked_softmax(attn / temperature, attend_mask.bool(), dim=-1)
+            weights = attn  # no schedule, the attention has been processed of mask softmax
+
         self._attn_weights = weights    # (batch, max_attend_length)
 
         # context: (batch, attend_dim)
@@ -123,7 +128,7 @@ def get_wrapped_attention(attn_type: str,
 
     elif attn_type == 'cosine':
         from allennlp.modules.attention import CosineAttention
-        attn = CosineAttention(vector_dim=vector_dim, matrix_dim=matrix_dim)
+        attn = CosineAttention()
         attn = AllenNLPAttentionWrapper(attn)
 
     elif attn_type == "generalized_bilinear":

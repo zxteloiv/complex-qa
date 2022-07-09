@@ -25,7 +25,7 @@ class SquallBaseBuilder(EncoderStackMixin):
             nn.Linear(plm_model.config.hidden_size, hid_sz),
             ResLayer(hid_sz, hid_sz),
         )
-        h_ctx_enc = self.get_stacked_rnn_encoder('aug_lstm', hid_sz * 2, hid_sz, 2, dropout=0)
+        h_ctx_enc = self.get_stacked_rnn_encoder(p.plm_encoder, hid_sz * 2, p.plm_enc_out, 2, dropout=0)
 
         tgt_type_keys: tuple = ('pad', 'keyword', 'column', 'literal_string', 'literal_number')
         parser = SquallBaseParser(
