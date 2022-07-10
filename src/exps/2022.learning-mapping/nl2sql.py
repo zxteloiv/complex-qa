@@ -42,7 +42,7 @@ def base_param():
 
     p.word_ctx_attn = 'dot_product'
     p.col_ctx_attn = 'dot_product'
-    p.plm_encoder = 'lstm'
+    p.plm_encoder = 'aug_lstm'
     p.plm_enc_out = p.hidden_sz
     p.decoder_init = 'avg_all'
 
@@ -51,62 +51,6 @@ def base_param():
     p.span_begin = 'mha'
     p.span_end = 'mha'
 
-    return p
-
-
-@Registry.hparamset()
-def squall_ex1():
-    p = base_param()
-    p.plm_encoder = 'bilstm'
-    p.plm_enc_out = p.hidden_sz // 2
-    p.decoder_init = 'avg_all'
-    p.word_ctx_attn = 'cosine'
-    p.col_ctx_attn = 'cosine'
-    p.col_copy = 'mha'
-    p.span_begin = 'mha'
-    p.span_end = 'mha'
-    return p
-
-
-@Registry.hparamset()
-def squall_ex2():
-    p = base_param()
-    p.plm_encoder = 'bilstm'
-    p.plm_enc_out = p.hidden_sz // 2
-    p.decoder_init = 'avg_all'
-    p.word_ctx_attn = 'cosine'
-    p.col_ctx_attn = 'cosine'
-    p.col_copy = 'bilinear'
-    p.span_begin = 'bilinear'
-    p.span_end = 'bilinear'
-    return p
-
-
-@Registry.hparamset()
-def squall_ex3():
-    p = base_param()
-    p.plm_encoder = 'bilstm'
-    p.plm_enc_out = p.hidden_sz // 2
-    p.decoder_init = 'avg_all'
-    p.word_ctx_attn = 'dot_product'
-    p.col_ctx_attn = 'dot_product'
-    p.col_copy = 'mha'
-    p.span_begin = 'mha'
-    p.span_end = 'mha'
-    return p
-
-
-@Registry.hparamset()
-def squall_ex4():
-    p = base_param()
-    p.plm_encoder = 'bilstm'
-    p.plm_enc_out = p.hidden_sz // 2
-    p.decoder_init = 'avg_all'
-    p.word_ctx_attn = 'dot_product'
-    p.col_ctx_attn = 'dot_product'
-    p.col_copy = 'bilinear'
-    p.span_begin = 'bilinear'
-    p.span_end = 'bilinear'
     return p
 
 
