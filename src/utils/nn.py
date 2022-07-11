@@ -333,6 +333,42 @@ def assign_stacked_states(src_agg: List[torch.Tensor], num_layers: int, strategy
     return init_state
 
 
+def build_compact_indices(mask: torch.LongTensor, padding: int = -1):
+    """
+    Turn a boolean mask tensor into a compact index tensor, facilitating tensor gathering.
+
+    :param mask: (batch, bunch), all values are either 0 or 1
+    :param padding: int, indicating the padding to the output index tensor.
+            default is -1 because 0 is usually a valid index
+    :return: (batch, max_selection), indices of the mask
+    """
+    assert mask.ndim == 2
+    row, col = mask.nonzero(as_tuple=True)  # (flat_nonzeros)
+    nz_cnt = mask.count_nonzero(dim=1)      # (batch,), summed over the bunch dim, nz_cnt.sum() == flat_nonzeros
+    seq = torch.arange(nz_cnt.max(), device=mask.device)    # (max_selection,)
+    meta_col = torch.cat([seq[:n] for n in nz_cnt])         # (flat_nonzeros,),
+    places = torch.full((nz_cnt.size()[0], nz_cnt.max()), fill_value=padding, dtype=torch.long, device=mask.device)
+    places[row, meta_col] = col
+    return places
+
+
+def compact_mask_select(tensor: torch.Tensor, mask: torch.LongTensor) -> Tuple[torch.Tensor, torch.LongTensor]:
+    """
+    Given a state tensor (e.g. the output state of an entire sequence), select some of them indicated by the mask.
+    Although the state can be of any size, here it's restricted to be 3-order.
+
+    :param tensor: (batch, bunch, h_dim)
+    :param mask: (batch, bunch), 0 or 1 indicating to select the correct size or not
+    :return: a tuple of the two
+            select_output: (batch, max_selection, h_dim),
+            select_mask: (batch, max_selection)
+    """
+    indices = build_compact_indices(mask)
+    mask = (indices != -1)
+    output = tensor[torch.arange(indices.size()[0]).unsqueeze(-1), indices]
+    return output, mask
+
+
 def expand_tensor_size_at_dim(t: torch.Tensor, size: int, dim: int =-2) -> torch.Tensor:
     old_size = t.size()
     t = t.unsqueeze(dim=dim)

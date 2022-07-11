@@ -6,8 +6,8 @@ from models.interfaces.attention import Attention as IAttn
 from models.interfaces.encoder import Encoder
 from models.interfaces.unified_rnn import RNNStack
 from models.modules.variational_dropout import VariationalDropout
-from models.transformer.multi_head_attention import MultiHeadSelfAttention
-from utils.nn import aggregate_layered_state, assign_stacked_states, masked_reducing_gather
+from models.transformer.multi_head_attention import MultiHeadAttention
+from utils.nn import aggregate_layered_state, assign_stacked_states, masked_reducing_gather, compact_mask_select
 from utils.seq_collector import SeqCollector
 
 
@@ -17,7 +17,8 @@ class SquallBaseParser(nn.Module):
                  plm_model,
                  hidden_sz: int,
                  plm2hidden: nn.Module,
-                 hidden_enc: Encoder,
+                 word_enc: Encoder,
+                 col_enc: Encoder,
 
                  kwd_embedding: nn.Module,
                  col2input: nn.Module,
@@ -41,10 +42,11 @@ class SquallBaseParser(nn.Module):
         super().__init__()
         self.pretrained_model = plm_model
         self.plm2hidden = plm2hidden
-        self.hidden_enc = hidden_enc
+        self.word_enc = word_enc
+        self.col_enc = col_enc
 
-        self.word_att_col = MultiHeadSelfAttention(1, hidden_sz, hidden_sz, hidden_sz)
-        self.col_att_word = MultiHeadSelfAttention(1, hidden_sz, hidden_sz, hidden_sz)
+        self.word_att_col = MultiHeadAttention(1, hidden_sz, hidden_sz, hidden_sz, hidden_sz)
+        self.col_att_word = MultiHeadAttention(1, hidden_sz, hidden_sz, hidden_sz, hidden_sz)
 
         self.sql_word_attn = sql_word_attn
         self.sql_col_attn = sql_col_attn
@@ -101,20 +103,20 @@ class SquallBaseParser(nn.Module):
                 **kwargs
                 ):
         self._reset_variational_dropouts()
-        enc_states, state_mask, word_pivot, col_pivot, xattn_weights = self.encode(src_ids, src_types, src_plm_type_ids)
-        hx = self.init_decoder(enc_states, state_mask)
-
+        word_states, word_mask, col_states, col_mask, xattn_weights = self.encode(src_ids, src_types, src_plm_type_ids)
         loss_aux = self.aux_loss(*xattn_weights, align_wc_word, align_wc_col)
+
+        hx = self.init_decoder(word_states, word_mask)
 
         mem = SeqCollector()
         for i in range(tgt_type.size()[1] - 1):
-            inp = self.get_teacher_forcing_input(0, tgt_type, enc_states, tgt_keyword, tgt_col_id,
+            inp = self.get_teacher_forcing_input(i, tgt_type, word_states, col_states, tgt_keyword, tgt_col_id,
                                                  tgt_literal_begin, tgt_literal_end)
             hx, out = self.decoder(inp, hx)
-            word_ctx, col_ctx = self.get_enc_attn(out, word_pivot, col_pivot, enc_states)
+            word_ctx, col_ctx = self.get_enc_attn(out, word_states, word_mask, col_states, col_mask)
 
             hvec = torch.cat([out, word_ctx, col_ctx], dim=-1)   # (b, hidden * 3)
-            self.step_predictions(hvec, enc_states, word_pivot, col_pivot, mem)
+            self.step_predictions(hvec, word_states, word_mask, col_states, col_mask, mem)
 
         losses, matches = self.get_training_loss(mem, tgt_type[:, 1:], tgt_keyword[:, 1:],
                                                  tgt_col_id[:, 1:], tgt_col_type[:, 1:],
@@ -123,7 +125,7 @@ class SquallBaseParser(nn.Module):
         losses.append(0.2 * loss_aux)
         final_loss = sum(losses)
 
-        self.compute_metrics(word_pivot, col_pivot, matches, tgt_type[:, 1:], final_loss)
+        self.compute_metrics(word_mask, col_mask, matches, tgt_type[:, 1:], final_loss)
 
         output = {"src_id": src_ids, "src_type": src_types, "tgt_type": tgt_type,
                   "tgt_keyword": tgt_keyword, "tgt_col_id": tgt_col_id, "tgt_col_type": tgt_col_type,
@@ -206,25 +208,18 @@ class SquallBaseParser(nn.Module):
         def st_is(k: str):
             return src_types == self.stype_map[k]
 
-        col_pivot = st_is('col_pivot')      # use ctx word
-        word_pivot = st_is('word_pivot')    # use ctx col
-        is_special = st_is('special')       # use 0
-        is_pad = st_is('pad')               # use 0
-        is_word = st_is('word')             # use col
-        is_col = st_is('column')            # use word
+        word_states, word_state_mask = compact_mask_select(states, st_is('word_pivot'))
+        col_states, col_state_mask = compact_mask_select(states, st_is('col_pivot'))
 
-        # ctx: (b, n, hid)
-        # attn: (b, n, num_heads=1, attend_length=n)
-        col_ctx, col_attn = self.word_att_col.forward(states, col_pivot)
-        word_ctx, word_attn = self.col_att_word.forward(states, word_pivot)
+        # ctx: (b, len, hid)
+        # attn: (b, input_len, num_heads=1, attend_len)
+        col_ctx, col_attn = self.word_att_col.forward(word_states, col_states, col_state_mask)
+        word_ctx, word_attn = self.col_att_word.forward(col_states, word_states, word_state_mask)
 
-        overall_ctx = ((is_word + word_pivot).unsqueeze(-1) * col_ctx
-                       + (is_col + col_pivot).unsqueeze(-1) * word_ctx
-                       + (is_special + is_pad).unsqueeze(-1) * torch.zeros_like(word_ctx))
+        word_states = self.word_enc.forward(torch.cat([word_states, col_ctx], dim=-1), word_state_mask)
+        col_states = self.col_enc.forward(torch.cat([col_states, word_ctx], dim=-1), col_state_mask)
 
-        encoded_states = self.hidden_enc(torch.cat([states, overall_ctx], dim=-1), state_mask)
-
-        return encoded_states, state_mask, word_pivot, col_pivot, (col_attn, word_attn)
+        return word_states, word_state_mask, col_states, col_state_mask, (col_attn, word_attn)
 
     def aux_loss(self, col_attn, word_attn, align_word, align_col):
         # attn: (b, n, 1, attend_length)
@@ -249,16 +244,16 @@ class SquallBaseParser(nn.Module):
         hx, _ = self.decoder.init_hidden_states(dec_states)
         return hx
 
-    def get_teacher_forcing_input(self, step: int, tgt_type: torch.Tensor, src_states,
+    def get_teacher_forcing_input(self, step: int, tgt_type: torch.Tensor, word_states, col_states,
                                   keywords, col_id, span_begin, span_end):
         batch = tgt_type.size()[0]
         step_input_type = tgt_type[:, step].unsqueeze(-1)   # (batch, 1)
 
         # *_inp, span_*: (batch, hid)
         emb_inp = self.sql_keyword_embed(keywords[:, step])
-        col_inp = self.col2input(src_states[range(batch), col_id[:, step]])
-        span_begin_state = src_states[range(batch), span_begin[:, step]]
-        span_end_state = src_states[range(batch), span_end[:, step]]
+        col_inp = self.col2input(col_states[range(batch), col_id[:, step]])
+        span_begin_state = word_states[range(batch), span_begin[:, step]]
+        span_end_state = word_states[range(batch), span_end[:, step]]
         len1_span_inp = self.span2input(torch.cat([span_begin_state, span_begin_state], dim=-1))
         len2_span_inp = self.span2input(torch.cat([span_begin_state, span_end_state], dim=-1))
 
@@ -273,27 +268,27 @@ class SquallBaseParser(nn.Module):
                + is_num * len1_span_inp + is_str * len2_span_inp)
         return inp
 
-    def get_enc_attn(self, step_out, word_pivot, col_pivot, src_states):
+    def get_enc_attn(self, step_out, word_states, word_state_mask, col_states, col_state_mask):
         # step_out: (b, hid)
-        # *_pivot: (b, n)
-        word_context = self.sql_word_attn.forward(step_out, src_states, word_pivot)
-        col_context = self.sql_col_attn.forward(step_out, src_states, col_pivot)
+        # *_mask: (b, n)
+        word_context = self.sql_word_attn.forward(step_out, word_states, word_state_mask)
+        col_context = self.sql_col_attn.forward(step_out, col_states, col_state_mask)
         # attn_weights for word_context will be added in self.step_predictions for training supervision
         # and thus will not be returned here.
         return word_context, col_context
 
-    def step_predictions(self, hvec, enc_states, word_pivot, col_pivot, mem):
+    def step_predictions(self, hvec, word_state, word_mask, col_state, col_mask, mem):
         # classification-based predictions
         ttype_logit = self.sql_type(hvec)  # (b, #types)
         keyword_logit = self.sql_keyword(hvec)  # (b, #keywords)
         col_type_logit = self.sql_col_type(hvec)  # (b, #coltypes)
 
         # attention-based predictions
-        self.sql_col_copy.forward(hvec, enc_states, col_pivot)
+        self.sql_col_copy.forward(hvec, col_state, col_mask)
         col_copy_prob = self.sql_col_copy.get_latest_attn_weights()  # (b, n)
-        self.sql_span_begin.forward(hvec, enc_states, word_pivot)
+        self.sql_span_begin.forward(hvec, word_state, word_mask)
         span_begin_prob = self.sql_span_begin.get_latest_attn_weights()  # (b, n)
-        self.sql_span_end.forward(hvec, enc_states, word_pivot)
+        self.sql_span_end.forward(hvec, word_state, word_mask)
         span_end_prob = self.sql_span_end.get_latest_attn_weights()  # (b, n)
         # for encoder attention training supervision
         word_attn_prob = self.sql_word_attn.get_latest_attn_weights()    # (b, n)

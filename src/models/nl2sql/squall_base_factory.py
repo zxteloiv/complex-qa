@@ -25,14 +25,16 @@ class SquallBaseBuilder(EncoderStackMixin):
             nn.Linear(plm_model.config.hidden_size, hid_sz),
             ResLayer(hid_sz, hid_sz),
         )
-        h_ctx_enc = self.get_stacked_rnn_encoder(p.plm_encoder, hid_sz * 2, p.plm_enc_out, 2, dropout=0)
+        word_enc = self.get_stacked_rnn_encoder(p.plm_encoder, hid_sz * 2, p.plm_enc_out, 2, dropout=0)
+        col_enc = self.get_stacked_rnn_encoder(p.plm_encoder, hid_sz * 2, p.plm_enc_out, 2, dropout=0)
 
         tgt_type_keys: tuple = ('pad', 'keyword', 'column', 'literal_string', 'literal_number')
         parser = SquallBaseParser(
             plm_model=plm_model,
             hidden_sz=p.hidden_sz,
             plm2hidden=plm2hidden,
-            hidden_enc=h_ctx_enc,
+            word_enc=word_enc,
+            col_enc=col_enc,
             kwd_embedding=nn.Sequential(
                 nn.Embedding(vocab.get_vocab_size(p.ns_keyword), p.emb_sz),
                 VDrop(dropout, on_the_fly=False),

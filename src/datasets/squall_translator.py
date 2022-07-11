@@ -159,18 +159,18 @@ class SquallAllInOneField(Field):
 
         if len(ws) > 0:
             ws_word, ws_sql = map(list, zip(*ws))
-            ws_word = self._lookup(ws_word, word_locs)
+            # ws_word = self._lookup(ws_word, word_locs)
             ws_sql = [x + 1 for x in ws_sql]
 
         if len(wc) > 0:
             wc_word, wc_col = map(list, zip(*wc))
-            wc_word = self._lookup(wc_word, word_locs)
-            wc_col = self._lookup(wc_col, col_locs)
+            # wc_word = self._lookup(wc_word, word_locs)
+            # wc_col = self._lookup(wc_col, col_locs)
 
         if len(sc) > 0:
             sc_sql, sc_col = map(list, zip(*sc))
             sc_sql = [x + 1 for x in sc_sql]
-            sc_col = self._lookup(sc_col, col_locs)
+            # sc_col = self._lookup(sc_col, col_locs)
 
         alignments = {
             "align_ws_word": ws_word,
@@ -200,18 +200,18 @@ class SquallAllInOneField(Field):
             elif type_str == "Column":
                 step['type'] = TgtType.Column
                 col_id, col_suffix = self._parse_column(value)
-                step['col_id'] = col_locs[col_id]
+                step['col_id'] = col_id #col_locs[col_id]
                 # take the None col_suffix as "none" (e.g. column c5 as c5_none)
                 # must be preprocessed before sent to executors.
                 step['col_type'] = self.vocab.get_token_index(col_suffix if col_suffix else "none", self.ns_coltype)
             elif type_str == "Literal.Number":
                 step['type'] = TgtType.LiteralNumber
-                step['literal_begin'] = word_locs[span[0]]
+                step['literal_begin'] = span[0] # word_locs[span[0]]
             elif type_str == "Literal.String":
                 # only literal.string has an end
                 step['type'] = TgtType.LiteralString
-                step['literal_begin'] = word_locs[span[0]]
-                step['literal_end'] = word_locs[span[1]]
+                step['literal_begin'] = span[0] # word_locs[span[0]]
+                step['literal_end'] = span[1] # word_locs[span[1]]
             else:
                 raise ValueError
 
