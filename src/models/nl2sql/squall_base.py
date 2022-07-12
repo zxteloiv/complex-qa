@@ -106,7 +106,7 @@ class SquallBaseParser(nn.Module):
                 ):
         self._reset_variational_dropouts()
         word_states, word_mask, col_states, col_mask = self.encode(src_ids, src_types, src_plm_type_ids)
-        loss_aux = self.get_encoder_loss(align_wc_word, align_wc_col)
+        loss_enc_attn = self.get_encoder_loss(align_wc_word, align_wc_col)
 
         hx = self.init_decoder(word_states, word_mask)
 
@@ -127,7 +127,7 @@ class SquallBaseParser(nn.Module):
                                                 tgt_col_id[:, 1:], tgt_col_type[:, 1:],
                                                 tgt_literal_begin[:, 1:], tgt_literal_end[:, 1:],
                                                 align_ws_word, align_ws_sql)
-        losses.append(0.2 * loss_aux)
+        losses.append(loss_enc_attn)
         final_loss = sum(losses)
 
         self.compute_metrics(word_mask, col_mask, matches, tgt_type[:, 1:], final_loss)
