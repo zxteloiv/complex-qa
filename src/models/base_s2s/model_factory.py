@@ -106,7 +106,7 @@ class RNNListMixin:
 class EncoderStackMixin(RNNListMixin):
     """Static method for different kinds of encoders, and an instance method"""
     @staticmethod
-    def get_stacked_rnn_encoder(encoder_type: str, inp_sz, hid_sz, num_layers, dropout, num_heads=12) -> EncoderStack:
+    def get_stacked_rnn_encoder(encoder_type: str, inp_sz, hid_sz, num_layers, dropout=0, num_heads=12) -> EncoderStack:
         """
         p.enc_dropout = 0.
         p.enc_out_dim = xxx # otherwise p.hidden_sz is used

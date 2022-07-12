@@ -28,7 +28,7 @@ def base_param():
     p.ADAM_BETAS = (0.9, 0.999)
     p.batch_sz = 16
     p.emb_sz = 256
-    p.hidden_sz = 200
+    p.hidden_sz = 256
     p.plm_model = 'bert-base-uncased'
 
     p.ns_keyword = 'keyword'
@@ -40,16 +40,20 @@ def base_param():
     p.decoder = 'lstm'
     p.num_dec_layers = 2
 
-    p.word_ctx_attn = 'dot_product'
-    p.col_ctx_attn = 'dot_product'
-    p.plm_encoder = 'aug_lstm'
-    p.plm_enc_out = p.hidden_sz
-    p.decoder_init = 'avg_all'
+    p.num_heads = 1     # heads for attention only
+    p.word_col_attn = 'generalized_bilinear'    # must be matrix attention
+    p.col_word_attn = 'generalized_bilinear'
+    p.sql_word_attn = 'mha'
+    p.sql_col_attn = 'bilinear'
+    p.plm_encoder = 'aug_bilstm'
+    p.plm_enc_out = p.hidden_sz // 2  # = hid_sz or hid_sz//2 when encoder is bidirectional
+    p.plm_enc_layers = 1
 
-    p.num_heads = 10  # for Multi-Head Attention only
-    p.col_copy = 'mha'
-    p.span_begin = 'mha'
-    p.span_end = 'mha'
+    p.decoder_init = 'zero_all'
+
+    p.col_copy = 'bilinear'
+    p.span_begin = 'bilinear'
+    p.span_end = 'bilinear'
 
     return p
 

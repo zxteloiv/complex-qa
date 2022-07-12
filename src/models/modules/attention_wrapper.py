@@ -105,6 +105,25 @@ class SingleTokenMHAttentionWrapper(IAttn):
         return c
 
 
+class PreAttnMappingWrapper(IAttn):
+    def get_latest_attn_weights(self) -> torch.Tensor:
+        return self.attn.get_latest_attn_weights()
+
+    def __init__(self, attn: IAttn, input_map: torch.nn.Module = None, attend_map: torch.nn.Module = None):
+        super().__init__()
+        self.attn = attn
+        self.input_map = input_map
+        self.attend_map = attend_map
+
+    def forward(self,
+                inputs: torch.Tensor,
+                attend_over: torch.Tensor,
+                attend_mask: Optional[torch.LongTensor] = None) -> torch.Tensor:
+        inputs = self.input_map(inputs) if self.input_map else inputs
+        attend_over = self.attend_map(attend_over) if self.attend_map else attend_over
+        return self.attn(inputs, attend_over, attend_mask)
+
+
 def get_wrapped_attention(attn_type: str,
                           vector_dim: int = 0,
                           matrix_dim: int = 0,

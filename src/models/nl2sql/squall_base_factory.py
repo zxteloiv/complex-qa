@@ -4,6 +4,7 @@ from models.base_s2s.stacked_rnn_cell import StackedRNNCell
 from models.modules.variational_dropout import VariationalDropout as VDrop
 from models.modules.res import ResLayer
 from models.modules.attention_wrapper import get_wrapped_attention as get_attn
+from models.modules.attention_wrapper import PreAttnMappingWrapper
 
 
 class SquallBaseBuilder(EncoderStackMixin):
@@ -20,35 +21,53 @@ class SquallBaseBuilder(EncoderStackMixin):
         hid_sz = p.hidden_sz
         dropout = p.dropout
 
-        plm_model = AutoModel.from_pretrained(p.plm_model)
-        plm2hidden = nn.Sequential(
-            nn.Linear(plm_model.config.hidden_size, hid_sz),
-            ResLayer(hid_sz, hid_sz),
-        )
-        word_enc = self.get_stacked_rnn_encoder(p.plm_encoder, hid_sz * 2, p.plm_enc_out, 2, dropout=0)
-        col_enc = self.get_stacked_rnn_encoder(p.plm_encoder, hid_sz * 2, p.plm_enc_out, 2, dropout=0)
+        word_enc = self.get_stacked_rnn_encoder(p.plm_encoder, hid_sz * 2, p.plm_enc_out, p.plm_enc_layers)
+        col_enc = self.get_stacked_rnn_encoder(p.plm_encoder, hid_sz * 2, p.plm_enc_out, p.plm_enc_layers)
+        assert word_enc.get_output_dim() == hid_sz and col_enc.get_output_dim() == hid_sz
 
+        plm_model = AutoModel.from_pretrained(p.plm_model)
         tgt_type_keys: tuple = ('pad', 'keyword', 'column', 'literal_string', 'literal_number')
         parser = SquallBaseParser(
             plm_model=plm_model,
-            hidden_sz=p.hidden_sz,
-            plm2hidden=plm2hidden,
+            word_plm2hidden=nn.Sequential(
+                nn.Linear(plm_model.config.hidden_size, hid_sz, bias=False),
+            ),
+            col_plm2hidden=nn.Sequential(
+                nn.Linear(plm_model.config.hidden_size, hid_sz, bias=False),
+            ),
             word_enc=word_enc,
             col_enc=col_enc,
+            word_col_attn=get_attn(p.word_col_attn, hid_sz, hid_sz,
+                                   num_heads=p.num_heads),
+            col_word_attn=get_attn(p.col_word_attn, hid_sz, hid_sz,
+                                   num_heads=p.num_heads),
             kwd_embedding=nn.Sequential(
+                nn.Embedding(vocab.get_vocab_size(p.ns_keyword), p.emb_sz),
+                VDrop(dropout, on_the_fly=False),
+            ) if p.emb_sz == hid_sz else nn.Sequential(
                 nn.Embedding(vocab.get_vocab_size(p.ns_keyword), p.emb_sz),
                 VDrop(dropout, on_the_fly=False),
                 nn.Linear(p.emb_sz, hid_sz),
                 VDrop(dropout, on_the_fly=False),
             ),
-            col2input=nn.Sequential(ResLayer(hid_sz, hid_sz), VDrop(dropout, on_the_fly=False)),
-            span2input=nn.Sequential(ResLayer(hid_sz * 2, hid_sz), VDrop(dropout, on_the_fly=False)),
+            col2input=nn.Sequential(
+                nn.Linear(hid_sz, hid_sz),
+                VDrop(dropout, on_the_fly=False),
+                ResLayer(hid_sz, dropout=VDrop(dropout, on_the_fly=False)),
+            ),
+            span2input=nn.Sequential(
+                nn.Linear(hid_sz * 2, hid_sz),
+                VDrop(dropout, on_the_fly=False),
+                ResLayer(hid_sz, dropout=VDrop(dropout, on_the_fly=False)),
+            ),
             decoder=StackedRNNCell(
                 self.get_stacked_rnns(p.decoder, hid_sz, hid_sz, p.num_dec_layers, dropout),
                 dropout=dropout,    # vertical dropout between cell layers
             ),
-            sql_word_attn=get_attn(p.word_ctx_attn, hid_sz, hid_sz),
-            sql_col_attn=get_attn(p.col_ctx_attn, hid_sz, hid_sz),
+            sql_word_attn=get_attn(p.sql_word_attn, hid_sz, hid_sz,
+                                   num_heads=p.num_heads, mha_mean_weight=True),
+            sql_col_attn=get_attn(p.sql_col_attn, hid_sz, hid_sz,
+                                  num_heads=p.num_heads, mha_mean_weight=True),
             sql_type=nn.Sequential(
                 nn.Linear(hid_sz * 3, hid_sz),
                 nn.Mish(),
@@ -67,9 +86,39 @@ class SquallBaseBuilder(EncoderStackMixin):
                 VDrop(dropout, on_the_fly=True),
                 nn.Linear(hid_sz, vocab.get_vocab_size(p.ns_coltype))
             ),
-            sql_col_copy=get_attn(p.col_copy, hid_sz * 3, hid_sz, num_heads=p.num_heads, mha_mean_weight=True),
-            sql_span_begin=get_attn(p.span_begin, hid_sz * 3, hid_sz, num_heads=p.num_heads, mha_mean_weight=True),
-            sql_span_end=get_attn(p.span_end, hid_sz * 3, hid_sz, num_heads=p.num_heads, mha_mean_weight=True),
+            sql_col_copy=PreAttnMappingWrapper(
+                get_attn(p.col_copy, hid_sz, hid_sz, num_heads=p.num_heads, mha_mean_weight=True),
+                input_map=nn.Sequential(
+                    nn.Linear(hid_sz * 3, hid_sz),
+                    nn.Mish(),
+                ),
+                attend_map=nn.Sequential(
+                    nn.Linear(hid_sz, hid_sz),
+                    nn.Mish()
+                ),
+            ),
+            sql_span_begin=PreAttnMappingWrapper(
+                get_attn(p.span_begin, hid_sz, hid_sz, num_heads=p.num_heads, mha_mean_weight=True),
+                input_map=nn.Sequential(
+                    nn.Linear(hid_sz * 3, hid_sz),
+                    nn.Mish()
+                ),
+                attend_map=nn.Sequential(
+                    nn.Linear(hid_sz, hid_sz),
+                    nn.Mish()
+                )
+            ),
+            sql_span_end=PreAttnMappingWrapper(
+                get_attn(p.span_end, hid_sz, hid_sz, num_heads=p.num_heads, mha_mean_weight=True),
+                input_map=nn.Sequential(
+                    nn.Linear(hid_sz * 3, hid_sz),
+                    nn.Mish()
+                ),
+                attend_map=nn.Sequential(
+                    nn.Linear(hid_sz, hid_sz),
+                    nn.Mish()
+                )
+            ),
             tgt_type_keys=tgt_type_keys,
             decoder_init_strategy=p.decoder_init,
         )

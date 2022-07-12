@@ -15,10 +15,13 @@ class SquallBaseParser(nn.Module):
     def __init__(self,
                  # modules
                  plm_model,
-                 hidden_sz: int,
-                 plm2hidden: nn.Module,
+                 word_plm2hidden: nn.Module,
+                 col_plm2hidden: nn.Module,
                  word_enc: Encoder,
                  col_enc: Encoder,
+
+                 word_col_attn: IAttn,
+                 col_word_attn: IAttn,
 
                  kwd_embedding: nn.Module,
                  col2input: nn.Module,
@@ -41,15 +44,16 @@ class SquallBaseParser(nn.Module):
                  ):
         super().__init__()
         self.pretrained_model = plm_model
-        self.plm2hidden = plm2hidden
+        self.word_plm2hidden = word_plm2hidden
+        self.col_plm2hidden = col_plm2hidden
         self.word_enc = word_enc
         self.col_enc = col_enc
 
-        self.word_att_col = MultiHeadAttention(1, hidden_sz, hidden_sz, hidden_sz, hidden_sz)
-        self.col_att_word = MultiHeadAttention(1, hidden_sz, hidden_sz, hidden_sz, hidden_sz)
-
-        self.sql_word_attn = sql_word_attn
+        self.word_col_attn = word_col_attn  # encoder use
+        self.col_word_attn = col_word_attn
+        self.sql_word_attn = sql_word_attn  # decoder use
         self.sql_col_attn = sql_col_attn
+
         self.sql_type = sql_type
         self.sql_keyword = sql_keyword
         self.sql_col_type = sql_col_type
@@ -74,13 +78,11 @@ class SquallBaseParser(nn.Module):
         self.item_count = 0
 
     def get_metrics(self, reset=False):
-        def rf6(f): return round(float(f), 6)
-
-        metric = {"ACC(EM)": rf6(self.acc.get_metric(reset)),
-                  "WORDS": rf6(self.word_num.get_metric(reset)),
-                  "COLUMNS": rf6(self.col_num.get_metric(reset)),
-                  "TLEN": rf6(self.tgt_len.get_metric(reset)),
-                  "AVG_LOSS": rf6(self.mean_loss.get_metric(reset)),
+        metric = {"ACC(EM)": round(self.acc.get_metric(reset), 6),
+                  "WORDS": round(self.word_num.get_metric(reset), 2),
+                  "COLUMNS": round(self.col_num.get_metric(reset), 2),
+                  "TLEN": round(self.tgt_len.get_metric(reset), 2),
+                  "AVG_LOSS": round(self.mean_loss.get_metric(reset), 6),
                   "COUNT": self.item_count,
                   }
         if reset:
@@ -103,25 +105,28 @@ class SquallBaseParser(nn.Module):
                 **kwargs
                 ):
         self._reset_variational_dropouts()
-        word_states, word_mask, col_states, col_mask, xattn_weights = self.encode(src_ids, src_types, src_plm_type_ids)
-        loss_aux = self.aux_loss(*xattn_weights, align_wc_word, align_wc_col)
+        word_states, word_mask, col_states, col_mask = self.encode(src_ids, src_types, src_plm_type_ids)
+        loss_aux = self.get_encoder_loss(align_wc_word, align_wc_col)
 
         hx = self.init_decoder(word_states, word_mask)
 
         mem = SeqCollector()
         for i in range(tgt_type.size()[1] - 1):
-            inp = self.get_teacher_forcing_input(i, tgt_type, word_states, col_states, tgt_keyword, tgt_col_id,
-                                                 tgt_literal_begin, tgt_literal_end)
+            inp = self.get_teacher_forcing_input(
+                i, tgt_type, word_states, col_states, tgt_keyword, tgt_col_id,
+                tgt_literal_begin, tgt_literal_end
+            )
+
             hx, out = self.decoder(inp, hx)
             word_ctx, col_ctx = self.get_enc_attn(out, word_states, word_mask, col_states, col_mask)
 
             hvec = torch.cat([out, word_ctx, col_ctx], dim=-1)   # (b, hidden * 3)
             self.step_predictions(hvec, word_states, word_mask, col_states, col_mask, mem)
 
-        losses, matches = self.get_training_loss(mem, tgt_type[:, 1:], tgt_keyword[:, 1:],
-                                                 tgt_col_id[:, 1:], tgt_col_type[:, 1:],
-                                                 tgt_literal_begin[:, 1:], tgt_literal_end[:, 1:],
-                                                 align_ws_word, align_ws_sql)
+        losses, matches = self.get_decoder_loss(mem, tgt_type[:, 1:], tgt_keyword[:, 1:],
+                                                tgt_col_id[:, 1:], tgt_col_type[:, 1:],
+                                                tgt_literal_begin[:, 1:], tgt_literal_end[:, 1:],
+                                                align_ws_word, align_ws_sql)
         losses.append(0.2 * loss_aux)
         final_loss = sum(losses)
 
@@ -146,11 +151,11 @@ class SquallBaseParser(nn.Module):
         self.item_count += word_pivot.size()[0]
         self.mean_loss(final_loss)
 
-    def get_training_loss(self, mem: SeqCollector, gold_type: torch.LongTensor,
-                          gold_keyword, gold_col_id, gold_col_type,
-                          gold_span_begin, gold_span_end,
-                          ws_word, ws_sql,
-                          ):
+    def get_decoder_loss(self, mem: SeqCollector, gold_type: torch.LongTensor,
+                         gold_keyword, gold_col_id, gold_col_type,
+                         gold_span_begin, gold_span_end,
+                         ws_word, ws_sql,
+                         ):
         # memory have the following keys as in the self.step_predictions method
         # mem(ttype=ttype_logit, keyword=keyword_logit, col_type=col_type_logit, word_attn=word_attn_weights,
         #     col_copy=col_copy_logit, span_begin=span_begin_logit, span_end=span_end_logit)
@@ -171,14 +176,14 @@ class SquallBaseParser(nn.Module):
         def is_type(k: str):
             return gold_type == self.ttype_map[k]
 
-        # logits based losses
+        # logits based prediction loss
         # *_logit: (b, tgt_len, #V), the unnormalized logits over #V
         # *_mask: (b, tgt_len)
         _append_loss(logprob(mem.get_stacked_tensor('ttype')), gold_type, ~is_type('pad'))
         _append_loss(logprob(mem.get_stacked_tensor('keyword')), gold_keyword, is_type('keyword'))
         _append_loss(logprob(mem.get_stacked_tensor('col_type')), gold_col_type, is_type('column'))
 
-        # attention-based losses with gold selection labels
+        # copy-based prediction losses, with gold selection labels
         # (b, tgt_len, src_len)
         _append_loss(log(mem.get_stacked_tensor('col_copy')), gold_col_id, is_type('column'))
 
@@ -187,7 +192,7 @@ class SquallBaseParser(nn.Module):
         _append_loss(span_begin_log, gold_span_begin, is_type('literal_string'))
         _append_loss(log(mem.get_stacked_tensor('span_end')), gold_span_end, is_type('literal_string'))
 
-        # attention-based losses with gold alignments
+        # additional attention supervision losses, with gold alignments
         # (b, tgt_len, src_len)
         word_attn = mem.get_stacked_tensor('word_attn')
         batch = torch.arange(gold_type.size()[0], device=gold_type.device).unsqueeze(-1)
@@ -203,32 +208,36 @@ class SquallBaseParser(nn.Module):
                                         token_type_ids=plm_type_ids,
                                         attention_mask=state_mask.float())
         enc_states = enc_out.last_hidden_state
-        states = self.plm2hidden(enc_states)
 
         def st_is(k: str):
             return src_types == self.stype_map[k]
 
-        word_states, word_state_mask = compact_mask_select(states, st_is('word_pivot'))
-        col_states, col_state_mask = compact_mask_select(states, st_is('col_pivot'))
+        word_states, word_state_mask = compact_mask_select(enc_states, st_is('word_pivot'))
+        col_states, col_state_mask = compact_mask_select(enc_states, st_is('col_pivot'))
+        word_states = self.word_plm2hidden(word_states)
+        col_states = self.col_plm2hidden(col_states)
 
         # ctx: (b, len, hid)
         # attn: (b, input_len, num_heads=1, attend_len)
-        col_ctx, col_attn = self.word_att_col.forward(word_states, col_states, col_state_mask)
-        word_ctx, word_attn = self.col_att_word.forward(col_states, word_states, word_state_mask)
+        col_ctx = self.word_col_attn.forward(word_states, col_states, col_state_mask)
+        word_ctx = self.col_word_attn.forward(col_states, word_states, word_state_mask)
 
         word_states = self.word_enc.forward(torch.cat([word_states, col_ctx], dim=-1), word_state_mask)
         col_states = self.col_enc.forward(torch.cat([col_states, word_ctx], dim=-1), col_state_mask)
 
-        return word_states, word_state_mask, col_states, col_state_mask, (col_attn, word_attn)
+        return word_states, word_state_mask, col_states, col_state_mask
 
-    def aux_loss(self, col_attn, word_attn, align_word, align_col):
+    def get_encoder_loss(self, align_word, align_col):
         # attn: (b, n, 1, attend_length)
         batch = torch.arange(align_word.size()[0], device=align_word.device).unsqueeze(-1)
 
+        col_attn = self.word_col_attn.get_latest_attn_weights()
+        word_attn = self.col_word_attn.get_latest_attn_weights()
+
         # align_word/col: (b, num_alignments)
         # (batch, num_alignments)
-        col_probs = col_attn[batch, align_word, 0, align_col]   # each word to col distribution
-        word_probs = word_attn[batch, align_col, 0, align_word] # each col to words distribution
+        col_probs = col_attn[batch, align_word, align_col]   # each word to col distribution
+        word_probs = word_attn[batch, align_col, align_word] # each col to words distribution
 
         dup_word_num = (align_word.unsqueeze(-1) == align_word.unsqueeze(-2)).sum(-1)
         dup_col_num = (align_col.unsqueeze(-1) == align_col.unsqueeze(-2)).sum(-1)

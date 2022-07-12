@@ -2,22 +2,22 @@ import torch.nn as nn
 
 
 class ResLayer(nn.Module):
-    def __init__(self, in_dim, out_dim):
+    def __init__(self, in_out_dim, deprecated_dim=None,
+                 activation: nn.Module = nn.Mish(),
+                 dropout: nn.Module = None,
+                 ):
         super(ResLayer, self).__init__()
-        if in_dim != out_dim:
-            self.linear = nn.Linear(in_dim, out_dim)
-        else:
-            self.linear = None
+        if deprecated_dim is not None:
+            assert in_out_dim == deprecated_dim, 'ResLayer will not transform dimensions anymore.'
 
-        self.linear2 = nn.Sequential(
-            nn.Linear(out_dim, out_dim),
-            nn.Mish(),
-            nn.Linear(out_dim, out_dim),
-            nn.Mish(),
-        )
+        self.linear = nn.Linear(in_out_dim, in_out_dim)
+        self.act = activation
+        self.dropout = dropout
 
     def forward(self, x):
-        if self.linear:
-            x = self.linear(x)
-        return self.linear2(x) + x
+        z = self.linear(x)
+        z = self.act(z)
+        if self.dropout:
+            z = self.dropout(z)
+        return x + z
 
