@@ -46,8 +46,13 @@ class SquallAllInOneField(Field):
         output = {}
         for key_list in self.model_input_keys.values():
             for key in key_list:
+                if key == 'col_type_mask':
+                    continue
                 ids = tensors_by_keys[key]
                 output[key] = nested_list_numbers_to_tensors(ids, padding=0)
+
+        col_mask = tensors_by_keys['col_type_mask']
+        output['col_type_mask'] = nested_list_numbers_to_tensors(col_mask, padding=1)
         return output
 
     def generate_namespace_tokens(self, example) -> Generator[Tuple[str, str], None, None]:
@@ -124,10 +129,26 @@ class SquallAllInOneField(Field):
 
         token_ids = self._tokenizer.convert_tokens_to_ids(tokens)
 
+        # in fact, the number of col-types is less than 100,
+        # and it is believed not large across different tasks.
+        # we can reliably represent the candidate with one-hot masks for the ease of use,
+        # instead of specifying the selected type ids.
+        col_type_candidates = []
+        for i, col in enumerate(example['columns']):
+            type_ids = [self.vocab.get_token_index(coltype, self.ns_coltype) for coltype in col[2]]
+            if len(type_ids) == 0:
+                # any column has a type, if no parsed type is available, the none is used.
+                # indicating the column copy module must select a "none" type.
+                type_ids = [self.vocab.get_token_index('none', self.ns_coltype)]
+
+            one_hot_mask = [1 if i in type_ids else 0 for i in range(self.vocab.get_vocab_size(self.ns_coltype))]
+            col_type_candidates.append(one_hot_mask)
+
         params = {
             "src_ids": token_ids,
             "src_types": types,
             "src_plm_type_ids": plm_type_ids,
+            "col_type_mask": col_type_candidates,
         }
         return params, word_loc_lookup, col_loc_lookup
 
@@ -302,7 +323,7 @@ class SquallAllInOneField(Field):
         self.ns_coltype: str = ns_coltype
 
         self.model_input_keys = {
-            "src_keys": ['src_ids', 'src_types', 'src_plm_type_ids'],
+            "src_keys": ['src_ids', 'src_types', 'src_plm_type_ids', 'col_type_mask'],
             "tgt_keys": ['tgt_type', 'tgt_keyword', 'tgt_col_id', 'tgt_col_type',
                          'tgt_literal_begin', 'tgt_literal_end'],
             "align_keys": ['align_ws_word', 'align_ws_sql',

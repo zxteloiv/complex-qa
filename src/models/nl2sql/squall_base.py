@@ -1,5 +1,6 @@
 import torch
 from allennlp.training.metrics import Average
+from allennlp.nn.util import masked_log_softmax
 from torch import nn
 
 from models.interfaces.attention import Attention as IAttn
@@ -123,10 +124,11 @@ class SquallBaseParser(nn.Module):
             hvec = torch.cat([out, word_ctx, col_ctx], dim=-1)   # (b, hidden * 3)
             self.step_predictions(hvec, word_states, word_mask, col_states, col_mask, mem)
 
-        losses, matches = self.get_decoder_loss(mem, tgt_type[:, 1:], tgt_keyword[:, 1:],
-                                                tgt_col_id[:, 1:], tgt_col_type[:, 1:],
-                                                tgt_literal_begin[:, 1:], tgt_literal_end[:, 1:],
-                                                align_ws_word, align_ws_sql)
+        losses, matches = self.get_decoder_loss(
+            mem, tgt_type[:, 1:], tgt_keyword[:, 1:], tgt_col_id[:, 1:], tgt_col_type[:, 1:],
+            tgt_literal_begin[:, 1:], tgt_literal_end[:, 1:], align_ws_word, align_ws_sql,
+            col_type_mask=kwargs.get('col_type_mask'),
+        )
         losses.append(loss_enc_attn)
         final_loss = sum(losses)
 
@@ -155,6 +157,7 @@ class SquallBaseParser(nn.Module):
                          gold_keyword, gold_col_id, gold_col_type,
                          gold_span_begin, gold_span_end,
                          ws_word, ws_sql,
+                         col_type_mask: torch.LongTensor = None,
                          ):
         # memory have the following keys as in the self.step_predictions method
         # mem(ttype=ttype_logit, keyword=keyword_logit, col_type=col_type_logit, word_attn=word_attn_weights,
@@ -162,9 +165,12 @@ class SquallBaseParser(nn.Module):
 
         losses = []
         matches = []
+        nbatch, dev = gold_type.size(0), gold_type.device
 
-        def logprob(logits):
-            return torch.log_softmax(logits, dim=-1)
+        def logprob(logits, mask=None):
+            if mask is None:
+                return torch.log_softmax(logits, dim=-1)
+            return masked_log_softmax(logits, mask, dim=-1)
 
         def log(prob):
             return prob.clamp(min=1e-20).log()
@@ -181,7 +187,11 @@ class SquallBaseParser(nn.Module):
         # *_mask: (b, tgt_len)
         _append_loss(logprob(mem.get_stacked_tensor('ttype')), gold_type, ~is_type('pad'))
         _append_loss(logprob(mem.get_stacked_tensor('keyword')), gold_keyword, is_type('keyword'))
-        _append_loss(logprob(mem.get_stacked_tensor('col_type')), gold_col_type, is_type('column'))
+
+        # col_type_mask: (b, col_num, #V)
+        batch = torch.arange(nbatch, device=dev).unsqueeze(-1)  # (b, 1)
+        masks = col_type_mask[batch, gold_col_id]   # (b, tgt_len, #V)
+        _append_loss(logprob(mem.get_stacked_tensor('col_type'), masks), gold_col_type, is_type('column'))
 
         # copy-based prediction losses, with gold selection labels
         # (b, tgt_len, src_len)
@@ -195,7 +205,6 @@ class SquallBaseParser(nn.Module):
         # additional attention supervision losses, with gold alignments
         # (b, tgt_len, src_len)
         word_attn = mem.get_stacked_tensor('word_attn')
-        batch = torch.arange(gold_type.size()[0], device=gold_type.device).unsqueeze(-1)
         # attention as supervision but not prediction targets
         dup_sql_num = (ws_sql.unsqueeze(-1) == ws_sql.unsqueeze(-2)).sum(-1)
         word_prob = word_attn[batch, ws_sql, ws_word]

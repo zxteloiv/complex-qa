@@ -58,6 +58,13 @@ def base_param():
     return p
 
 
+@Registry.hparamset()
+def avg_init():
+    p = base_param()
+    p.decoder_init = 'avg_all'
+    return p
+
+
 def setup_bot(args, get_model_func=None, trialname='base'):
     from trialbot.training import Events
     from models.nl2sql.squall_base_factory import SquallBaseBuilder
