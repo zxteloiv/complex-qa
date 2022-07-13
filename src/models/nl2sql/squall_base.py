@@ -198,7 +198,10 @@ class SquallBaseParser(nn.Module):
 
         # col_type_mask: (b, col_num, #V)
         batch = torch.arange(nbatch, device=dev).unsqueeze(-1)  # (b, 1)
-        masks = col_type_mask[batch, gold_col_id]   # (b, tgt_len, #V)
+        if self.training:
+            masks = None
+        else:
+            masks = col_type_mask[batch, gold_col_id]   # (b, tgt_len, #V)
         _append_loss(logprob(mem.get_stacked_tensor('col_type'), masks), gold_col_type, is_type('column'))
 
         # copy-based prediction losses, with gold selection labels
