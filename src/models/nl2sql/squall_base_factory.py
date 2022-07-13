@@ -21,8 +21,10 @@ class SquallBaseBuilder(EncoderStackMixin):
         hid_sz = p.hidden_sz
         dropout = p.dropout
 
-        word_enc = self.get_stacked_rnn_encoder(p.plm_encoder, hid_sz * 2, p.plm_enc_out, p.plm_enc_layers)
-        col_enc = self.get_stacked_rnn_encoder(p.plm_encoder, hid_sz * 2, p.plm_enc_out, p.plm_enc_layers)
+        word_enc = self.get_stacked_rnn_encoder(p.plm_encoder, hid_sz * 2, p.plm_enc_out, p.plm_enc_layers,
+                                                dropout=.2)
+        col_enc = self.get_stacked_rnn_encoder(p.plm_encoder, hid_sz * 2, p.plm_enc_out, p.plm_enc_layers,
+                                               dropout=.2)
         assert word_enc.get_output_dim() == hid_sz and col_enc.get_output_dim() == hid_sz
 
         plm_model = AutoModel.from_pretrained(p.plm_model)
@@ -38,9 +40,21 @@ class SquallBaseBuilder(EncoderStackMixin):
             word_enc=word_enc,
             col_enc=col_enc,
             word_col_attn=get_attn(p.word_col_attn, hid_sz, hid_sz,
-                                   num_heads=p.num_heads),
+                                   num_heads=p.num_heads, use_linear=False, use_bias=False),
             col_word_attn=get_attn(p.col_word_attn, hid_sz, hid_sz,
-                                   num_heads=p.num_heads),
+                                   num_heads=p.num_heads, use_linear=False, use_bias=False),
+            aux_col=PreAttnMappingWrapper(
+                get_attn(p.word_col_attn, hid_sz, hid_sz,
+                         num_heads=p.num_heads, use_linear=False, use_bias=False),
+                input_map=nn.Sequential(
+                    nn.Linear(hid_sz, hid_sz),
+                    nn.Mish(),
+                ),
+                attend_map=nn.Sequential(
+                    nn.Linear(hid_sz, hid_sz),
+                    nn.Mish()
+                ),
+            ),
             kwd_embedding=nn.Sequential(
                 nn.Embedding(vocab.get_vocab_size(p.ns_keyword), p.emb_sz),
                 VDrop(dropout, on_the_fly=False),

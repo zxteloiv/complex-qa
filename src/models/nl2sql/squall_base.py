@@ -38,6 +38,9 @@ class SquallBaseParser(nn.Module):
                  sql_span_begin: IAttn,
                  sql_span_end: IAttn,
 
+                 # optional modules
+                 aux_col: IAttn = None,
+
                  # configs
                  src_type_keys: tuple = ('pad', 'special', 'word', 'word_pivot', 'column', 'col_pivot'),
                  tgt_type_keys: tuple = ('pad', 'keyword', 'column', 'literal_string', 'literal_number'),
@@ -49,6 +52,8 @@ class SquallBaseParser(nn.Module):
         self.col_plm2hidden = col_plm2hidden
         self.word_enc = word_enc
         self.col_enc = col_enc
+
+        self.aux_word_col = aux_col
 
         self.word_col_attn = word_col_attn  # encoder use
         self.col_word_attn = col_word_attn
@@ -107,7 +112,6 @@ class SquallBaseParser(nn.Module):
                 ):
         self._reset_variational_dropouts()
         word_states, word_mask, col_states, col_mask = self.encode(src_ids, src_types, src_plm_type_ids)
-        loss_enc_attn = self.get_encoder_loss(align_wc_word, align_wc_col)
 
         hx = self.init_decoder(word_states, word_mask)
 
@@ -129,7 +133,11 @@ class SquallBaseParser(nn.Module):
             tgt_literal_begin[:, 1:], tgt_literal_end[:, 1:], align_ws_word, align_ws_sql,
             col_type_mask=kwargs.get('col_type_mask'),
         )
+        loss_enc_attn = self.get_encoder_loss(align_wc_word, align_wc_col)
         losses.append(loss_enc_attn)
+        if self.aux_word_col is not None:
+            aux_loss = self.get_aux_loss(word_states, col_states, col_mask, align_wc_word, align_wc_col)
+            losses.append(0.2 * aux_loss)
         final_loss = sum(losses)
 
         self.compute_metrics(word_mask, col_mask, matches, tgt_type[:, 1:], final_loss)
@@ -254,6 +262,17 @@ class SquallBaseParser(nn.Module):
         col_loss = (col_probs - dup_word_num.reciprocal()) ** 2 / 2
         word_loss = (word_probs - dup_col_num.reciprocal()) ** 2 / 2
         return (col_loss + word_loss).sum(-1).mean()
+
+    def get_aux_loss(self, word_states, col_states, col_mask, align_word, align_col):
+        # NLL loss for the the attention module
+        _ = self.aux_word_col.forward(word_states, col_states, col_mask)
+        col_attn = self.aux_word_col.get_latest_attn_weights()  # (b, word_len, col_len)
+
+        batch = torch.arange(align_word.size()[0], device=align_word.device).unsqueeze(-1)
+        col_probs = col_attn[batch, align_word, align_col]   # (batch, num_alignments)
+        col_logprobs = col_probs.clamp(min=1e-20).log()     # (batch, num_alignments)
+        aux_loss = - col_logprobs.sum(-1).mean()
+        return aux_loss
 
     def init_decoder(self, states, state_mask):
         agg_src = aggregate_layered_state([states], state_mask, self._strategy)

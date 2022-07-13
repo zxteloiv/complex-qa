@@ -22,7 +22,7 @@ def base_param():
     from trialbot.utils.root_finder import find_root
     p = HyperParamSet.common_settings(find_root())
     p.TRAINING_LIMIT = 60
-    p.WEIGHT_DECAY = 1e-3
+    p.WEIGHT_DECAY = 0.
     p.OPTIM = "adabelief"
     p.ADAM_LR = 1e-3
     p.ADAM_BETAS = (0.9, 0.999)
