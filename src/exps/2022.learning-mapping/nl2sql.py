@@ -22,7 +22,7 @@ def base_param():
     from trialbot.utils.root_finder import find_root
     p = HyperParamSet.common_settings(find_root())
     p.TRAINING_LIMIT = 60
-    p.WEIGHT_DECAY = 0.
+    p.WEIGHT_DECAY = 1e-3
     p.OPTIM = "adabelief"
     p.ADAM_LR = 1e-3
     p.ADAM_BETAS = (0.9, 0.999)
@@ -44,16 +44,18 @@ def base_param():
     p.word_col_attn = 'generalized_bilinear'    # must be matrix attention
     p.col_word_attn = 'generalized_bilinear'
     p.sql_word_attn = 'mha'
-    p.sql_col_attn = 'bilinear'
+    p.sql_col_attn = 'generalized_bilinear'
     p.plm_encoder = 'aug_bilstm'
     p.plm_enc_out = p.hidden_sz // 2  # = hid_sz or hid_sz//2 when encoder is bidirectional
     p.plm_enc_layers = 1
 
     p.decoder_init = 'zero_all'
 
-    p.col_copy = 'bilinear'
-    p.span_begin = 'bilinear'
-    p.span_end = 'bilinear'
+    p.col_copy = 'generalized_bilinear'
+    p.span_begin = 'generalized_bilinear'
+    p.span_end = 'generalized_bilinear'
+    p.bilinear_use_linear = True
+    p.bilinear_use_bias = True
 
     return p
 

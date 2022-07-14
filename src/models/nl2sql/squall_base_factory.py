@@ -40,12 +40,18 @@ class SquallBaseBuilder(EncoderStackMixin):
             word_enc=word_enc,
             col_enc=col_enc,
             word_col_attn=get_attn(p.word_col_attn, hid_sz, hid_sz,
-                                   num_heads=p.num_heads, use_linear=False, use_bias=False),
+                                   num_heads=p.num_heads,
+                                   use_linear=p.bilinear_use_linear,
+                                   use_bias=p.bilinear_use_bias),
             col_word_attn=get_attn(p.col_word_attn, hid_sz, hid_sz,
-                                   num_heads=p.num_heads, use_linear=False, use_bias=False),
+                                   num_heads=p.num_heads,
+                                   use_linear=p.bilinear_use_linear,
+                                   use_bias=p.bilinear_use_bias),
             aux_col=PreAttnMappingWrapper(
                 get_attn(p.word_col_attn, hid_sz, hid_sz,
-                         num_heads=p.num_heads, use_linear=False, use_bias=False),
+                         num_heads=p.num_heads,
+                         use_linear=p.bilinear_use_linear,
+                         use_bias=p.bilinear_use_bias),
                 input_map=nn.Sequential(
                     nn.Linear(hid_sz, hid_sz),
                     nn.Mish(),
@@ -65,23 +71,31 @@ class SquallBaseBuilder(EncoderStackMixin):
                 VDrop(dropout, on_the_fly=False),
             ),
             col2input=nn.Sequential(
-                nn.Linear(hid_sz, hid_sz),
+                nn.Linear(hid_sz, hid_sz // 2),
                 VDrop(dropout, on_the_fly=False),
-                ResLayer(hid_sz, dropout=VDrop(dropout, on_the_fly=False)),
+                nn.Mish(),
+                nn.Linear(hid_sz // 2, hid_sz),
             ),
             span2input=nn.Sequential(
-                nn.Linear(hid_sz * 2, hid_sz),
+                nn.Linear(hid_sz * 2, hid_sz // 2),
                 VDrop(dropout, on_the_fly=False),
-                ResLayer(hid_sz, dropout=VDrop(dropout, on_the_fly=False)),
+                nn.Mish(),
+                nn.Linear(hid_sz // 2, hid_sz),
             ),
             decoder=StackedRNNCell(
                 self.get_stacked_rnns(p.decoder, hid_sz, hid_sz, p.num_dec_layers, dropout),
                 dropout=dropout,    # vertical dropout between cell layers
             ),
             sql_word_attn=get_attn(p.sql_word_attn, hid_sz, hid_sz,
-                                   num_heads=p.num_heads, mha_mean_weight=True),
+                                   num_heads=p.num_heads,
+                                   use_linear=p.bilinear_use_linear,
+                                   use_bias=p.bilinear_use_bias,
+                                   mha_mean_weight=True),
             sql_col_attn=get_attn(p.sql_col_attn, hid_sz, hid_sz,
-                                  num_heads=p.num_heads, mha_mean_weight=True),
+                                  num_heads=p.num_heads,
+                                  use_linear=p.bilinear_use_linear,
+                                  use_bias=p.bilinear_use_bias,
+                                  mha_mean_weight=True),
             sql_type=nn.Sequential(
                 nn.Linear(hid_sz * 3, hid_sz),
                 nn.Mish(),
@@ -101,7 +115,11 @@ class SquallBaseBuilder(EncoderStackMixin):
                 nn.Linear(hid_sz, vocab.get_vocab_size(p.ns_coltype))
             ),
             sql_col_copy=PreAttnMappingWrapper(
-                get_attn(p.col_copy, hid_sz, hid_sz, num_heads=p.num_heads, mha_mean_weight=True),
+                get_attn(p.col_copy, hid_sz, hid_sz,
+                         num_heads=p.num_heads,
+                         use_linear=p.bilinear_use_linear,
+                         use_bias=p.bilinear_use_bias,
+                         mha_mean_weight=True),
                 input_map=nn.Sequential(
                     nn.Linear(hid_sz * 3, hid_sz),
                     nn.Mish(),
@@ -112,7 +130,11 @@ class SquallBaseBuilder(EncoderStackMixin):
                 ),
             ),
             sql_span_begin=PreAttnMappingWrapper(
-                get_attn(p.span_begin, hid_sz, hid_sz, num_heads=p.num_heads, mha_mean_weight=True),
+                get_attn(p.span_begin, hid_sz, hid_sz,
+                         num_heads=p.num_heads,
+                         use_linear=p.bilinear_use_linear,
+                         use_bias=p.bilinear_use_bias,
+                         mha_mean_weight=True),
                 input_map=nn.Sequential(
                     nn.Linear(hid_sz * 3, hid_sz),
                     nn.Mish()
@@ -123,7 +145,11 @@ class SquallBaseBuilder(EncoderStackMixin):
                 )
             ),
             sql_span_end=PreAttnMappingWrapper(
-                get_attn(p.span_end, hid_sz, hid_sz, num_heads=p.num_heads, mha_mean_weight=True),
+                get_attn(p.span_end, hid_sz, hid_sz,
+                         num_heads=p.num_heads,
+                         use_linear=p.bilinear_use_linear,
+                         use_bias=p.bilinear_use_bias,
+                         mha_mean_weight=True),
                 input_map=nn.Sequential(
                     nn.Linear(hid_sz * 3, hid_sz),
                     nn.Mish()

@@ -100,6 +100,7 @@ class SquallAllInOneField(Field):
             _add('[CLS]', SrcType.Special)
 
             for word in nl:
+                # the dataset doesn't have empty word tokens.
                 for piece in self._tokenizer.tokenize(word):
                     _add(piece, SrcType.Word)
                 types[-1] = SrcType.WordPivot   # the last piece is selected to represent the world
@@ -111,9 +112,15 @@ class SquallAllInOneField(Field):
         def _add_col_tokens(cols):
             physical_loc = []
             for col in cols:
-                for piece in self._tokenizer.tokenize(col[0]):
+                pieces = self._tokenizer.tokenize(col[0])
+                for piece in pieces:
                     _add(piece, SrcType.Column)
-                types[-1] = SrcType.ColPivot
+
+                if len(pieces) == 0:    # empty column label, in case that the alignment index is corrupted
+                    _add('.', SrcType.ColPivot)
+                else:
+                    types[-1] = SrcType.ColPivot
+
                 physical_loc.append(len(tokens) - 1)
                 _add('[SEP]', SrcType.Special)
 
