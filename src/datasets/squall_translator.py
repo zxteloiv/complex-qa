@@ -146,7 +146,7 @@ class SquallAllInOneField(Field):
             if len(type_ids) == 0:
                 # any column has a type, if no parsed type is available, the none is used.
                 # indicating the column copy module must select a "none" type.
-                type_ids = [self.vocab.get_token_index('none', self.ns_coltype)]
+                type_ids.append(self.vocab.get_token_index('none', self.ns_coltype))
 
             one_hot_mask = [1 if i in type_ids else 0 for i in range(self.vocab.get_vocab_size(self.ns_coltype))]
             col_type_candidates.append(one_hot_mask)

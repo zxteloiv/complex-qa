@@ -82,6 +82,7 @@ class SquallBaseParser(nn.Module):
         self.tgt_len = Average()
         self.mean_loss = Average()
         self.item_count = 0
+        self.match_stats = None
 
     def get_metrics(self, reset=False):
         metric = {"ACC(EM)": round(self.acc.get_metric(reset), 6),
@@ -90,9 +91,11 @@ class SquallBaseParser(nn.Module):
                   "TLEN": round(self.tgt_len.get_metric(reset), 2),
                   "AVG_LOSS": round(self.mean_loss.get_metric(reset), 6),
                   "COUNT": self.item_count,
+                  "TaskAcc": [round(n / d, 4) if d > 0 else 'nan' for n, d in self.match_stats],
                   }
         if reset:
             self.item_count = 0
+            self.match_stats = None
         return metric
 
     def _reset_variational_dropouts(self):
@@ -128,7 +131,7 @@ class SquallBaseParser(nn.Module):
             hvec = torch.cat([out, word_ctx, col_ctx], dim=-1)   # (b, hidden * 3)
             self.step_predictions(hvec, word_states, word_mask, col_states, col_mask, mem)
 
-        losses, matches = self.get_decoder_loss(
+        losses, matches, match_stat = self.get_decoder_loss(
             mem, tgt_type[:, 1:], tgt_keyword[:, 1:], tgt_col_id[:, 1:], tgt_col_type[:, 1:],
             tgt_literal_begin[:, 1:], tgt_literal_end[:, 1:], align_ws_word, align_ws_sql,
             col_type_mask=kwargs.get('col_type_mask'),
@@ -140,7 +143,7 @@ class SquallBaseParser(nn.Module):
             losses.append(0.2 * aux_loss)
         final_loss = sum(losses)
 
-        self.compute_metrics(word_mask, col_mask, matches, tgt_type[:, 1:], final_loss)
+        self.compute_metrics(word_mask, col_mask, matches, match_stat, tgt_type[:, 1:], final_loss)
 
         output = {"src_id": src_ids, "src_type": src_types, "tgt_type": tgt_type,
                   "tgt_keyword": tgt_keyword, "tgt_col_id": tgt_col_id, "tgt_col_type": tgt_col_type,
@@ -149,7 +152,7 @@ class SquallBaseParser(nn.Module):
                   }
         return output
 
-    def compute_metrics(self, word_pivot, col_pivot, matches, tgt_type, final_loss):
+    def compute_metrics(self, word_pivot, col_pivot, matches, match_stat, tgt_type, final_loss):
         for n in word_pivot.sum(-1):
             self.word_num(n)
         for n in col_pivot.sum(-1):
@@ -160,6 +163,13 @@ class SquallBaseParser(nn.Module):
             self.tgt_len(n)
         self.item_count += word_pivot.size()[0]
         self.mean_loss(final_loss)
+
+        if self.match_stats is None:
+            self.match_stats = match_stat
+        else:
+            for i, (n, d) in enumerate(match_stat):
+                self.match_stats[i][0] += n
+                self.match_stats[i][1] += d
 
     def get_decoder_loss(self, mem: SeqCollector, gold_type: torch.LongTensor,
                          gold_keyword, gold_col_id, gold_col_type,
@@ -174,18 +184,15 @@ class SquallBaseParser(nn.Module):
         losses = []
         matches = []
         nbatch, dev = gold_type.size(0), gold_type.device
+        match_stat = []
 
-        def logprob(logits, mask=None):
-            if mask is None:
-                return torch.log_softmax(logits, dim=-1)
-            return masked_log_softmax(logits, mask, dim=-1)
-
-        def log(prob):
-            return prob.clamp(min=1e-20).log()
-
-        def _append_loss(logprob, target, mask: torch.BoolTensor):
+        def _add_loss(logprob, target, mask: torch.BoolTensor):
             losses.append(-masked_reducing_gather(logprob, target, mask.float(), 'batch'))
-            matches.append(torch.bitwise_or(~mask, logprob.argmax(dim=-1) == target).all(dim=-1))
+            correct = logprob.argmax(dim=-1) == target
+            matches.append(torch.bitwise_or(~mask, correct).all(dim=-1))
+            nominator = torch.bitwise_and(mask, correct).sum().item()
+            denominator = mask.sum().item()
+            match_stat.append([nominator, denominator])
 
         def is_type(k: str):
             return gold_type == self.ttype_map[k]
@@ -193,8 +200,8 @@ class SquallBaseParser(nn.Module):
         # logits based prediction loss
         # *_logit: (b, tgt_len, #V), the unnormalized logits over #V
         # *_mask: (b, tgt_len)
-        _append_loss(logprob(mem.get_stacked_tensor('ttype')), gold_type, ~is_type('pad'))
-        _append_loss(logprob(mem.get_stacked_tensor('keyword')), gold_keyword, is_type('keyword'))
+        _add_loss(logprob(mem.get_stacked_tensor('ttype')), gold_type, ~is_type('pad'))
+        _add_loss(logprob(mem.get_stacked_tensor('keyword')), gold_keyword, is_type('keyword'))
 
         # col_type_mask: (b, col_num, #V)
         batch = torch.arange(nbatch, device=dev).unsqueeze(-1)  # (b, 1)
@@ -202,16 +209,26 @@ class SquallBaseParser(nn.Module):
             masks = None
         else:
             masks = col_type_mask[batch, gold_col_id]   # (b, tgt_len, #V)
-        _append_loss(logprob(mem.get_stacked_tensor('col_type'), masks), gold_col_type, is_type('column'))
+        _add_loss(logprob(mem.get_stacked_tensor('col_type'), masks), gold_col_type, is_type('column'))
 
         # copy-based prediction losses, with gold selection labels
         # (b, tgt_len, src_len)
-        _append_loss(log(mem.get_stacked_tensor('col_copy')), gold_col_id, is_type('column'))
+        _add_loss(log(mem.get_stacked_tensor('col_copy')), gold_col_id, is_type('column'))
 
         span_begin_log = log(mem.get_stacked_tensor('span_begin'))
-        _append_loss(span_begin_log, gold_span_begin, is_type('literal_number'))
-        _append_loss(span_begin_log, gold_span_begin, is_type('literal_string'))
-        _append_loss(log(mem.get_stacked_tensor('span_end')), gold_span_end, is_type('literal_string'))
+        _add_loss(span_begin_log, gold_span_begin, is_type('literal_number'))
+        _add_loss(span_begin_log, gold_span_begin, is_type('literal_string'))
+        span_end_prob = mem.get_stacked_tensor('span_end')  # (b, tgt_len, src_len)
+        if self.training:
+            span_end_logp = log(span_end_prob)
+        else:
+            span_end_mask = torch.ones_like(span_end_prob)
+            for i in range(nbatch):
+                for j, step_begin in enumerate(gold_span_begin[i]):
+                    span_end_mask[i, j, :step_begin] = 0
+            span_end_norm = (span_end_prob * span_end_mask).sum(-1, keepdims=True).clamp(min=1e-20)
+            span_end_logp = (span_end_prob / span_end_norm).clamp(min=1e-20).log()
+        _add_loss(span_end_logp, gold_span_end, is_type('literal_string'))
 
         # additional attention supervision losses, with gold alignments
         # (b, tgt_len, src_len)
@@ -220,7 +237,7 @@ class SquallBaseParser(nn.Module):
         dup_sql_num = (ws_sql.unsqueeze(-1) == ws_sql.unsqueeze(-2)).sum(-1)
         word_prob = word_attn[batch, ws_sql, ws_word]
         losses.append(((word_prob - dup_sql_num.reciprocal()) ** 2 / 2).sum(-1).mean()) # sum alignments, mean batch
-        return losses, matches
+        return losses, matches, match_stat
 
     def encode(self, src_ids, src_types: torch.Tensor, plm_type_ids):
         state_mask: torch.Tensor = (src_types != self.stype_map['pad'])
@@ -335,3 +352,14 @@ class SquallBaseParser(nn.Module):
 
         mem(ttype=ttype_logit, keyword=keyword_logit, col_type=col_type_logit, word_attn=word_attn_prob,
             col_copy=col_copy_prob, span_begin=span_begin_prob, span_end=span_end_prob)
+
+
+def logprob(logits, mask=None):
+    if mask is None:
+        return torch.log_softmax(logits, dim=-1)
+    return masked_log_softmax(logits, mask, dim=-1)
+
+
+def log(prob):
+    return prob.clamp(min=1e-20).log()
+
