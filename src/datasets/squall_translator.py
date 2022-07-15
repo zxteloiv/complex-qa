@@ -1,7 +1,7 @@
 import logging
 from collections import defaultdict
 from enum import IntEnum
-from typing import Mapping, Generator, Tuple, List, Optional
+from typing import Mapping, Generator, Tuple, List, Optional, Set
 
 import torch
 from trialbot.data.translator import Field, FieldAwareTranslator, NullableTensor
@@ -44,15 +44,16 @@ class SquallAllInOneField(Field):
                             tensors_by_keys: Mapping[str, List[NullableTensor]]
                             ) -> Mapping[str, torch.Tensor]:
         output = {}
-        for key_list in self.model_input_keys.values():
+        for key_list in self.zero_padded_keys.values():
             for key in key_list:
-                if key == 'col_type_mask':
-                    continue
                 ids = tensors_by_keys[key]
                 output[key] = nested_list_numbers_to_tensors(ids, padding=0)
 
-        col_mask = tensors_by_keys['col_type_mask']
-        output['col_type_mask'] = nested_list_numbers_to_tensors(col_mask, padding=1)
+        # additional keys not in the zero_padded_keys, requiring special process.
+        output['col_type_mask'] = nested_list_numbers_to_tensors(tensors_by_keys['col_type_mask'], padding=1)
+        output['tbl_cells'] = tensors_by_keys['tbl_cells']  # a batch list of cell text sets
+        output['nl_toks'] = tensors_by_keys['nl_toks']
+        output['sql_toks'] = tensors_by_keys['sql_toks']
         return output
 
     def generate_namespace_tokens(self, example) -> Generator[Tuple[str, str], None, None]:
@@ -70,7 +71,7 @@ class SquallAllInOneField(Field):
                 col_type = col_type or "none"
                 yield self.ns_coltype, col_type
 
-    def to_tensor(self, example) -> Mapping[str, NullableTensor]:
+    def to_tensor(self, example):
 
         src_params, word_locs, col_locs = self._get_source(example)
 
@@ -78,10 +79,15 @@ class SquallAllInOneField(Field):
 
         tgt_params = self._get_target(example, word_locs, col_locs)
 
+        table_cells = self._load_text_cells(example)
+
         id_lists = dict()
         id_lists.update(src_params)
         id_lists.update(alignments)
         id_lists.update(tgt_params)
+        id_lists['tbl_cells'] = table_cells
+        id_lists['nl_toks'] = example.get('nl')
+        id_lists['sql_toks'] = [x[1] for x in example.get('sql')]
         return id_lists
 
     @staticmethod
@@ -158,6 +164,20 @@ class SquallAllInOneField(Field):
             "col_type_mask": col_type_candidates,
         }
         return params, word_loc_lookup, col_loc_lookup
+
+    def _load_text_cells(self, example) -> Set[Tuple[str, str]]:
+        table = example['tbl_cells']
+        ret = set()     # each element is col_str, cell_str
+        for content in table["contents"][2:]:
+            for col in content:
+                if col["type"] == "TEXT":
+                    for x in col["data"]:
+                        ret.add((col["col"], str(x)))
+                elif col["type"] == "LIST TEXT":
+                    for lst in col["data"]:
+                        for x in lst:
+                            ret.add((col["col"], str(x)))
+        return ret
 
     def _get_attn_sup(self, example, word_locs, col_locs) -> dict:
         wsc_graph: Graph[str] = self.get_connectivity_graph(example)    # word, sql, column nodes
@@ -329,8 +349,8 @@ class SquallAllInOneField(Field):
         self.ns_keyword: str = ns_keyword
         self.ns_coltype: str = ns_coltype
 
-        self.model_input_keys = {
-            "src_keys": ['src_ids', 'src_types', 'src_plm_type_ids', 'col_type_mask'],
+        self.zero_padded_keys = {
+            "src_keys": ['src_ids', 'src_types', 'src_plm_type_ids'],
             "tgt_keys": ['tgt_type', 'tgt_keyword', 'tgt_col_id', 'tgt_col_type',
                          'tgt_literal_begin', 'tgt_literal_end'],
             "align_keys": ['align_ws_word', 'align_ws_sql',

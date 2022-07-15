@@ -2,16 +2,26 @@ from trialbot.data import JsonDataset
 
 from trialbot.utils.root_finder import find_root
 from os.path import join
+import json
 
 ROOT = find_root()
 SQUALL_PATH = join(ROOT, 'data', 'squall', 'data')
+SQUALL_TABLE = join(ROOT, 'data', 'squall', 'tables', 'json')
+
+
+def _join_table(example):
+    table_id = example.get('tbl')
+    table_file = join(SQUALL_TABLE, f'{table_id}.json')
+    example['tbl_cells'] = json.loads(open(table_file).read())
+    return example
 
 
 def get_data_split_func(i: int):
     def dataset_fun():
-        train = JsonDataset(join(SQUALL_PATH, f'train-{i}.json'))
-        dev = JsonDataset(join(SQUALL_PATH, f'dev-{i}.json'))
-        test = JsonDataset(join(SQUALL_PATH, f'wtq-test.json'))
+        from utils.trialbot.transform_dataset import TransformData
+        train = TransformData(JsonDataset(join(SQUALL_PATH, f'train-{i}.json')), _join_table)
+        dev = TransformData(JsonDataset(join(SQUALL_PATH, f'dev-{i}.json')), _join_table)
+        test = TransformData(JsonDataset(join(SQUALL_PATH, f'wtq-test.json')), _join_table)
         return train, dev, test
 
     return dataset_fun

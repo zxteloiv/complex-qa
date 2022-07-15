@@ -94,6 +94,8 @@ def setup_bot(args, get_model_func=None, trialname='base'):
         from trialbot.training.extensions import every_epoch_model_saver
         from utils.trialbot.extensions import end_with_nan_loss
         from utils.trialbot.extensions import evaluation_on_dev_every_epoch, collect_garbage
+        from utils.trialbot.extensions import reset_variational_dropout
+        bot.add_event_handler(Events.ITERATION_STARTED, reset_variational_dropout, 100)
         bot.add_event_handler(Events.ITERATION_STARTED, collect_garbage, 100)
         bot.add_event_handler(Events.ITERATION_COMPLETED, end_with_nan_loss, 100)
         bot.add_event_handler(Events.EPOCH_COMPLETED, every_epoch_model_saver, 100)

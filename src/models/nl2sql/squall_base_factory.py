@@ -1,8 +1,8 @@
 from torch import nn
+
 from models.base_s2s.model_factory import EncoderStackMixin
 from models.base_s2s.stacked_rnn_cell import StackedRNNCell
 from models.modules.variational_dropout import VariationalDropout as VDrop
-from models.modules.res import ResLayer
 from models.modules.attention_wrapper import get_wrapped_attention as get_attn
 from models.modules.attention_wrapper import PreAttnMappingWrapper
 
@@ -11,8 +11,10 @@ class SquallBaseBuilder(EncoderStackMixin):
     def __init__(self, p, vocab):
         super().__init__()
         self.p = p
-        from trialbot.data import NSVocabulary
+        from trialbot.data import NSVocabulary, START_SYMBOL, END_SYMBOL
         self.vocab: NSVocabulary = vocab
+        self.start_tok = START_SYMBOL
+        self.end_tok = END_SYMBOL
 
     def get_model(self):
         from .squall_base import SquallBaseParser
@@ -159,6 +161,11 @@ class SquallBaseBuilder(EncoderStackMixin):
                     nn.Mish()
                 )
             ),
+            start_token=self.start_tok,
+            end_token=self.end_tok,
+            ns_keyword=p.ns_keyword,
+            ns_coltype=p.ns_coltype,
+            vocab=vocab,
             tgt_type_keys=tgt_type_keys,
             decoder_init_strategy=p.decoder_init,
         )
@@ -170,7 +177,7 @@ class SquallBaseBuilder(EncoderStackMixin):
         example conf:
 
         p.emb_sz = 256
-        p.hidden_sz = 200
+        p.hidden_sz = 256
         p.plm_model = 'bert-base-uncased'
 
         p.ns_keyword = 'keyword'
@@ -181,13 +188,21 @@ class SquallBaseBuilder(EncoderStackMixin):
         p.decoder = 'lstm'
         p.num_dec_layers = 2
 
-        p.word_ctx_attn = 'dot_product'
-        p.col_ctx_attn = 'dot_product'
+        p.word_col_attn = 'generalized_bilinear'    # must be matrix attention
+        p.col_word_attn = 'generalized_bilinear'
+        p.sql_word_attn = 'mha'
+        p.sql_col_attn = 'generalized_bilinear'
+        p.plm_encoder = 'aug_bilstm'
+        p.plm_enc_out = p.hidden_sz // 2  # = hid_sz or hid_sz//2 when encoder is bidirectional
+        p.plm_enc_layers = 1
 
-        p.num_heads = 10  # for Multi-Head Attention only
-        p.col_copy = 'mha'
-        p.span_begin = 'bilinear'
-        p.span_end = 'bilinear'
+        p.num_heads = 1     # heads for attention only
+
+        p.col_copy = 'generalized_bilinear'
+        p.span_begin = 'generalized_bilinear'
+        p.span_end = 'generalized_bilinear'
+        p.bilinear_use_linear = True
+        p.bilinear_use_bias = True
 
         p.decoder_init = 'zero_all'
 

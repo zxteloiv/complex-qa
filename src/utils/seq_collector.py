@@ -1,6 +1,6 @@
 from typing import Optional
 from collections import defaultdict
-import logging
+
 
 class SeqCollector:
     def __init__(self, history: Optional[defaultdict] = None):
