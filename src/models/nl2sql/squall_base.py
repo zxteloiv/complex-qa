@@ -54,7 +54,10 @@ class SquallBaseParser(nn.Module):
                  # configs
                  src_type_keys: tuple = ('pad', 'special', 'word', 'word_pivot', 'column', 'col_pivot'),
                  tgt_type_keys: tuple = ('pad', 'keyword', 'column', 'literal_string', 'literal_number'),
-                 decoder_init_strategy: str = "zero_all"
+                 decoder_init_strategy: str = "zero_all",
+
+                 sup_unaligned_attn_vec: bool = False,
+                 sup_unaligned_attn_mat: bool = False,
                  ):
         super().__init__()
         self.pretrained_model = plm_model
@@ -106,6 +109,8 @@ class SquallBaseParser(nn.Module):
         self.dec_acc_pred = Average()
         self.item_count = 0
         self.match_stats = None
+        self._sup_unaligned_attn_vec = sup_unaligned_attn_vec
+        self._sup_unaligned_attn_mat = sup_unaligned_attn_mat
 
     def get_metrics(self, reset=False):
         metric = {"ACC(EM)": round(self.acc.get_metric(reset), 6),
@@ -129,7 +134,7 @@ class SquallBaseParser(nn.Module):
                 # alignments between each word/sql, word/col, and sql/col pair
                 align_ws_word, align_ws_sql, align_wc_word, align_wc_col, align_sc_sql, align_sc_col,
                 # decoder supervisions,
-                tgt_type, tgt_keyword, tgt_col_id, tgt_col_type, tgt_literal_begin, tgt_literal_end,
+                tgt_type: torch.Tensor, tgt_keyword, tgt_col_type, tgt_col_id, tgt_literal_begin, tgt_literal_end,
                 # extension for future uses
                 **kwargs
                 ):
@@ -159,7 +164,8 @@ class SquallBaseParser(nn.Module):
         gold_predictions = (tgt_type[:, 1:], tgt_keyword[:, 1:], tgt_col_type[:, 1:],
                             tgt_col_id[:, 1:], tgt_literal_begin[:, 1:], tgt_literal_end[:, 1:])
         losses, matches, match_stat = self.get_prediction_losses(logprob_dict, *gold_predictions)
-        losses.extend(self.get_alignment_loss(mem, align_ws_word, align_ws_sql, align_wc_word, align_wc_col))
+        losses.extend(self.get_alignment_loss(mem, align_ws_word, align_ws_sql, align_wc_word, align_wc_col,
+                                              word_mask, col_mask, tgt_type[:, 1:] != self.ttype_map['pad']))
         if self.aux_word_col is not None:
             aux_loss = self.get_aux_loss(word_states, col_states, col_mask, align_wc_word, align_wc_col)
             losses.append(0.2 * aux_loss)
@@ -168,7 +174,7 @@ class SquallBaseParser(nn.Module):
         self.compute_metrics(word_mask, col_mask, matches, match_stat, tgt_type[:, 1:], final_loss)
 
         output = {"src_id": src_ids, "src_type": src_types, "tgt_type": tgt_type,
-                  "tgt_keyword": tgt_keyword, "tgt_col_id": tgt_col_id, "tgt_col_type": tgt_col_type,
+                  "tgt_keyword": tgt_keyword, "tgt_col_type": tgt_col_type, "tgt_col_id": tgt_col_id,
                   "tgt_literal_begin": tgt_literal_begin, "tgt_literal_end": tgt_literal_end,
                   "loss": final_loss,
                   }
@@ -322,35 +328,66 @@ class SquallBaseParser(nn.Module):
 
         return losses, matches, match_stat
 
-    def get_alignment_loss(self, mem: SeqCollector, ws_word, ws_sql, wc_word, wc_col):
-        nbatch, dev = ws_word.size(0), ws_word.device
-        batch = torch.arange(nbatch, device=dev).unsqueeze(-1)
+    def get_alignment_loss(self, mem: SeqCollector, ws_word, ws_sql, wc_word, wc_col,
+                           word_mask, col_mask, sql_mask):
+        # decoder to word attention
+        s2w_attn = mem.get_stacked_tensor(self.step_attn_keys[0])
+        # encoder attention
+        w2c_attn = self.word_col_attn.get_latest_attn_weights()  # (b, num_words, num_cols)
+        c2w_attn = self.col_word_attn.get_latest_attn_weights()  # (b, num_cols, num_words)
 
-        # decoder-to-words attention supervision losses, with gold alignments
-        # (b, tgt_len, src_len)
-        word_attn = mem.get_stacked_tensor(self.step_attn_keys[0])
-        # attention as supervision but not prediction targets
-        dup_sql_num = (ws_sql.unsqueeze(-1) == ws_sql.unsqueeze(-2)).sum(-1)
-        word_prob = word_attn[batch, ws_sql, ws_word]
-        sql2word_att_loss = ((word_prob - dup_sql_num.reciprocal()) ** 2 / 2).sum(-1).mean()
+        s2w_loss = self._get_attn_sup_loss(s2w_attn, ws_sql, ws_word, sql_mask, word_mask)
+        w2c_loss = self._get_attn_sup_loss(w2c_attn, wc_word, wc_col, word_mask, col_mask)
+        c2w_loss = self._get_attn_sup_loss(c2w_attn, wc_col, wc_word, col_mask, word_mask)
 
-        # encoder attention supervision
-        col_attn = self.word_col_attn.get_latest_attn_weights()
-        word_attn = self.col_word_attn.get_latest_attn_weights()
-
-        # align_word/col: (b, num_alignments)
-        # (batch, num_alignments)
-        col_probs = col_attn[batch, wc_word, wc_col]   # each word to col distribution
-        word_probs = word_attn[batch, wc_col, wc_word] # each col to words distribution
-
-        dup_word_num = (wc_word.unsqueeze(-1) == wc_word.unsqueeze(-2)).sum(-1)
-        dup_col_num = (wc_col.unsqueeze(-1) == wc_col.unsqueeze(-2)).sum(-1)
-
-        word2col_att_loss = ((col_probs - dup_word_num.reciprocal()) ** 2 / 2).sum(-1).mean()
-        col2word_att_loss = ((word_probs - dup_col_num.reciprocal()) ** 2 / 2).sum(-1).mean()
-
-        losses = [sql2word_att_loss, word2col_att_loss, col2word_att_loss]
+        losses = [s2w_loss, w2c_loss, c2w_loss]
         return losses
+
+    def _get_attn_sup_loss(self, attn_weights, align_vec, align_mat, vec_mask, mat_mask):
+        """
+        Attention L2 loss under different supervision settings.
+
+        :param attn_weights: (b, #vec, #mat)
+        :param align_vec:   (b, #align), padded by -1
+        :param align_mat:   (b, #align), padded by -1
+        :param vec_mask:    (b, #vec)
+        :param mat_mask:    (b, #mat)
+        :return: (), a torch scalar for the L2 loss
+        """
+        nbatch, dev = attn_weights.size(0), attn_weights.device
+        batch = torch.arange(nbatch, device=dev).unsqueeze(-1)          # (b, 1)
+        pad_mask = vec_mask.unsqueeze(-1) * mat_mask.unsqueeze(-2)      # (b, #vec, #mat)
+        align_mask = align_vec >= 0
+
+        attn_target = torch.zeros_like(attn_weights)        # (b, #vec, #mat)
+        dup_num = (align_vec.unsqueeze(-1) == align_vec.unsqueeze(-2)).sum(-1)  # (b, #align)
+        # use align_mask to reset invalid alignments (-1 when padding, for example).
+        # since the target is defaulted to 0, setting invalid alignments to 0 is just fine.
+        attn_target[batch, align_vec, align_mat] = dup_num.reciprocal() * align_mask
+
+        # use attn_mask to reset loss at padding locations
+        raw_l2_loss = (attn_weights - attn_target) ** 2 / 2 * pad_mask
+
+        if self._sup_unaligned_attn_vec and self._sup_unaligned_attn_mat:
+            # the baseline choice
+            # attentions related to unaligned vec or unaligned mat must be trained towards 0
+            return raw_l2_loss.sum(dim=(1, 2)).mean()
+
+        elif self._sup_unaligned_attn_mat:
+            # unaligned attended matrix will be trained towards 0,
+            # thus select the aligned vector only
+            selected_loss = raw_l2_loss[batch, align_vec]   # (b, #align, #mat)
+            return (selected_loss.sum(-1) * align_mask).sum(-1).mean()
+
+        elif self._sup_unaligned_attn_vec:
+            # weights of unaligned attention vectors will be trained towards 0,
+            # which means
+            # thus select the aligned vector only
+            selected_loss = raw_l2_loss[batch, :, align_mat]    # (b, #align, #vec)
+            return (selected_loss.sum(-1) * align_mask).sum(-1).mean()
+
+        else:   # only the alignments are required
+            return (raw_l2_loss[batch, align_vec, align_mat] * align_mask).sum(-1).mean()  # (b, #align) -> ()
 
     def get_aux_loss(self, word_states, col_states, col_mask, align_word, align_col):
         # NLL loss for the the attention module
@@ -359,7 +396,8 @@ class SquallBaseParser(nn.Module):
 
         batch = torch.arange(align_word.size()[0], device=align_word.device).unsqueeze(-1)
         col_probs = col_attn[batch, align_word, align_col]   # (batch, num_alignments)
-        col_logprobs = col_probs.clamp(min=1e-20).log()     # (batch, num_alignments)
+        align_mask = align_word >= 0
+        col_logprobs = col_probs.clamp(min=1e-20).log() * align_mask     # (batch, num_alignments)
         aux_loss = - col_logprobs.sum(-1).mean()
         return aux_loss
 

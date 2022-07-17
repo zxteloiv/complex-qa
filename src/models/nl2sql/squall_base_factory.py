@@ -168,6 +168,8 @@ class SquallBaseBuilder(EncoderStackMixin):
             vocab=vocab,
             tgt_type_keys=tgt_type_keys,
             decoder_init_strategy=p.decoder_init,
+            sup_unaligned_attn_mat=getattr(p, 'supervise_unaligned_attn_mat', False),
+            sup_unaligned_attn_vec=getattr(p, 'supervise_unaligned_attn_vec', False),
         )
         return parser
 

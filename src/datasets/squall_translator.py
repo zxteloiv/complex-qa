@@ -1,7 +1,7 @@
 import logging
 from collections import defaultdict
 from enum import IntEnum
-from typing import Mapping, Generator, Tuple, List, Optional, Set
+from typing import Mapping, Generator, Tuple, List, Optional, Set, Dict
 
 import torch
 from trialbot.data.translator import Field, FieldAwareTranslator, NullableTensor
@@ -44,13 +44,11 @@ class SquallAllInOneField(Field):
                             tensors_by_keys: Mapping[str, List[NullableTensor]]
                             ) -> Mapping[str, torch.Tensor]:
         output = {}
-        for key_list in self.zero_padded_keys.values():
-            for key in key_list:
+        for pad_id, keys in self.padded_keys.items():
+            for key in keys:
                 ids = tensors_by_keys[key]
-                output[key] = nested_list_numbers_to_tensors(ids, padding=0)
+                output[key] = nested_list_numbers_to_tensors(ids, padding=pad_id)
 
-        # additional keys not in the zero_padded_keys, requiring special process.
-        output['col_type_mask'] = nested_list_numbers_to_tensors(tensors_by_keys['col_type_mask'], padding=1)
         output['tbl_cells'] = tensors_by_keys['tbl_cells']  # a batch list of cell text sets
         output['nl_toks'] = tensors_by_keys['nl_toks']
         output['sql_toks'] = tensors_by_keys['sql_toks']
@@ -201,9 +199,9 @@ class SquallAllInOneField(Field):
                 if ntype == 'col':
                     sc.add((s, nid))
 
-        ws_word = ws_sql = [0]
-        wc_word = wc_col = [0]
-        sc_sql = sc_col = [0]
+        ws_word = ws_sql = [-1]
+        wc_word = wc_col = [-1]
+        sc_sql = sc_col = [-1]
 
         if len(ws) > 0:
             ws_word, ws_sql = map(list, zip(*ws))
@@ -349,12 +347,22 @@ class SquallAllInOneField(Field):
         self.ns_keyword: str = ns_keyword
         self.ns_coltype: str = ns_coltype
 
-        self.zero_padded_keys = {
-            "src_keys": ['src_ids', 'src_types', 'src_plm_type_ids'],
-            "tgt_keys": ['tgt_type', 'tgt_keyword', 'tgt_col_id', 'tgt_col_type',
-                         'tgt_literal_begin', 'tgt_literal_end'],
-            "align_keys": ['align_ws_word', 'align_ws_sql',
-                           'align_wc_word', 'align_wc_col',
-                           'align_sc_sql', 'align_sc_col'],
+        self.padded_keys: Dict[int, List[str]] = {
+            0: [
+                # src keys
+                'src_ids', 'src_types', 'src_plm_type_ids',
+                # target keys, target_types are acturally general paddings
+                'tgt_type', 'tgt_keyword', 'tgt_col_type',  # prediction-based
+                'tgt_col_id', 'tgt_literal_begin', 'tgt_literal_end',   # copy-based
+            ],
+            -1: [
+                # alignment keys
+                'align_ws_word', 'align_ws_sql',
+                'align_wc_word', 'align_wc_col',
+                'align_sc_sql', 'align_sc_col',
+            ],
+            1: [
+                'col_type_mask',
+            ]
         }
 

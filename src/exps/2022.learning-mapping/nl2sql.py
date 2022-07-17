@@ -57,13 +57,59 @@ def base_param():
     p.bilinear_use_linear = True
     p.bilinear_use_bias = True
 
+    # default
+    p.optim_kwargs = {"degenerated_to_sgd": True, "weight_decouple": True,
+                      "fixed_decay": False, "amsgrad": False, "rectify": True}
     return p
 
 
 @Registry.hparamset()
-def avg_init():
+def unaligned_mat():
     p = base_param()
-    p.decoder_init = 'avg_all'
+    p.supervise_unaligned_attn_mat = True
+    return p
+
+
+@Registry.hparamset()
+def unaligned_vec():
+    p = base_param()
+    p.supervise_unaligned_attn_vec = True
+    return p
+
+
+@Registry.hparamset()
+def both():
+    p = base_param()
+    p.supervise_unaligned_attn_vec = True
+    p.supervise_unaligned_attn_mat = True
+    return p
+
+
+@Registry.hparamset()
+def no_rectify():
+    p = base_param()
+    p.optim_kwargs['rectify'] = False
+    return p
+
+
+@Registry.hparamset()
+def no_rectify_unaligned_vec():
+    p = unaligned_vec()
+    p.optim_kwargs['rectify'] = False
+    return p
+
+
+@Registry.hparamset()
+def no_rectify_unaligned_mat():
+    p = unaligned_mat()
+    p.optim_kwargs['rectify'] = False
+    return p
+
+
+@Registry.hparamset()
+def no_rectify_both():
+    p = both()
+    p.optim_kwargs['rectify'] = False
     return p
 
 
