@@ -167,16 +167,20 @@ class SquallBaseParser(nn.Module):
 
         self.compute_metrics(word_mask, col_mask, matches, match_stat, tgt_type[:, 1:], final_loss)
 
-        predictions = self.decode_logprob(logprob_dict)
-        pred_queries, _ = self.realisation(predictions, kwargs.get('nl_toks'), kwargs.get('tbl_cells'))
-        gold_queries, _ = self.realisation(gold_predictions, kwargs.get('nl_toks'), kwargs.get('tbl_cells'))
-        self.compute_realisation_metrics(pred_queries, gold_queries, kwargs.get('sql_toks'))
-
         output = {"src_id": src_ids, "src_type": src_types, "tgt_type": tgt_type,
                   "tgt_keyword": tgt_keyword, "tgt_col_id": tgt_col_id, "tgt_col_type": tgt_col_type,
                   "tgt_literal_begin": tgt_literal_begin, "tgt_literal_end": tgt_literal_end,
                   "loss": final_loss,
                   }
+
+        if not self.training:
+            # during training the logits are only evaluated
+            predictions = self.decode_logprob(logprob_dict)
+            pred_queries, _ = self.realisation(predictions, kwargs.get('nl_toks'), kwargs.get('tbl_cells'))
+            gold_queries, _ = self.realisation(gold_predictions, kwargs.get('nl_toks'), kwargs.get('tbl_cells'))
+            self.compute_realisation_metrics(pred_queries, gold_queries, kwargs.get('sql_toks'))
+            output.update(pred_queries=pred_queries, target=kwargs.get('sql_toks'), nl_toks=kwargs.get('nl_toks'))
+
         return output
 
     # ------------ encoding steps ------------
