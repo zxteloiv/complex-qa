@@ -16,11 +16,8 @@ def foo():
     translator: FieldAwareTranslator = Registry.get_translator('squall-base')
     from utils.vocab_builder import get_ns_counter
 
-    if os.path.exists('temp-vocab'):
-        vocab = NSVocabulary.from_files('temp-vocab')
-    else:
-        vocab = NSVocabulary(get_ns_counter(train, translator))
-        vocab.save_to_files('temp-vocab')
+    vocab = NSVocabulary(get_ns_counter(train, translator))
+    vocab.save_to_files('temp-vocab')
     translator.index_with_vocab(vocab)
     print(vocab)
 

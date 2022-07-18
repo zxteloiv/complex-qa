@@ -206,7 +206,7 @@ class SquallAllInOneField(Field):
         if len(ws) > 0:
             ws_word, ws_sql = map(list, zip(*ws))
             # ws_word = self._lookup(ws_word, word_locs)
-            ws_sql = [x + 1 for x in ws_sql]
+            # ws_sql = [x + 1 for x in ws_sql]
 
         if len(wc) > 0:
             wc_word, wc_col = map(list, zip(*wc))
@@ -215,7 +215,7 @@ class SquallAllInOneField(Field):
 
         if len(sc) > 0:
             sc_sql, sc_col = map(list, zip(*sc))
-            sc_sql = [x + 1 for x in sc_sql]
+            # sc_sql = [x + 1 for x in sc_sql]
             # sc_col = self._lookup(sc_col, col_locs)
 
         alignments = {
