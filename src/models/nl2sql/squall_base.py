@@ -105,7 +105,6 @@ class SquallBaseParser(nn.Module):
         self.col_num = Average()
         self.tgt_len = Average()
         self.mean_loss = Average()
-        self.dec_acc_gold = Average()
         self.dec_acc_pred = Average()
         self.item_count = 0
         self.match_stats = None
@@ -113,8 +112,7 @@ class SquallBaseParser(nn.Module):
         self._sup_unaligned_attn_mat = sup_unaligned_attn_mat
 
     def get_metrics(self, reset=False):
-        metric = {"ACC(EM)": round(self.acc.get_metric(reset), 6),
-                  "ACCGold": round(self.dec_acc_gold.get_metric(reset), 6),
+        metric = {"ACC_EM": round(self.acc.get_metric(reset), 6),
                   "ACCPred": round(self.dec_acc_pred.get_metric(reset), 6),
                   "WORDS": round(self.word_num.get_metric(reset), 2),
                   "COLUMNS": round(self.col_num.get_metric(reset), 2),
@@ -183,8 +181,7 @@ class SquallBaseParser(nn.Module):
             # during training the logits are only evaluated
             predictions = self.decode_logprob(logprob_dict)
             pred_queries, _ = self.realisation(predictions, kwargs.get('nl_toks'), kwargs.get('tbl_cells'))
-            gold_queries, _ = self.realisation(gold_predictions, kwargs.get('nl_toks'), kwargs.get('tbl_cells'))
-            self.compute_realisation_metrics(pred_queries, gold_queries, kwargs.get('sql_toks'))
+            self.compute_realisation_metrics(pred_queries, kwargs.get('sql_toks'))
             output.update(pred_queries=pred_queries, target=kwargs.get('sql_toks'), nl_toks=kwargs.get('nl_toks'))
 
         return output
@@ -302,7 +299,8 @@ class SquallBaseParser(nn.Module):
         losses, matches, match_stat = [], [], []
 
         def _add_loss(logprob, target, mask: torch.BoolTensor):
-            losses.append(-masked_reducing_gather(logprob, target, mask.float(), 'batch'))
+            loss_matrix = torch.gather(logprob, index=target.unsqueeze(-1), dim=-1).squeeze(-1)
+            losses.append(- (loss_matrix * mask).sum() / mask.size(0))
             correct = logprob.argmax(dim=-1) == target
             matches.append(torch.bitwise_or(~mask, correct).all(dim=-1))
             nominator = torch.bitwise_and(mask, correct).sum().item()
@@ -466,13 +464,11 @@ class SquallBaseParser(nn.Module):
 
         return batch_query, batch_types
 
-    def compute_realisation_metrics(self, pred_queries, gold_queries, target_sqls: List[List[str]]):
-        for pred_toks, gold_toks, sql_toks in zip(pred_queries, gold_queries, target_sqls):
+    def compute_realisation_metrics(self, pred_queries, target_sqls: List[List[str]]):
+        for pred_toks, sql_toks in zip(pred_queries, target_sqls):
             pred_query = " ".join(pred_toks)
-            gold_query = " ".join(gold_toks)
             sql = " ".join(sql_toks)
             self.dec_acc_pred(1. if pred_query == sql else 0.)
-            self.dec_acc_gold(1. if gold_query == sql else 0.)
 
     @staticmethod
     def _process_with_string_patterns(query, substring, tbl_cells, types):

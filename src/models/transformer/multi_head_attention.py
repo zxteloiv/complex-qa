@@ -1,3 +1,5 @@
+import copy
+import logging
 from typing import Union, List, Mapping, Dict, Tuple, Optional
 import torch
 import torch.nn
@@ -16,6 +18,7 @@ class GeneralMultiHeadAttention(torch.nn.Module):
                  attention_dropout: float = 0.,
                  use_future_blinding: bool = False,
                  temperature: Optional[float] = None,
+                 try_cloned_linear: bool = True,
                  ):
         """
         The basic multi-head attention, used for the following cases:
@@ -52,11 +55,32 @@ class GeneralMultiHeadAttention(torch.nn.Module):
         self._dropout = torch.nn.Dropout(attention_dropout)
 
         # key and value mapping, w.r.t. all heads, combined
-        self._combined_kv = torch.nn.Linear(attend_to_dim, total_attention_dim + total_value_dim)
-        # query mapping, w.r.t. all heads, combined
-        self._combined_query = torch.nn.Linear(input_dim, total_attention_dim)
-        # final output attention mapping
-        self._output = torch.nn.Linear(total_value_dim, output_dim)
+        if try_cloned_linear and \
+                attend_to_dim == total_attention_dim == total_value_dim == input_dim == output_dim:
+
+            self._cloned_linear: bool = True
+
+            logging.getLogger(self.__class__.__name__).debug('Using cloned linear for each mapping')
+            linear = torch.nn.Linear(attend_to_dim, total_attention_dim)
+            self._combined_k = linear
+            self._combined_v = copy.deepcopy(linear)
+            self._combined_query = copy.deepcopy(linear)
+            self._output = copy.deepcopy(linear)
+
+        else:
+            self._cloned_linear: bool = False
+            logging.getLogger(self.__class__.__name__).debug('Using separate linear for each mapping')
+            self._combined_k = torch.nn.Linear(attend_to_dim, total_attention_dim)
+            self._combined_v = torch.nn.Linear(attend_to_dim, total_value_dim)
+            # query mapping, w.r.t. all heads, combined
+            self._combined_query = torch.nn.Linear(input_dim, total_attention_dim)
+            # final output attention mapping
+            self._output = torch.nn.Linear(total_value_dim, output_dim)
+
+    def extra_repr(self) -> str:
+        return 'temperature={}, head={}, cloned_linear={}, future_blinding={}'.format(
+            self._temperature, self._num_heads, self._cloned_linear, self._use_future_blinding
+        )
 
     def forward(self,
                 input: torch.Tensor,
@@ -77,10 +101,10 @@ class GeneralMultiHeadAttention(torch.nn.Module):
                    context: (batch, max_input_length, output_dim)
                  attention: (batch, max_input_length, num_heads, max_attend_length)
         """
-        kv = self._combined_kv(attend_over)
         # keys: (batch, max_attend_length, num_head * key_dim)
         # values: (batch, max_attend_length, num_head * value_dim)
-        keys, values = torch.split(kv, [self._key_dim * self._num_heads, self._value_dim * self._num_heads], dim=-1)
+        keys = self._combined_k(attend_over)
+        values = self._combined_v(attend_over)
 
         # queries: (batch, max_input_length, num_head * query_dim)
         queries = self._combined_query(input)

@@ -36,6 +36,11 @@ class VariationalDropout(nn.Module):
         size[self._vector_dim] = vector_size
         return torch.empty(size, device=device).bernoulli_(p=self.p)
 
+    def extra_repr(self) -> str:
+        return 'ratio={}, on_the_fly={}, rescaling={}, batch_at_dim={}, vec_at_dim={}'.format(
+            self.p, self._on_the_fly, self._rescaling, self._batch_dim, self._vector_dim
+        )
+
     def reset(self):
         self._mask = None
 

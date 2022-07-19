@@ -87,14 +87,24 @@ class GeneralizedBilinearAttention(Attention):
 
         self.reset_parameters()
 
+    def extra_repr(self) -> str:
+        return 'input_size={}, attn_size={}, linear={}, bias={}'.format(
+            self.bi_weight.size(1), self.bi_weight.size(0), self.a_linear is not None, self.bias is not None,
+        )
+
     def reset_parameters(self) -> None:
-        nonlinearity = self._check_nonlinearity(self.activation)
-        init.kaiming_uniform_(self.bi_weight, a=math.sqrt(5), nonlinearity=nonlinearity)
+        # nonlinearity = self._check_nonlinearity(self.activation)
+        # init.kaiming_uniform_(self.bi_weight, a=math.sqrt(5), nonlinearity=nonlinearity)
+        init.kaiming_uniform_(self.bi_weight, a=math.sqrt(5))
         if self.bias is not None:
             fan_in, _ = init._calculate_fan_in_and_fan_out(self.bi_weight)
-            gain = init.calculate_gain(nonlinearity, math.sqrt(5))
-            std = gain / math.sqrt(fan_in)
-            bound = std * math.sqrt(3.0) / math.sqrt(fan_in)
+            if fan_in > 0:
+                bound = 1 / math.sqrt(fan_in)
+            else:
+                bound = 0
+            # gain = init.calculate_gain(nonlinearity, math.sqrt(5))
+            # std = gain / math.sqrt(fan_in)
+            # bound = std * math.sqrt(3.0) / math.sqrt(fan_in)
             init.uniform_(self.bias, -bound, bound)
 
     @staticmethod

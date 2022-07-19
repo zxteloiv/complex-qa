@@ -64,10 +64,10 @@ class SquallAllInOneField(Field):
         for tok_type, value, span in sql:
             if tok_type == "Keyword":
                 yield self.ns_keyword, value
-            elif tok_type == "Column":
-                col_id, col_type = self._parse_column(value)
-                col_type = col_type or "none"
+        for col in example['columns']:
+            for col_type in col[2]:
                 yield self.ns_coltype, col_type
+        yield self.ns_coltype, 'none'
 
     def to_tensor(self, example):
 
