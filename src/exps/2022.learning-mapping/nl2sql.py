@@ -54,62 +54,60 @@ def base_param():
     p.col_copy = 'generalized_bilinear'
     p.span_begin = 'generalized_bilinear'
     p.span_end = 'generalized_bilinear'
-    p.bilinear_use_linear = True
-    p.bilinear_use_bias = True
+    p.bilinear_use_linear = False
+    p.bilinear_use_bias = False
 
     # default
+    p.supervise_unaligned_attn_mat = True
+    p.supervise_unaligned_attn_vec = True
+    return p
+
+
+@Registry.hparamset()
+def adamax():
+    p = base_param()
+    p.OPTIM = "adamax"
+    p.optim_kwargs = {}
+    return p
+
+
+@Registry.hparamset()
+def adabelief_no_rect_no_wd():
+    p = base_param()
+    p.WEIGHT_DECAY = 0
+    p.OPTIM = "adabelief"
     p.optim_kwargs = {"degenerated_to_sgd": True, "weight_decouple": True,
-                      "fixed_decay": False, "amsgrad": False, "rectify": True}
+                      "fixed_decay": True, "amsgrad": False, "rectify": False}
     return p
 
 
 @Registry.hparamset()
-def unaligned_mat():
+def adabelief_no_wd():
     p = base_param()
-    p.supervise_unaligned_attn_mat = True
+    p.WEIGHT_DECAY = 0
+    p.OPTIM = "adabelief"
+    p.optim_kwargs = {"degenerated_to_sgd": True, "weight_decouple": True,
+                      "fixed_decay": True, "amsgrad": False, "rectify": True}
     return p
 
 
 @Registry.hparamset()
-def unaligned_vec():
+def adabelief_no_rect():
     p = base_param()
-    p.supervise_unaligned_attn_vec = True
+    p.WEIGHT_DECAY = 1e-3
+    p.OPTIM = "adabelief"
+    p.optim_kwargs = {"degenerated_to_sgd": True, "weight_decouple": True,
+                      "fixed_decay": True, "amsgrad": False, "rectify": False}
     return p
 
 
 @Registry.hparamset()
-def both():
+def adabelief():
     p = base_param()
-    p.supervise_unaligned_attn_vec = True
-    p.supervise_unaligned_attn_mat = True
-    return p
-
-
-@Registry.hparamset()
-def no_rectify():
-    p = base_param()
-    p.optim_kwargs['rectify'] = False
-    return p
-
-
-@Registry.hparamset()
-def no_rectify_unaligned_vec():
-    p = unaligned_vec()
-    p.optim_kwargs['rectify'] = False
-    return p
-
-
-@Registry.hparamset()
-def no_rectify_unaligned_mat():
-    p = unaligned_mat()
-    p.optim_kwargs['rectify'] = False
-    return p
-
-
-@Registry.hparamset()
-def no_rectify_both():
-    p = both()
-    p.optim_kwargs['rectify'] = False
+    p.WEIGHT_DECAY = 1e-3
+    p.OPTIM = "adabelief"
+    p.optim_kwargs = {"degenerated_to_sgd": True, "weight_decouple": True,
+                      "fixed_decay": True, "amsgrad": False, "rectify": True}
     return p
 
 
