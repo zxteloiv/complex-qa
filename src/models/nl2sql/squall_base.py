@@ -12,6 +12,7 @@ from trialbot.data import NSVocabulary
 from models.interfaces.attention import Attention as IAttn
 from models.interfaces.encoder import Encoder
 from models.interfaces.unified_rnn import RNNStack
+from models.nl2sql.p_tuning_v2 import PTuningV2Prompt
 from utils.nn import aggregate_layered_state, assign_stacked_states, masked_reducing_gather, compact_mask_select
 from utils.seq_collector import SeqCollector
 
@@ -50,6 +51,7 @@ class SquallBaseParser(nn.Module):
 
                  # optional modules
                  aux_col: IAttn = None,
+                 p_tuning: PTuningV2Prompt = None,
 
                  # configs
                  src_type_keys: tuple = ('pad', 'special', 'word', 'word_pivot', 'column', 'col_pivot'),
@@ -84,6 +86,11 @@ class SquallBaseParser(nn.Module):
         self.col2input = col2input
         self.span2input = span2input
         self.decoder = decoder
+
+        self.p_tuning = p_tuning
+        if self.p_tuning is not None:
+            self.pretrained_model: torch.nn.Module
+            self.pretrained_model.requires_grad_(False)
 
         self._strategy = decoder_init_strategy
         self.start_token = start_token
@@ -190,9 +197,17 @@ class SquallBaseParser(nn.Module):
 
     def encode(self, src_ids, src_types: torch.Tensor, plm_type_ids):
         state_mask: torch.Tensor = (src_types != self.stype_map['pad'])
+        past_key_values = None
+        if self.p_tuning is not None:
+            nbatch = state_mask.size(0)
+            past_key_values = self.p_tuning.forward(nbatch)
+            prefix_mask = state_mask.new_ones((nbatch, self.p_tuning.prefix_len))
+            state_mask = torch.cat([prefix_mask, state_mask], dim=-1)
+
         enc_out = self.pretrained_model(input_ids=src_ids,
                                         token_type_ids=plm_type_ids,
-                                        attention_mask=state_mask.float())
+                                        attention_mask=state_mask.float(),
+                                        past_key_values=past_key_values)
         enc_states = enc_out.last_hidden_state
 
         def st_is(k: str):

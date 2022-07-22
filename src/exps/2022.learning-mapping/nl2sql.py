@@ -21,12 +21,13 @@ def base_param():
     from trialbot.training.hparamset import HyperParamSet
     from trialbot.utils.root_finder import find_root
     p = HyperParamSet.common_settings(find_root())
-    p.TRAINING_LIMIT = 60
-    p.WEIGHT_DECAY = 1e-3
+    p.TRAINING_LIMIT = 80
+    p.WEIGHT_DECAY = 0
     p.OPTIM = "adabelief"
+    p.optim_kwargs = {"rectify": False}
     p.ADAM_LR = 1e-3
     p.ADAM_BETAS = (0.9, 0.999)
-    p.batch_sz = 16
+    p.batch_sz = 32
     p.emb_sz = 256
     p.hidden_sz = 256
     p.plm_model = 'bert-base-uncased'
@@ -64,50 +65,51 @@ def base_param():
 
 
 @Registry.hparamset()
-def adamax():
+def p_tuning_2():
     p = base_param()
-    p.OPTIM = "adamax"
-    p.optim_kwargs = {}
+    p.prompt_length = 2
     return p
 
 
 @Registry.hparamset()
-def adabelief_no_rect_no_wd():
+def p_tuning_8():
     p = base_param()
-    p.WEIGHT_DECAY = 0
-    p.OPTIM = "adabelief"
-    p.optim_kwargs = {"degenerated_to_sgd": True, "weight_decouple": True,
-                      "fixed_decay": True, "amsgrad": False, "rectify": False}
+    p.prompt_length = 8
     return p
 
 
 @Registry.hparamset()
-def adabelief_no_wd():
+def p_tuning_16():
     p = base_param()
-    p.WEIGHT_DECAY = 0
-    p.OPTIM = "adabelief"
-    p.optim_kwargs = {"degenerated_to_sgd": True, "weight_decouple": True,
-                      "fixed_decay": True, "amsgrad": False, "rectify": True}
+    p.prompt_length = 16
     return p
 
 
 @Registry.hparamset()
-def adabelief_no_rect():
+def p_tuning_32():
     p = base_param()
-    p.WEIGHT_DECAY = 1e-3
-    p.OPTIM = "adabelief"
-    p.optim_kwargs = {"degenerated_to_sgd": True, "weight_decouple": True,
-                      "fixed_decay": True, "amsgrad": False, "rectify": False}
+    p.prompt_length = 32
     return p
 
 
 @Registry.hparamset()
-def adabelief():
+def p_tuning_64():
     p = base_param()
-    p.WEIGHT_DECAY = 1e-3
-    p.OPTIM = "adabelief"
-    p.optim_kwargs = {"degenerated_to_sgd": True, "weight_decouple": True,
-                      "fixed_decay": True, "amsgrad": False, "rectify": True}
+    p.prompt_length = 64
+    return p
+
+
+@Registry.hparamset()
+def p_tuning_128():
+    p = base_param()
+    p.prompt_length = 128
+    return p
+
+
+@Registry.hparamset()
+def p_tuning_256():
+    p = base_param()
+    p.prompt_length = 256
     return p
 
 
@@ -164,7 +166,10 @@ def get_updater(bot: TrialBot):
         else:
             nonbert_params.append(param)
 
-    params = [{'lr': 1e-5, 'params': bert_params}, {'params': nonbert_params}]
+    if getattr(p, 'prompt_length', 0) > 0:
+        params = nonbert_params
+    else:
+        params = [{'lr': 1e-5, 'params': bert_params}, {'params': nonbert_params}]
 
     optim = select_optim(p, params)
     logger.info(f"Using Optimizer {optim}")

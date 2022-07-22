@@ -15,6 +15,8 @@ from ..modules.attention_composer import get_attn_composer
 from .stacked_rnn_cell import StackedRNNCell
 import os.path as osp
 
+from ..modules.variational_dropout import VariationalDropout
+
 
 class EmbeddingMxin:
     def get_source_embedding(self):
@@ -107,13 +109,6 @@ class EncoderStackMixin(RNNListMixin):
     """Static method for different kinds of encoders, and an instance method"""
     @staticmethod
     def get_stacked_rnn_encoder(encoder_type: str, inp_sz, hid_sz, num_layers, dropout=0, num_heads=12) -> EncoderStack:
-        """
-        p.enc_dropout = 0.
-        p.enc_out_dim = xxx # otherwise p.hidden_sz is used
-        p.emb_sz = 300
-        p.encoder = "lstm"  # lstm, transformer, bilstm, aug_lstm, aug_bilstm
-        p.num_heads = 8     # heads for transformer when used
-        """
         from allennlp.modules.seq2seq_encoders import PytorchSeq2SeqWrapper as PTRNNWrapper
         from allennlp.modules.seq2seq_encoders import AugmentedLstmSeq2SeqEncoder
         from allennlp.modules.seq2seq_encoders import StackedBidirectionalLstmSeq2SeqEncoder
@@ -127,6 +122,12 @@ class EncoderStackMixin(RNNListMixin):
                 return hid_sz
 
         enc_classes = dict(
+            mlp=lambda floor: nn.Sequential(nn.Linear(_get_inp_sz(floor), hid_sz // 2),
+                                            VariationalDropout(dropout),
+                                            nn.Mish(),
+                                            nn.Linear(hid_sz // 2, hid_sz),
+                                            VariationalDropout(dropout),
+                                            nn.Mish()),
             lstm=lambda floor: PTRNNWrapper(nn.LSTM(_get_inp_sz(floor), hid_sz, batch_first=True)),
             gru=lambda floor: PTRNNWrapper(nn.GRU(_get_inp_sz(floor), hid_sz, batch_first=True)),
             bilstm=lambda floor: PTRNNWrapper(nn.LSTM(_get_inp_sz(floor, True), hid_sz, batch_first=True,

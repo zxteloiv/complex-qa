@@ -166,12 +166,43 @@ class SquallBaseBuilder(EncoderStackMixin):
             ns_keyword=p.ns_keyword,
             ns_coltype=p.ns_coltype,
             vocab=vocab,
+            p_tuning=self.get_p_tuning_module(plm_model.config),
             tgt_type_keys=tgt_type_keys,
             decoder_init_strategy=p.decoder_init,
             sup_unaligned_attn_mat=getattr(p, 'supervise_unaligned_attn_mat', False),
             sup_unaligned_attn_vec=getattr(p, 'supervise_unaligned_attn_vec', False),
         )
         return parser
+
+    def get_p_tuning_module(self, plm_config):
+        from .p_tuning_v2 import PTuningV2Prompt
+        from transformers import BertConfig
+        plm_config: BertConfig
+        p = self.p
+        prefix_len = getattr(p, 'prompt_length', 0)
+        if not isinstance(prefix_len, int) or prefix_len <= 0:
+            return None
+
+        prompt_encoder = getattr(p, 'prompt_encoder', None)
+        if prompt_encoder is not None:
+            enc_out_size = plm_config.num_hidden_layers * 2 * plm_config.hidden_size
+            prompt_encoder = self.get_stacked_rnn_encoder(
+                prompt_encoder,
+                p.hidden_sz,  # coupled with embedding size, not correlated with outer dimensions
+                enc_out_size,
+                getattr(p, 'prompt_encoder_layers', 1),
+                p.dropout
+            )
+
+        p_tuning = PTuningV2Prompt(
+            prefix_len=p.prompt_length,
+            n_layers=plm_config.num_hidden_layers,
+            n_head=plm_config.num_attention_heads,
+            plm_hidden=plm_config.hidden_size,
+            prefix_enc=prompt_encoder,
+            dropout=nn.Dropout(p.dropout),
+        )
+        return p_tuning
 
     @classmethod
     def from_param_vocab(cls, p, vocab):
