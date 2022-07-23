@@ -2,7 +2,7 @@ from torch import nn
 
 from models.base_s2s.model_factory import EncoderStackMixin
 from models.base_s2s.stacked_rnn_cell import StackedRNNCell
-from models.modules.variational_dropout import VariationalDropout as VDrop
+from models.modules.variational_dropout import VariationalDropout as VDrop, VariationalDropout
 from models.modules.attention_wrapper import get_wrapped_attention as get_attn
 from models.modules.attention_wrapper import PreAttnMappingWrapper
 
@@ -183,15 +183,16 @@ class SquallBaseBuilder(EncoderStackMixin):
         if not isinstance(prefix_len, int) or prefix_len <= 0:
             return None
 
-        prompt_encoder = getattr(p, 'prompt_encoder', None)
-        if prompt_encoder is not None:
+        prompt_encoder = getattr(p, 'prompt_encoder', False)
+        if prompt_encoder:
             enc_out_size = plm_config.num_hidden_layers * 2 * plm_config.hidden_size
-            prompt_encoder = self.get_stacked_rnn_encoder(
-                prompt_encoder,
-                p.hidden_sz,  # coupled with embedding size, not correlated with outer dimensions
-                enc_out_size,
-                getattr(p, 'prompt_encoder_layers', 1),
-                p.dropout
+            mlp_hid = enc_out_size // plm_config.num_attention_heads
+            prompt_encoder = nn.Sequential(
+                nn.Linear(plm_config.hidden_size,  mlp_hid),
+                VariationalDropout(p.dropout),
+                nn.SELU(),
+                nn.Linear(mlp_hid, enc_out_size),
+                nn.SELU()   # no dropout at the final layer
             )
 
         p_tuning = PTuningV2Prompt(
@@ -199,7 +200,7 @@ class SquallBaseBuilder(EncoderStackMixin):
             n_layers=plm_config.num_hidden_layers,
             n_head=plm_config.num_attention_heads,
             plm_hidden=plm_config.hidden_size,
-            prefix_enc=prompt_encoder,
+            prefix_enc=prompt_encoder if prompt_encoder else None,
             dropout=nn.Dropout(p.dropout),
         )
         return p_tuning

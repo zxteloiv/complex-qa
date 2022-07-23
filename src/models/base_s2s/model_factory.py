@@ -122,12 +122,6 @@ class EncoderStackMixin(RNNListMixin):
                 return hid_sz
 
         enc_classes = dict(
-            mlp=lambda floor: nn.Sequential(nn.Linear(_get_inp_sz(floor), hid_sz // 2),
-                                            VariationalDropout(dropout),
-                                            nn.Mish(),
-                                            nn.Linear(hid_sz // 2, hid_sz),
-                                            VariationalDropout(dropout),
-                                            nn.Mish()),
             lstm=lambda floor: PTRNNWrapper(nn.LSTM(_get_inp_sz(floor), hid_sz, batch_first=True)),
             gru=lambda floor: PTRNNWrapper(nn.GRU(_get_inp_sz(floor), hid_sz, batch_first=True)),
             bilstm=lambda floor: PTRNNWrapper(nn.LSTM(_get_inp_sz(floor, True), hid_sz, batch_first=True,

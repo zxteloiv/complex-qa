@@ -11,7 +11,7 @@ class PTuningV2Prompt(nn.Module):
                  n_layers: int,
                  n_head: int,
                  plm_hidden: int,
-                 prefix_enc: Encoder = None,
+                 prefix_enc: nn.Module = None,
                  dropout: nn.Module = None,
                  ):
         super().__init__()
@@ -19,8 +19,7 @@ class PTuningV2Prompt(nn.Module):
         if prefix_enc is None:
             self.emb = nn.Embedding(prefix_len, plm_hidden * n_layers * 2)
         else:
-            self.emb = nn.Embedding(prefix_len, prefix_enc.get_input_dim())
-            assert prefix_enc.get_output_dim() == plm_hidden * n_layers * 2
+            self.emb = nn.Embedding(prefix_len, plm_hidden)
 
         self.prefix_encoder = prefix_enc
         self.dropout = dropout
