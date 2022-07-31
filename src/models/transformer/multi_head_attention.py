@@ -19,6 +19,7 @@ class GeneralMultiHeadAttention(torch.nn.Module):
                  use_future_blinding: bool = False,
                  temperature: Optional[float] = None,
                  try_cloned_linear: bool = True,
+                 eval_top1_ctx: bool = False,
                  ):
         """
         The basic multi-head attention, used for the following cases:
@@ -51,6 +52,7 @@ class GeneralMultiHeadAttention(torch.nn.Module):
 
         self._temperature = temperature or (self._key_dim ** 0.5)
         self._use_future_blinding = use_future_blinding
+        self._eval_top1 = eval_top1_ctx
 
         self._dropout = torch.nn.Dropout(attention_dropout)
 
@@ -136,10 +138,24 @@ class GeneralMultiHeadAttention(torch.nn.Module):
         # attn: (batch, num_heads, max_input_len, max_attend_length)
         attn = self.dot_attention(queries, keys, attend_mask, structural_mask)
 
-        # context_by_heads: (batch, num_heads, max_input_len, value_dim)
-        context_by_heads = torch.matmul(attn, values)
-        # context_by_heads: (batch, max_input_len, num_heads, value_dim)
-        context_by_heads = context_by_heads.permute(0, 2, 1, 3)
+        if self._eval_top1 and not self.training:
+            head_attn_max = attn.argmax(dim=-1)   # (b, n_head, inp_len)
+            nbatch, nhead, ninp = head_attn_max.size()
+
+            def tr(*args, **kwargs):
+                return torch.arange(*args, **kwargs, dtype=torch.long, device=head_attn_max.device)
+
+            # ctx: (b, n_head, inp_len, value_dim)
+            ctx = values[tr(nbatch).view(-1, 1, 1), tr(nhead).view(1, -1, 1), head_attn_max]
+
+            # context_by_heads: (batch, max_input_len, num_heads, value_dim)
+            context_by_heads = ctx.permute(0, 2, 1, 3)
+
+        else:
+            # context_by_heads: (batch, num_heads, max_input_len, value_dim)
+            context_by_heads = torch.matmul(attn, values)
+            # context_by_heads: (batch, max_input_len, num_heads, value_dim)
+            context_by_heads = context_by_heads.permute(0, 2, 1, 3)
 
         # context: (batch, max_input_length, output_dim)
         context = self._output(context_by_heads.reshape(batch, max_input_length, -1))

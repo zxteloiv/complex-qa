@@ -69,6 +69,7 @@ class GeneralizedBilinearAttention(Attention):
                  use_linear: bool = True,
                  use_bias: bool = True,
                  activation: Optional[nn.Module] = None,
+                 eval_top1_ctx: bool = False,
                  ):
         super().__init__()
 
@@ -84,6 +85,9 @@ class GeneralizedBilinearAttention(Attention):
         self.bias = nn.Parameter(torch.zeros(1,)) if use_bias and activation is not None else None
         self.activation = activation
         self._attn_weights = None
+        self.attn_dim = attn_dim
+        self.vec_dim = vec_dim
+        self.eval_top1_ctx = eval_top1_ctx
 
         self.reset_parameters()
 
@@ -193,10 +197,25 @@ class GeneralizedBilinearAttention(Attention):
         # attn: (...a..., -1, num_tensors, 1)
         attn_weights = masked_softmax(similarity, rs_mask, dim=-2)
 
-        # rs_context: (...a..., -1, attn_dim)
-        # context: (...a..., ...b..., attn_dim)
-        rs_context = (attn_weights * rs_a).sum(-2)
-        context = rs_context.view(*attn_prefix_dims, *input_suffix_dims, -1)
+        if self.eval_top1_ctx and not self.training:
+            # rs_a: (...a..., 1, num_tensors, attn_dim)
+            # max_pos: (...a..., -1(=prod(...b...)), 1, 1)
+            max_pos = attn_weights.argmax(dim=-2, keepdim=True)
+
+            attn_size = max_pos.size()
+            ctx_size = rs_a.size()
+
+            # pos_idx: (...a..., prod(input_suffix_dims), 1, attn_dim)
+            pos_idx = max_pos.expand(*attn_prefix_dims, -1, -1, ctx_size[-1])
+            ctx_input = rs_a.expand(*attn_prefix_dims, attn_size[-3], -1, -1)
+            context = torch.gather(ctx_input, dim=-2, index=pos_idx)
+            context = context.view(*attn_prefix_dims, *input_suffix_dims, -1)
+
+        else:
+            # rs_context: (...a..., -1, attn_dim)
+            # context: (...a..., ...b..., attn_dim)
+            rs_context = (attn_weights * rs_a).sum(-2)
+            context = rs_context.view(*attn_prefix_dims, *input_suffix_dims, -1)
 
         attn_weights = attn_weights.squeeze(-1).reshape(*attn_prefix_dims, *input_suffix_dims, -1)
         self._attn_weights = attn_weights

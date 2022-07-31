@@ -155,9 +155,14 @@ def get_wrapped_attention(attn_type: str,
         from torch import nn
         use_linear = kwargs.get('use_linear', True)
         use_bias = kwargs.get('use_bias', True)
+        use_argmax = kwargs.get('use_argmax', False)
         activation = nn.Tanh() if kwargs.get('use_tanh_activation', False) else None
         attn = GeneralizedBilinearAttention(matrix_dim, vector_dim,
-                                            activation=activation, use_linear=use_linear, use_bias=use_bias)
+                                            activation=activation,
+                                            use_linear=use_linear,
+                                            use_bias=use_bias,
+                                            eval_top1_ctx=use_argmax,
+                                            )
 
     elif attn_type == "generalized_dot_product":
         from .generalized_attention import GeneralizedDotProductAttention
@@ -171,13 +176,16 @@ def get_wrapped_attention(attn_type: str,
     elif attn_type == "mha":
         from ..transformer.multi_head_attention import GeneralMultiHeadAttention
         num_heads = kwargs.get('num_heads', 8)
+        use_argmax = kwargs.get('use_argmax', False)
         attn = GeneralMultiHeadAttention(num_heads,
                                          input_dim=vector_dim,
                                          total_attention_dim=vector_dim,
                                          total_value_dim=vector_dim,
                                          attend_to_dim=matrix_dim,
                                          output_dim=matrix_dim,
-                                         attention_dropout=attention_dropout,)
+                                         attention_dropout=attention_dropout,
+                                         eval_top1_ctx=use_argmax,
+                                         )
         attn = SingleTokenMHAttentionWrapper(attn, mean_reduction_heads=kwargs.get('mha_mean_weight', False))
 
     elif attn_type == "seq_mha":

@@ -61,55 +61,17 @@ def base_param():
     # default
     p.supervise_unaligned_attn_mat = True
     p.supervise_unaligned_attn_vec = True
+
+    p.prompt_length = 0     # tried: 2, 8, 16, 32, 64, 128, 256
+
+    p.eval_attn_argmax = True
     return p
 
 
-@Registry.hparamset()
-def p_tuning_2():
+@Registry.hparamset(name='base-wo-argmax')
+def eval_wo_argmax():
     p = base_param()
-    p.prompt_length = 2
-    return p
-
-
-@Registry.hparamset()
-def p_tuning_8():
-    p = base_param()
-    p.prompt_length = 8
-    return p
-
-
-@Registry.hparamset()
-def p_tuning_16():
-    p = base_param()
-    p.prompt_length = 16
-    return p
-
-
-@Registry.hparamset()
-def p_tuning_32():
-    p = base_param()
-    p.prompt_length = 32
-    return p
-
-
-@Registry.hparamset()
-def p_tuning_64():
-    p = base_param()
-    p.prompt_length = 64
-    return p
-
-
-@Registry.hparamset()
-def p_tuning_128():
-    p = base_param()
-    p.prompt_length = 128
-    return p
-
-
-@Registry.hparamset()
-def p_tuning_256():
-    p = base_param()
-    p.prompt_length = 256
+    p.eval_attn_argmax = False
     return p
 
 
