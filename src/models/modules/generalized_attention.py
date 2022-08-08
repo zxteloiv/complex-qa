@@ -8,10 +8,6 @@ from ..interfaces.attention import Attention
 
 
 class GeneralizedDotProductAttention(Attention):
-    def __init__(self):
-        super().__init__()
-        self._last_attn_weights = None
-
     def forward(self, inputs, attend_over, attend_mask = None, structural_mask = None) -> torch.Tensor:
         """
         :param inputs:      (...a..., ...b..., vec_dim)
@@ -55,13 +51,8 @@ class GeneralizedDotProductAttention(Attention):
         # context: (...a..., ...b..., attn_dim)
         context = rs_context.reshape(*attn_prefix_dims, *input_suffix_dims, -1)
 
-        self._last_attn_weights = attn_weights.reshape(*attn_prefix_dims, *input_suffix_dims, -1)
+        self.save_last_attn_weights(attn_weights.reshape(*attn_prefix_dims, *input_suffix_dims, -1))
         return context
-
-    def get_latest_attn_weights(self) -> torch.Tensor:
-        if self._last_attn_weights is None:
-            raise ValueError('Attention module has never been applied.')
-        return self._last_attn_weights
 
 
 class GeneralizedBilinearAttention(Attention):
@@ -84,7 +75,6 @@ class GeneralizedBilinearAttention(Attention):
         # without a nonlinear activation, the bias is useless because the softmax will erase the differences
         self.bias = nn.Parameter(torch.zeros(1,)) if use_bias and activation is not None else None
         self.activation = activation
-        self._attn_weights = None
         self.attn_dim = attn_dim
         self.vec_dim = vec_dim
         self.eval_top1_ctx = eval_top1_ctx
@@ -218,13 +208,7 @@ class GeneralizedBilinearAttention(Attention):
             context = rs_context.view(*attn_prefix_dims, *input_suffix_dims, -1)
 
         attn_weights = attn_weights.squeeze(-1).reshape(*attn_prefix_dims, *input_suffix_dims, -1)
-        self._attn_weights = attn_weights
+        self.save_last_attn_weights(attn_weights)
 
         return context
-
-    def get_latest_attn_weights(self) -> torch.Tensor:
-        if self._attn_weights is None:
-            raise ValueError('Attention module has never been applied.')
-        return self._attn_weights
-
 

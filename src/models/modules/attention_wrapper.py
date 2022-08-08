@@ -11,11 +11,6 @@ class AllenNLPAttentionWrapper(IAttn):
     A wrapper for matrix attention in allennlp, fitting the interface of the multi-headed attention
     defined in models.transformer.multi_head_attention
     """
-    def get_latest_attn_weights(self) -> torch.Tensor:
-        if self._attn_weights is None:
-            raise ValueError('Attention weight is None.')
-        return self._attn_weights
-
     def __init__(self, attn: AllenAttention, attn_dropout: float = 0.,
                  use_temperature_schedule: bool = False,
                  init_tau: float = 1., min_tau: float = .05):
@@ -29,7 +24,6 @@ class AllenNLPAttentionWrapper(IAttn):
         if use_temperature_schedule:
             # manually normalize in the forward pass of the wrapper
             self._attn._normalize = False
-        self._attn_weights = None
 
     def forward(self,
                 inputs: torch.Tensor,
@@ -57,7 +51,7 @@ class AllenNLPAttentionWrapper(IAttn):
         else:
             weights = attn  # no schedule, the attention has been processed of mask softmax
 
-        self._attn_weights = weights    # (batch, max_attend_length)
+        self.save_last_attn_weights(weights)    # (batch, max_attend_length)
 
         # context: (batch, attend_dim)
         context = (self._dropout(weights.unsqueeze(-1)) * attend_over).sum(1)
@@ -65,15 +59,9 @@ class AllenNLPAttentionWrapper(IAttn):
 
 
 class SingleTokenMHAttentionWrapper(IAttn):
-    def get_latest_attn_weights(self) -> torch.Tensor:
-        if self._attn_weights is None:
-            raise ValueError("Attention Weight is None")
-        return self._attn_weights
-
     def __init__(self, attn: GeneralMultiHeadAttention, mean_reduction_heads: bool = False):
         super(SingleTokenMHAttentionWrapper, self).__init__()
         self._attn = attn
-        self._attn_weights = None
         self._mean_on_heads = mean_reduction_heads
 
     def forward(self, inputs, attend_over, attend_mask = None, structural_mask = None):
@@ -99,9 +87,9 @@ class SingleTokenMHAttentionWrapper(IAttn):
         a = a.squeeze(1)
 
         if self._mean_on_heads:
-            self._attn_weights = a.mean(1)  # (b, max_attend_length)
+            self.save_last_attn_weights(a.mean(1))  # (b, max_attend_length)
         else:
-            self._attn_weights = a  # (b, num_heads, max_attend_length)
+            self.save_last_attn_weights(a)  # (b, num_heads, max_attend_length)
         return c
 
 
