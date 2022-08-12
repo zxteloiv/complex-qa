@@ -42,19 +42,19 @@ def base_param():
     p.num_dec_layers = 2
 
     p.num_heads = 1     # heads for attention only
-    p.word_col_attn = 'generalized_bilinear'    # must be matrix attention
-    p.col_word_attn = 'generalized_bilinear'
-    p.sql_word_attn = 'mha'
-    p.sql_col_attn = 'generalized_bilinear'
+    p.word_col_attn = 'adaptive_bilinear'    # must be matrix attention
+    p.col_word_attn = 'adaptive_bilinear'
+    p.sql_word_attn = 'adaptive_mha'
+    p.sql_col_attn = 'adaptive_bilinear'
     p.plm_encoder = 'aug_bilstm'
     p.plm_enc_out = p.hidden_sz // 2  # = hid_sz or hid_sz//2 when encoder is bidirectional
     p.plm_enc_layers = 1
 
     p.decoder_init = 'zero_all'
 
-    p.col_copy = 'generalized_bilinear'
-    p.span_begin = 'generalized_bilinear'
-    p.span_end = 'generalized_bilinear'
+    p.col_copy = 'adaptive_bilinear'
+    p.span_begin = 'adaptive_bilinear'
+    p.span_end = 'adaptive_bilinear'
     p.bilinear_use_linear = False
     p.bilinear_use_bias = False
 

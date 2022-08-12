@@ -4,11 +4,11 @@ import torch
 from torch import nn
 from torch.nn import init
 from allennlp.nn.util import masked_softmax
-from ..interfaces.attention import Attention
+from ..interfaces.attention import AdaptiveAttention
 
 
-class GeneralizedDotProductAttention(Attention):
-    def forward(self, inputs, attend_over, attend_mask = None, structural_mask = None) -> torch.Tensor:
+class GeneralizedDotProductAttention(AdaptiveAttention):
+    def forward(self, inputs, attend_over, attend_mask=None, structural_mask=None) -> torch.Tensor:
         """
         :param inputs:      (...a..., ...b..., vec_dim)
         :param attend_over: (...a..., num_tensors, attn_dim)
@@ -55,7 +55,7 @@ class GeneralizedDotProductAttention(Attention):
         return context
 
 
-class GeneralizedBilinearAttention(Attention):
+class GeneralizedBilinearAttention(AdaptiveAttention):
     def __init__(self, attn_dim: int, vec_dim: int,
                  use_linear: bool = True,
                  use_bias: bool = True,
