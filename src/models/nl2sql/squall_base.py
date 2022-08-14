@@ -57,9 +57,6 @@ class SquallBaseParser(nn.Module):
                  src_type_keys: tuple = ('pad', 'special', 'word', 'word_pivot', 'column', 'col_pivot'),
                  tgt_type_keys: tuple = ('pad', 'keyword', 'column', 'literal_string', 'literal_number'),
                  decoder_init_strategy: str = "zero_all",
-
-                 sup_unaligned_attn_vec: bool = False,
-                 sup_unaligned_attn_mat: bool = False,
                  ):
         super().__init__()
         self.pretrained_model = plm_model
@@ -115,8 +112,6 @@ class SquallBaseParser(nn.Module):
         self.dec_acc_pred = Average()
         self.item_count = 0
         self.match_stats = None
-        self._sup_unaligned_attn_vec = sup_unaligned_attn_vec
-        self._sup_unaligned_attn_mat = sup_unaligned_attn_mat
 
     def get_metrics(self, reset=False):
         metric = {"ACC_EM": round(self.acc.get_metric(reset), 6),
@@ -160,8 +155,18 @@ class SquallBaseParser(nn.Module):
                 step_emb = self.get_step_embedding(word_states, col_states, *step_input)
 
             hx, out = self.decoder(step_emb, hx)
-            word_ctx, col_ctx = self.get_enc_attn(out, word_states, word_mask, col_states, col_mask)
-            hvec = torch.cat([out, word_ctx, col_ctx], dim=-1)   # (b, hidden * 3)
+
+            if self.training:
+                mem(step_out=out)
+            else:
+                word_ctx, col_ctx = self.get_enc_attn(out, word_states, word_mask, col_states, col_mask)
+                hvec = torch.cat([out, word_ctx, col_ctx], dim=-1)   # (b, hidden * 3)
+                self.step_predictions(hvec, word_states, word_mask, col_states, col_mask, mem)
+
+        if self.training:
+            all_step_outs = mem.get_stacked_tensor('step_out')
+            word_ctx, col_ctx = self.get_enc_attn(all_step_outs, word_states, word_mask, col_states, col_mask)
+            hvec = torch.cat([all_step_outs, word_ctx, col_ctx], dim=-1)    # (b, len, hidden * 5)
             self.step_predictions(hvec, word_states, word_mask, col_states, col_mask, mem)
 
         logprob_dict = self.get_logprobs(mem, col_type_mask=kwargs.get('col_type_mask'))
@@ -344,7 +349,11 @@ class SquallBaseParser(nn.Module):
     def get_alignment_loss(self, mem: SeqCollector, ws_word, ws_sql, wc_word, wc_col,
                            word_mask, col_mask, sql_mask):
         # decoder to word attention
-        s2w_attn = mem.get_stacked_tensor(self.step_attn_keys[0])
+        if self.training:
+            s2w_attn = mem[self.step_attn_keys[0]][-1]
+        else:
+            s2w_attn = mem.get_stacked_tensor(self.step_attn_keys[0])
+
         # encoder attention
         w2c_attn = self.word_col_attn.get_latest_attn_weights()  # (b, num_words, num_cols)
         c2w_attn = self.col_word_attn.get_latest_attn_weights()  # (b, num_cols, num_words)
@@ -380,27 +389,9 @@ class SquallBaseParser(nn.Module):
 
         # use attn_mask to reset loss at padding locations
         raw_l2_loss = (attn_weights - attn_target) ** 2 / 2 * pad_mask
-
-        if self._sup_unaligned_attn_vec and self._sup_unaligned_attn_mat:
-            # the baseline choice
-            # attentions related to unaligned vec or unaligned mat must be trained towards 0
-            return raw_l2_loss.sum(dim=(1, 2)).mean()
-
-        elif self._sup_unaligned_attn_mat:
-            # unaligned attended matrix will be trained towards 0,
-            # thus select the aligned vector only
-            selected_loss = raw_l2_loss[batch, align_vec]   # (b, #align, #mat)
-            return (selected_loss.sum(-1) * align_mask).sum(-1).mean()
-
-        elif self._sup_unaligned_attn_vec:
-            # weights of unaligned attention vectors will be trained towards 0,
-            # which means
-            # thus select the aligned vector only
-            selected_loss = raw_l2_loss[batch, :, align_mat]    # (b, #align, #vec)
-            return (selected_loss.sum(-1) * align_mask).sum(-1).mean()
-
-        else:   # only the alignments are required
-            return (raw_l2_loss[batch, align_vec, align_mat] * align_mask).sum(-1).mean()  # (b, #align) -> ()
+        # following the baseline choice,
+        # attentions related to unaligned vec or unaligned mat must also be trained towards 0
+        return raw_l2_loss.sum(dim=(1, 2)).mean()
 
     def get_aux_loss(self, word_states, col_states, col_mask, align_word, align_col):
         # NLL loss for the the attention module
@@ -530,7 +521,8 @@ class SquallBaseParser(nn.Module):
         if self.training:
             keys_and_funcs = chain(product(self.step_prediction_keys[:3], [logprob]),
                                    product(self.step_prediction_keys[3:], [log]))
-            output = {k: foo(kget(k)) for k, foo in keys_and_funcs}
+            # for training, we use a one-turn-prediction instead of applying argmax step by step
+            output = {k: foo(mem[k][-1]) for k, foo in keys_and_funcs}
             return output
 
         ks = self.step_prediction_keys
