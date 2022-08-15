@@ -1,10 +1,9 @@
 import logging
+import re
 from typing import Optional, Tuple, Union
 
-from allennlp.modules.attention import Attention as AllenAttention
 from allennlp.modules.matrix_attention import MatrixAttention
 from allennlp.nn.util import masked_softmax
-from ..transformer.multi_head_attention import GeneralMultiHeadAttention
 from ..interfaces.attention import Attention as IAttn, AdaptiveAttention, AdaptiveAttnLogits
 import torch
 
@@ -23,6 +22,54 @@ class AdaptiveAllenLogits(AdaptiveAttnLogits):
         return self.mat_attn(inputs, attend_over)
 
 
+def _ctx_by_weighted_sum(attn_prob, value):
+    """
+    :param attn_prob: (batch, head, M, N)
+    :param value: (batch, head, N, d_v)
+    :return: (batch, M, d), d == d_v * head
+    """
+    ctx = torch.einsum('bhmn,bhnd->bmhd', attn_prob, value) # (batch, M, head, d_v)
+    ctx = ctx.view(*ctx.size()[:2], -1)     # (batch, M, d)
+    return ctx
+
+
+def _ctx_by_argmax(attn_prob, value):
+    """
+    :param attn_prob: (batch, head, M, N)
+    :param value: (batch, head, N, d_v)
+    :return: (batch, M, d), d == d_v * head
+    """
+    bsz, nhead, inp_len, _ = attn_prob.size()
+    max_attn_pos = attn_prob.argmax(dim=-1)  # (b, head, M)
+
+    def tr(*args, **kwargs):
+        return torch.arange(*args, **kwargs, device=attn_prob.device)
+
+    max_value = value[tr(bsz).view(-1, 1, 1), tr(nhead).view(1, -1, 1), max_attn_pos]  # (b, head, M, dv)
+    ctx = max_value.permute([0, 2, 1, 3]).view(bsz, inp_len, -1)
+    return ctx
+
+
+def _ctx_by_normed_topk(attn_prob, value, num_k: int):
+    """
+    :param attn_prob: (batch, head, M, N)
+    :param value: (batch, head, N, d_v)
+    :return: (batch, M, d), d == d_v * head
+    """
+    def tr(*args, **kwargs):
+        return torch.arange(*args, **kwargs, device=attn_prob.device)
+
+    bsz, nhead, inp_len, _ = attn_prob.size()
+    k_att, k_idx = torch.topk(attn_prob, num_k, dim=-1)     # (b, head, M, K)
+    k_val = value[tr(bsz).view(-1, 1, 1, 1), tr(nhead).view(1, -1, 1, 1), k_idx]  # (b, head, M, K, dv)
+
+    val = (k_att.unsqueeze(-1) * k_val).sum(dim=-2)  # (b, head, M, dv)
+    val = val / k_att.sum(dim=-1, keepdim=True)
+
+    ctx = val.permute([0, 2, 1, 3]).reshape(bsz, inp_len, -1)
+    return ctx
+
+
 class AdaptiveGeneralAttention(AdaptiveAttention):
     """Most Sophisticated attention features are implemented here,
     independent with the attention score computations.
@@ -35,7 +82,7 @@ class AdaptiveGeneralAttention(AdaptiveAttention):
                  num_heads: int = 1,
                  pre_q_mapping: torch.nn.Module = None,
                  pre_k_mapping: torch.nn.Module = None,
-                 pre_v_mapping: torch.nn.Module = None,
+                 pre_v_mapping: Union[torch.nn.Module, str] = None,
                  post_ctx_mapping: torch.nn.Module = None,
                  training_ctx: str = 'weighted_sum',
                  eval_ctx: str = 'weighted_sum',
@@ -48,15 +95,19 @@ class AdaptiveGeneralAttention(AdaptiveAttention):
         :param min_tau: set the minimal temperature for softmax.
         :param num_heads: int, 1 by default. if greater than 1, multi-head attention is applied.
         :param pre_q_mapping: map the input to Query by some mapping e.g. (linear)
+                default to the identity function if set to None.
         :param pre_k_mapping: map the attn targets to Keys by some mapping.
+                default to identity function if set to None.
         :param pre_v_mapping: map the attn targets to Values by some mapping.
+                use the same module of pre_k_mapping if set to "shared".
+                Otherwise or set to None, it is set to the identity function.
         :param post_ctx_mapping: map the output context after the attentions.
         :param training_ctx: weighted_sum, argmax, Hungarian, sample, or normed-topK.
         :param eval_ctx: weighted_sum, argmax, Hungarian, sample, or normed-topK.
         :param shared_scorer_for_heads: True by default. otherwise the attn_scorer needs
-         to be copied into a different module (but with the same attention type) for each head.
-         Since the multihead is usually meant to use with dot-prod attention, we fix it as True
-         and leave the function in the future.
+                to be copied into a different module (but with the same attention type) for each head.
+                Since the multihead is usually meant to use with dot-prod attention, we fix it as True
+                and leave the function in the future.
         """
         super().__init__()
         self.attn_scorer = attn_scorer
@@ -69,7 +120,14 @@ class AdaptiveGeneralAttention(AdaptiveAttention):
 
         self.pre_q_mapping = pre_q_mapping or _identity
         self.pre_k_mapping = pre_k_mapping or _identity
-        self.pre_v_mapping = pre_v_mapping or _identity
+
+        if isinstance(pre_v_mapping, str) and pre_v_mapping == "shared":
+            self.pre_v_mapping = self.pre_k_mapping
+        elif isinstance(pre_v_mapping, torch.nn.Module):
+            self.pre_v_mapping = pre_v_mapping
+        else:
+            self.pre_v_mapping = _identity
+
         self.post_ctx_mapping = post_ctx_mapping or _identity
 
         self.training_ctx = training_ctx
@@ -113,7 +171,7 @@ class AdaptiveGeneralAttention(AdaptiveAttention):
         attn_prob = self._compute_weight(attn_logit, attend_mask)   # (b, head, M, N)
 
         # ctx: (b, M, d)
-        ctx = self._weighted_sum_ctx(attn_prob, value)
+        ctx = self._ctx_delegation(attn_prob, value)
         ctx = self.post_ctx_mapping(ctx)
 
         if is_vec_attn:
@@ -133,12 +191,9 @@ class AdaptiveGeneralAttention(AdaptiveAttention):
         value = self.pre_v_mapping(attend_over)     # (b, N, d_v)
 
         def _split_heads(t: torch.Tensor):
-            if t.ndim == 3:
-                bsz, t_len, hid = t.size()
-            else:
-                bsz, hid = t.size()
-                t_len = 1
-
+            if t.ndim < 3:
+                t = t.unsqueeze(1)  # new axis after the batch dim
+            bsz, t_len, hid = t.size()
             assert hid % self.n_head == 0
             head_t = t.reshape(bsz, t_len, self.n_head, hid // self.n_head)
             head_t = head_t.transpose(1, 2).reshape(bsz * self.n_head, t_len, hid // self.n_head)
@@ -170,15 +225,18 @@ class AdaptiveGeneralAttention(AdaptiveAttention):
         attn_prob = masked_softmax(attn_logit / max(self.tau, self.min_tau), mask.bool())
         return attn_prob
 
-    def _weighted_sum_ctx(self, attn_prob, value):
-        """
-        :param attn_prob: (batch, head, M, N)
-        :param value: (batch, head, N, d_v)
-        :return:
-        """
-        ctx = torch.einsum('bhmn,bhnd->bmhd', attn_prob, value) # (batch, M, head, d_v)
-        ctx = ctx.view(*ctx.size()[:2], -1)     # (batch, M, d)
-        return ctx
+    def _ctx_delegation(self, attn_prob, value, **kwargs):
+        method = self.training_ctx if self.training else self.eval_ctx
+        if method == 'weighted_sum':
+            return _ctx_by_weighted_sum(attn_prob, value)
+        elif method == 'argmax':
+            return _ctx_by_argmax(attn_prob, value)
+        elif match := re.match(r'top(\d+)_norm', method):
+            return _ctx_by_normed_topk(attn_prob, value, num_k=int(match.group(1)))
+        else:
+            raise ValueError(f'the specified context delegation {method} '
+                             f'for {"training" if self.training else "evaluation"} '
+                             f'is unknown.')
 
 
 class PreAttnMappingWrapper(IAttn):

@@ -8,7 +8,7 @@ sys.path.insert(0, find_root('.SRC'))
 def main():
     from datasets.squall import install_squall_datasets
     from utils.trialbot.setup_cli import setup as setup_cli
-    import datasets.squall_translator
+    import datasets.squall_translator   # noqa
     install_squall_datasets()
 
     args = setup_cli(seed=2021, translator='squall-base', dataset='squall0', hparamset='squall-base')
