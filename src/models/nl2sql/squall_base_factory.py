@@ -230,7 +230,7 @@ class SquallBaseBuilder(EncoderStackMixin):
 
         p.word_col_attn = 'generalized_bilinear'    # must be matrix attention
         p.col_word_attn = 'generalized_bilinear'
-        p.sql_word_attn = 'mha'
+        p.sql_word_attn = 'adaptive_mha'
         p.sql_col_attn = 'generalized_bilinear'
         p.plm_encoder = 'aug_bilstm'
         p.plm_enc_out = p.hidden_sz // 2  # = hid_sz or hid_sz//2 when encoder is bidirectional

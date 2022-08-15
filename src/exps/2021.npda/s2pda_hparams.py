@@ -59,7 +59,7 @@ def cfq_pda():
 
     p.use_attn_residual_norm = True
 
-    p.tree_self_attn = 'seq_mha'    # seq_mha, generalized_dot_product
+    p.tree_self_attn = 'adaptive_mha'    # seq_mha, generalized_dot_product
 
     # ----------- end of tree settings -------------
 
