@@ -18,23 +18,6 @@ class _AttnWeightMixin:
         self._last_attn_weights = None
 
 
-class Attention(torch.nn.Module, _AttnWeightMixin, ABC):
-    """Compute the attention and merged for the context value, returns only the context vector"""
-    def forward(self,
-                inputs: torch.Tensor,
-                attend_over: torch.Tensor,
-                attend_mask: Optional[torch.LongTensor] = None) -> torch.Tensor:
-        """
-        Wrap the Attention in AllenNLP, with sufficient dimension and context value computation
-
-        :param inputs: (batch, input_dim)
-        :param attend_over: (batch, max_attend_length, attend_dim)
-        :param attend_mask: (batch, max_attend_length), used to blind out padded tokens
-        :return: context: (batch, output_dim=attend_dim)
-        """
-        raise NotImplementedError
-
-
 class VectorContextComposer(TwoVecComposer):
     """
     How to combine the context vector and the hidden states then?
@@ -46,22 +29,29 @@ class VectorContextComposer(TwoVecComposer):
         raise NotImplementedError
 
 
-class AdaptiveAttention(Attention, ABC):
+class AdaptiveAttention(torch.nn.Module, _AttnWeightMixin, ABC):
     def forward(self,
                 inputs: torch.Tensor,
                 attend_over: torch.Tensor,
-                attend_mask: Optional[torch.LongTensor] = None) -> torch.Tensor:
+                attend_mask: Optional[torch.LongTensor] = None,
+                graph_mask: Optional[torch.LongTensor] = None,
+                ) -> torch.Tensor:
         """
         Although the typing is the same as the superclass due to the limited,
         an adaptive attention is able to support either a token or matrix for the input.
         thus the tensor shape may vary, so is the output context or attn of the attention.
 
-        :param inputs: (batch, some_dim, input_dim) or simply (batch, input_dim)
+        :param inputs: (batch, input_length, input_dim) or simply (batch, input_dim)
         :param attend_over: (batch, attend_length, attend_dim)
         :param attend_mask: (batch, attend_length)
-        :return: context: (batch, some_dim, attend_dim) or simply (batch, input_dim)
+        :param graph_mask: (batch, input_length, attend_length)
+        :return: context: (batch, input_length, attend_dim) or simply (batch, input_dim)
         """
         raise NotImplementedError
+
+
+# declare the basic Attention for backward-compatibility
+Attention = AdaptiveAttention
 
 
 class AdaptiveAttnLogits(torch.nn.Module):

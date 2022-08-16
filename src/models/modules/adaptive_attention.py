@@ -8,12 +8,12 @@ from ..interfaces.attention import AdaptiveAttention
 
 
 class GeneralizedDotProductAttention(AdaptiveAttention):
-    def forward(self, inputs, attend_over, attend_mask=None, structural_mask=None) -> torch.Tensor:
+    def forward(self, inputs, attend_over, attend_mask=None, graph_mask=None) -> torch.Tensor:
         """
         :param inputs:      (...a..., ...b..., vec_dim)
         :param attend_over: (...a..., num_tensors, attn_dim)
         :param attend_mask: (...a..., num_tensors)
-        :param structural_mask: (...a..., ...b..., num_tensors)
+        :param graph_mask: (...a..., ...b..., num_tensors)
         :return: context vector: (...a..., ...b..., attn_dim)
         """
         input_size, bunch_size = inputs.size(), attend_over.size()
@@ -37,9 +37,9 @@ class GeneralizedDotProductAttention(AdaptiveAttention):
         if attend_mask is not None:
             rs_mask = attend_mask.unsqueeze(-2).unsqueeze(-1)
 
-        if structural_mask is not None:
+        if graph_mask is not None:
             # s_mask: (...a..., -1, num_tensors, 1)
-            rs_s_mask = structural_mask.reshape(*attn_prefix_dims, -1, bunch_size[-2], 1)
+            rs_s_mask = graph_mask.reshape(*attn_prefix_dims, -1, bunch_size[-2], 1)
             # rs_mask: (...a..., -1, num_tensors, 1)
             rs_mask = rs_mask * rs_s_mask
 
@@ -111,7 +111,7 @@ class GeneralizedBilinearAttention(AdaptiveAttention):
             nonlinearity = 'leaky_relu'
         return nonlinearity
 
-    def forward(self, inputs, attend_over, attend_mask = None) -> torch.Tensor:
+    def forward(self, inputs, attend_over, attend_mask=None, graph_mask=None) -> torch.Tensor:
         """
         Attend over the bunch of vectors.
 

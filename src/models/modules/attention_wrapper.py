@@ -1,6 +1,6 @@
 import logging
 import re
-from typing import Optional, Tuple, Union
+from typing import Optional, Tuple, Union, List, Callable
 
 from allennlp.modules.matrix_attention import MatrixAttention
 from allennlp.nn.util import masked_softmax
@@ -86,10 +86,10 @@ class AdaptiveGeneralAttention(AdaptiveAttention):
                  post_ctx_mapping: torch.nn.Module = None,
                  training_ctx: str = 'weighted_sum',
                  eval_ctx: str = 'weighted_sum',
+                 save_head_reduced_attn: bool = True,
                  shared_scorer_for_heads: bool = True,
                  ):
         """
-
         :param attn_scorer: Compute the unnormalized attention score.
         :param init_tau: set the temperature for softmax.
         :param min_tau: set the minimal temperature for softmax.
@@ -133,6 +133,13 @@ class AdaptiveGeneralAttention(AdaptiveAttention):
         self.training_ctx = training_ctx
         self.eval_ctx = eval_ctx
 
+        # a list of hook functions that accept and process the attention weight and returns the modified weights.
+        # with hooks we could introduce other dependencies on the weights and even change or rewrite it, for example,
+        # using the supervision for the attention weights.
+        self._runtime_weight_hooks: List[Callable[[torch.Tensor], torch.Tensor]] = []
+        self._head_graph_mask = None
+
+        self.save_head_reduced_attn = save_head_reduced_attn
         self.shared_head_scorer = shared_scorer_for_heads
         if not self.shared_head_scorer:
             raise NotImplementedError('Since the multihead is usually meant to use '
@@ -150,17 +157,35 @@ class AdaptiveGeneralAttention(AdaptiveAttention):
         )
         self.tau = tau
 
+    def set_head_mask(self, head_graph_mask: torch.LongTensor) -> None:
+        """
+        Since the Attention supports the multihead feature, it's possible to set graph masks by heads.
+        :param head_graph_mask: (batch, head, M, N), to inject connections for individual heads.
+        """
+        self._head_graph_mask = head_graph_mask
+
+    def clear_head_mask(self):
+        self._head_graph_mask = None
+
+    def set_runtime_weight_hooks(self, hooks: Callable[[torch.Tensor], torch.Tensor]) -> None:
+        self._runtime_weight_hooks = hooks
+
+    def clear_runtime_weight_hooks(self):
+        self._runtime_weight_hooks = []
+
     def forward(self,
                 inputs: torch.Tensor,
                 attend_over: torch.Tensor,
-                attend_mask: Optional[torch.LongTensor] = None) -> torch.Tensor:
+                attend_mask: Optional[torch.LongTensor] = None,
+                graph_mask: Optional[torch.LongTensor] = None,
+                ) -> torch.Tensor:
         """
         :param inputs: (batch, M, input_dim) or simply (batch, input_dim)
         :param attend_over: (batch, N, attend_dim)
         :param attend_mask: (batch, N)
+        :param graph_mask: (batch, M, N)
         """
         bsz = inputs.size(0)
-        is_vec_attn = inputs.ndim < 3
 
         # (bsz * head, [qkv]_length, d_[qkv])
         query, key, value = self._pre_attn_process(inputs, attend_over)
@@ -169,17 +194,14 @@ class AdaptiveGeneralAttention(AdaptiveAttention):
         attn = self.attn_scorer(query, key)    # (b * head, M, N)
         attn_logit = attn.view(bsz, self.n_head, *attn.size()[-2:]) # (b, head, M, N)
         attn_prob = self._compute_weight(attn_logit, attend_mask)   # (b, head, M, N)
+        self._save_weight(attn_prob)
+        attn_prob = self._call_weight_hooks(attn_prob)
 
         # ctx: (b, M, d)
         ctx = self._ctx_delegation(attn_prob, value)
         ctx = self.post_ctx_mapping(ctx)
-
-        if is_vec_attn:
-            attn_prob = attn_prob.squeeze(-2)   # remove the M=1 dimension if required
+        if inputs.ndim < 3:     # single token attention, remove the M=1 dim
             ctx = ctx.squeeze(-2)
-        attn_prob = attn_prob.mean(dim=1)   # remove the multihead dimension;
-
-        self.save_last_attn_weights(attn_prob)
         return ctx
 
     def _pre_attn_process(self, inputs, attend_over):
@@ -203,14 +225,13 @@ class AdaptiveGeneralAttention(AdaptiveAttention):
         headed_query, headed_key, headed_val = map(_split_heads, (query, key, value))
         return headed_query, headed_key, headed_val
 
-    def _compute_weight(self, attn_logit, attn_mask=None, graph_mask=None, head_graph_mask=None):
+    def _compute_weight(self, attn_logit, attn_mask=None, graph_mask=None):
         """
         Compute the attention probabilities from logits, given various masks.
 
         :param attn_logit: (batch, head, M, N)
         :param attn_mask: (batch, N), used to wipe out paddings in the attn targets.
         :param graph_mask: (batch, M, N), to inject graph connections of attention inputs ant targets.
-        :param head_graph_mask: (batch, head, M, N), to inject connections for individual heads.
         :return: attn_prob: (batch, head, M, N), the last dim sums to 1
         """
         bsz, nhead, inp_len, attn_len = attn_logit.size()
@@ -219,20 +240,30 @@ class AdaptiveGeneralAttention(AdaptiveAttention):
             mask *= attn_mask.view(bsz, 1, 1, attn_len)
         if graph_mask is not None:
             mask *= graph_mask.view(bsz, 1, inp_len, attn_len)
-        if head_graph_mask is not None:
-            mask *= head_graph_mask
+        if self._head_graph_mask is not None:
+            mask *= self._head_graph_mask
 
         attn_prob = masked_softmax(attn_logit / max(self.tau, self.min_tau), mask.bool())
         return attn_prob
 
-    def _ctx_delegation(self, attn_prob, value, **kwargs):
+    def _save_weight(self, attn_prob):
+        # remove the M=1 dimension if required
+        self.save_last_attn_weights(attn_prob.mean(dim=1) if self.save_head_reduced_attn else attn_prob)
+
+    def _call_weight_hooks(self, attn_prob: torch.Tensor) -> torch.Tensor:
+        for hook in self._runtime_weight_hooks:
+            attn_prob = hook(attn_prob)
+
+        return attn_prob
+
+    def _ctx_delegation(self, head_weights, value):
         method = self.training_ctx if self.training else self.eval_ctx
         if method == 'weighted_sum':
-            return _ctx_by_weighted_sum(attn_prob, value)
+            return _ctx_by_weighted_sum(head_weights, value)
         elif method == 'argmax':
-            return _ctx_by_argmax(attn_prob, value)
+            return _ctx_by_argmax(head_weights, value)
         elif match := re.match(r'top(\d+)_norm', method):
-            return _ctx_by_normed_topk(attn_prob, value, num_k=int(match.group(1)))
+            return _ctx_by_normed_topk(head_weights, value, num_k=int(match.group(1)))
         else:
             raise ValueError(f'the specified context delegation {method} '
                              f'for {"training" if self.training else "evaluation"} '
@@ -253,23 +284,21 @@ class PreAttnMappingWrapper(IAttn):
     def forward(self,
                 inputs: torch.Tensor,
                 attend_over: torch.Tensor,
-                attend_mask: Optional[torch.LongTensor] = None) -> torch.Tensor:
+                attend_mask: Optional[torch.LongTensor] = None, **kwargs) -> torch.Tensor:
         inputs = self.input_map(inputs) if self.input_map else inputs
         attend_over = self.attend_map(attend_over) if self.attend_map else attend_over
-        return self.attn(inputs, attend_over, attend_mask)
+        return self.attn(inputs, attend_over, attend_mask, **kwargs)
 
 
 def get_wrapped_attention(attn_type: str,
                           vector_dim: int = 0,
                           matrix_dim: int = 0,
-                          attention_dropout: float = 0.,
                           **kwargs):
     """
     Build an Attention module with specified parameters.
     :param attn_type: indicates the attention type, e.g. "bilinear", "dot_product" or "none"
     :param vector_dim: the vector to compute attention
     :param matrix_dim: the bunch of vectors to be attended against (batch, num, matrix_dim)
-    :param attention_dropout: the dropout to discard some attention weights
     :return: a torch.nn.Module
     """
 
@@ -301,9 +330,7 @@ def get_wrapped_attention(attn_type: str,
 
     elif attn_type == 'adaptive_bilinear':
         from allennlp.modules.matrix_attention import BilinearMatrixAttention
-        attn = AdaptiveGeneralAttention(
-            AdaptiveAllenLogits(BilinearMatrixAttention(vector_dim, matrix_dim)),
-        )
+        attn = AdaptiveGeneralAttention(AdaptiveAllenLogits(BilinearMatrixAttention(vector_dim, matrix_dim)))
 
     elif attn_type == 'adaptive_mha':
         from allennlp.modules.matrix_attention import DotProductMatrixAttention

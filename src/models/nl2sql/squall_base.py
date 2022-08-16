@@ -157,7 +157,7 @@ class SquallBaseParser(nn.Module):
             hx, out = self.decoder(step_emb, hx)
 
             if self.training:
-                mem(step_out=out)
+                mem(step_out=out)   # save the RNN output only and compute the predictions and losses altogether later
             else:
                 word_ctx, col_ctx = self.get_enc_attn(out, word_states, word_mask, col_states, col_mask)
                 hvec = torch.cat([out, word_ctx, col_ctx], dim=-1)   # (b, hidden * 3)
