@@ -1,5 +1,6 @@
+import logging
 from itertools import product, chain
-from typing import Dict, Any, Tuple, List
+from typing import Dict, Any, Tuple, List, Union, Literal
 
 import torch
 import re
@@ -8,13 +9,17 @@ from allennlp.nn.util import masked_log_softmax
 from fuzzywuzzy import fuzz
 from torch import nn
 from trialbot.data import NSVocabulary
+from scipy.optimize import linear_sum_assignment
 
-from models.interfaces.attention import Attention as IAttn
+# from models.interfaces.attention import Attention as IAttn
 from models.interfaces.encoder import Encoder
 from models.interfaces.unified_rnn import RNNStack
+from models.modules.attention_wrapper import AdaptiveGeneralAttention
 from models.nl2sql.p_tuning_v2 import PTuningV2Prompt
-from utils.nn import aggregate_layered_state, assign_stacked_states, masked_reducing_gather, compact_mask_select
+from utils.nn import aggregate_layered_state, assign_stacked_states, compact_mask_select
 from utils.seq_collector import SeqCollector
+
+IAttn = AdaptiveGeneralAttention
 
 
 class SquallBaseParser(nn.Module):
@@ -57,6 +62,7 @@ class SquallBaseParser(nn.Module):
                  src_type_keys: tuple = ('pad', 'special', 'word', 'word_pivot', 'column', 'col_pivot'),
                  tgt_type_keys: tuple = ('pad', 'keyword', 'column', 'literal_string', 'literal_number'),
                  decoder_init_strategy: str = "zero_all",
+                 attn_weight_policy: str = "softmax",
                  ):
         super().__init__()
         self.pretrained_model = plm_model
@@ -103,6 +109,14 @@ class SquallBaseParser(nn.Module):
         # the decoder-to-column attention is also meaningful but not used for training and evaluation
         self.step_attn_keys = ('word_attn',)
 
+        # the attention weights are generated dynamically during the forward pass, thus the weighting policies
+        # must be controlled by the model.
+        # instead, the context policies are fixed and specified in the module (during initializations
+        # inside the factory method), the model are not required to know them.
+        self.attn_training_policies: Dict[str, str]
+        self.attn_eval_policies: Dict[str, str]
+        self.attn_training_policies, self.attn_eval_policies = self.set_attn_weight_policy(attn_weight_policy)
+
         # metrics
         self.acc = Average()
         self.word_num = Average()
@@ -112,6 +126,29 @@ class SquallBaseParser(nn.Module):
         self.dec_acc_pred = Average()
         self.item_count = 0
         self.match_stats = None
+
+    def set_attn_weight_policy(self, weight_policy: str):
+        policies = ('softmax', 'tau_schedule', 'oracle_sup', 'hungarian_sup', 'oracle_as_weight', 'hungarian_as_weight')
+        assert weight_policy in policies
+
+        attn_trainings = {
+            'word_col_attn': weight_policy,
+            'col_word_attn': weight_policy,
+            'sql_word_attn': weight_policy,
+            'sql_col_attn': weight_policy,
+        }
+
+        generation_eval_policies = ('softmax', 'oracle_sup', 'hungarian_sup', 'oracle_as_weight')
+        encoding_eval_policies = ('softmax', 'oracle_sup', 'hungarian_sup', 'oracle_as_weight', 'hungarian_as_weight')
+        fallback = 'softmax'
+
+        attn_evals = {
+            'word_col_attn': weight_policy if weight_policy in encoding_eval_policies else fallback,
+            'col_word_attn': weight_policy if weight_policy in encoding_eval_policies else fallback,
+            'sql_word_attn': weight_policy if weight_policy in generation_eval_policies else fallback,
+            'sql_col_attn': weight_policy if weight_policy in generation_eval_policies else fallback,
+        }
+        return attn_trainings, attn_evals
 
     def get_metrics(self, reset=False):
         metric = {"ACC_EM": round(self.acc.get_metric(reset), 6),
@@ -138,6 +175,9 @@ class SquallBaseParser(nn.Module):
                 # extension for future uses
                 **kwargs
                 ):
+        # set hard weight before use
+        self._rm_and_set_hard_weight('word_col_attn', align_wc_word, align_wc_col)
+        self._rm_and_set_hard_weight('col_word_attn', align_wc_col, align_wc_word)
         word_states, word_mask, col_states, col_mask = self.encode(src_ids, src_types, src_plm_type_ids)
         hx = self.init_decoder(word_states, word_mask)
 
@@ -159,11 +199,15 @@ class SquallBaseParser(nn.Module):
             if self.training:
                 mem(step_out=out)   # save the RNN output only and compute the predictions and losses altogether later
             else:
+                self._rm_and_set_hard_weight('sql_word_attn', align_ws_sql, align_ws_word, step=(step, num_decoding_steps))
+                self._rm_and_set_hard_weight('sql_col_attn', align_sc_sql, align_sc_col, step=(step, num_decoding_steps))
                 word_ctx, col_ctx = self.get_enc_attn(out, word_states, word_mask, col_states, col_mask)
                 hvec = torch.cat([out, word_ctx, col_ctx], dim=-1)   # (b, hidden * 3)
                 self.step_predictions(hvec, word_states, word_mask, col_states, col_mask, mem)
 
         if self.training:
+            self._rm_and_set_hard_weight('sql_word_attn', align_ws_sql, align_ws_word)
+            self._rm_and_set_hard_weight('sql_col_attn', align_sc_sql, align_sc_col)
             all_step_outs = mem.get_stacked_tensor('step_out')
             word_ctx, col_ctx = self.get_enc_attn(all_step_outs, word_states, word_mask, col_states, col_mask)
             hvec = torch.cat([all_step_outs, word_ctx, col_ctx], dim=-1)    # (b, len, hidden * 5)
@@ -176,9 +220,9 @@ class SquallBaseParser(nn.Module):
         losses, matches, match_stat = self.get_prediction_losses(logprob_dict, *gold_predictions)
         losses.extend(self.get_alignment_loss(mem, align_ws_word, align_ws_sql, align_wc_word, align_wc_col,
                                               word_mask, col_mask, tgt_type[:, 1:] != self.ttype_map['pad']))
-        if self.aux_word_col is not None:
-            aux_loss = self.get_aux_loss(word_states, col_states, col_mask, align_wc_word, align_wc_col)
-            losses.append(0.2 * aux_loss)
+        # if self.aux_word_col is not None:
+        #     aux_loss = self.get_aux_loss(word_states, col_states, col_mask, align_wc_word, align_wc_col)
+        #     losses.append(0.2 * aux_loss)
         final_loss = sum(losses)
 
         self.compute_metrics(word_mask, col_mask, matches, match_stat, tgt_type[:, 1:], final_loss)
@@ -354,57 +398,39 @@ class SquallBaseParser(nn.Module):
         else:
             s2w_attn = mem.get_stacked_tensor(self.step_attn_keys[0])
 
-        # encoder attention
-        w2c_attn = self.word_col_attn.get_latest_attn_weights()  # (b, num_words, num_cols)
-        c2w_attn = self.col_word_attn.get_latest_attn_weights()  # (b, num_cols, num_words)
+        policy_dict = self.attn_training_policies if self.training else self.attn_eval_policies
 
-        s2w_loss = self._get_attn_sup_loss(s2w_attn, ws_sql, ws_word, sql_mask, word_mask)
-        w2c_loss = self._get_attn_sup_loss(w2c_attn, wc_word, wc_col, word_mask, col_mask)
-        c2w_loss = self._get_attn_sup_loss(c2w_attn, wc_col, wc_word, col_mask, word_mask)
+        def _get_loss(name, attn, vec, mat, vec_mask, mat_mask):
+            policy = policy_dict[name]
+            if policy == 'oracle_sup':
+                loss = self.get_oracle_sup_loss(attn, vec, mat, vec_mask, mat_mask)
+            elif policy == 'hungarian_sup':
+                loss = self.get_hungarian_sup_loss(attn, vec_mask, mat_mask)
+            else:
+                loss = 0
+            return loss
 
-        losses = [s2w_loss, w2c_loss, c2w_loss]
+        losses = [
+            _get_loss('word_col_attn', self.word_col_attn.get_latest_attn_weights(),    # (b, #words, #cols)
+                      wc_word, wc_col, word_mask, col_mask),
+            _get_loss('col_word_attn', self.col_word_attn.get_latest_attn_weights(),    # (b, #cols, #words)
+                      wc_col, wc_word, col_mask, word_mask),
+            _get_loss('sql_word_attn', s2w_attn, ws_sql, ws_word, sql_mask, word_mask), # (b, #sql, #words)
+        ]
         return losses
 
-    def _get_attn_sup_loss(self, attn_weights, align_vec, align_mat, vec_mask, mat_mask):
-        """
-        Attention L2 loss under different supervision settings.
-
-        :param attn_weights: (b, #vec, #mat)
-        :param align_vec:   (b, #align), padded by -1
-        :param align_mat:   (b, #align), padded by -1
-        :param vec_mask:    (b, #vec)
-        :param mat_mask:    (b, #mat)
-        :return: (), a torch scalar for the L2 loss
-        """
-        nbatch, dev = attn_weights.size(0), attn_weights.device
-        batch = torch.arange(nbatch, device=dev).unsqueeze(-1)          # (b, 1)
-        pad_mask = vec_mask.unsqueeze(-1) * mat_mask.unsqueeze(-2)      # (b, #vec, #mat)
-        align_mask = align_vec >= 0
-
-        attn_target = torch.zeros_like(attn_weights)        # (b, #vec, #mat)
-        dup_num = (align_vec.unsqueeze(-1) == align_vec.unsqueeze(-2)).sum(-1)  # (b, #align)
-        # use align_mask to reset invalid alignments (-1 when padding, for example).
-        # since the target is defaulted to 0, setting invalid alignments to 0 is just fine.
-        attn_target[batch, align_vec, align_mat] = dup_num.reciprocal() * align_mask
-
-        # use attn_mask to reset loss at padding locations
-        raw_l2_loss = (attn_weights - attn_target) ** 2 / 2 * pad_mask
-        # following the baseline choice,
-        # attentions related to unaligned vec or unaligned mat must also be trained towards 0
-        return raw_l2_loss.sum(dim=(1, 2)).mean()
-
-    def get_aux_loss(self, word_states, col_states, col_mask, align_word, align_col):
-        # NLL loss for the the attention module
-        _ = self.aux_word_col.forward(word_states, col_states, col_mask)
-        col_attn = self.aux_word_col.get_latest_attn_weights()  # (b, word_len, col_len)
-
-        batch = torch.arange(align_word.size()[0], device=align_word.device).unsqueeze(-1)
-        col_probs = col_attn[batch, align_word, align_col]   # (batch, num_alignments)
-        align_mask = align_word >= 0
-        col_logprobs = col_probs.clamp(min=1e-20).log() * align_mask     # (batch, num_alignments)
-        aux_loss = - col_logprobs.sum(-1).mean()
-        return aux_loss
-
+    # def get_aux_loss(self, word_states, col_states, col_mask, align_word, align_col):
+    #     # NLL loss for the the attention module
+    #     _ = self.aux_word_col.forward(word_states, col_states, col_mask)
+    #     col_attn = self.aux_word_col.get_latest_attn_weights()  # (b, word_len, col_len)
+    #
+    #     batch = torch.arange(align_word.size()[0], device=align_word.device).unsqueeze(-1)
+    #     col_probs = col_attn[batch, align_word, align_col]   # (batch, num_alignments)
+    #     align_mask = align_word >= 0
+    #     col_logprobs = col_probs.clamp(min=1e-20).log() * align_mask     # (batch, num_alignments)
+    #     aux_loss = - col_logprobs.sum(-1).mean()
+    #     return aux_loss
+    #
     def compute_metrics(self, word_pivot, col_pivot, matches, match_stat, tgt_type, final_loss):
         for n in word_pivot.sum(-1):
             self.word_num(n)
@@ -558,6 +584,129 @@ class SquallBaseParser(nn.Module):
         span_end_logp = log(span_end_prob, span_end_mask)
         output[k_end] = span_end_logp
         return output
+
+    def attn_tau_linear_scheduler(self, epoch: int, epoch_limit: int):
+        """This method is assumed to be called when every training epoch starts,
+        set the scheduler temperature based on the epoch counters.
+        Do not attach the scheduler for testing.
+        For evaluation, the tau is useless, (min_tau is used in the Attention module)
+        If tau_schedule is not used (attn.tau_is_fixed is true), the init_tau is always used thus not
+        need changing.
+        """
+        for name in self.attn_training_policies.keys():
+            # must be applied before an epoch starts, assuming the epoch starts from 1
+            attn: AdaptiveGeneralAttention = getattr(self, name)
+            if attn.tau_is_fixed:   # if a policy is "tau_schedule", the attn is set with tau_is_fixed flag.
+                continue
+
+            new_tau = (attn.min_tau - attn.init_tau) / (epoch_limit - 1) * (epoch - 1) + attn.init_tau
+            logging.getLogger(self.__class__.__name__).info(f'Update tau: {attn.tau:.4f} -> {new_tau:.4f} for {name}')
+            attn.update_tau(new_tau)
+
+    def _rm_and_set_hard_weight(self, name, align_vec, align_mat, step=None):
+        policy_dict: Dict[str, str] = self.attn_training_policies if self.training else self.attn_eval_policies
+        module: AdaptiveGeneralAttention = getattr(self, name)
+        module.clear_runtime_weight_hooks()
+        policy: str = policy_dict[name]
+        if policy == 'oracle_as_weight':
+            self.inject_oracle_weights(module, align_vec, align_mat, step)
+        elif policy == 'hungarian_as_weight':
+            self.inject_hungarian_weights(module)
+
+    def inject_hungarian_weights(self, attn_module: AdaptiveGeneralAttention):
+        def hungarian_weight_hook(attn_prob):
+            """
+            :param attn_prob: (batch, head, M, N)
+            :return: (batch, head, M, N)
+            """
+            bsz, nhead, inp_len, att_len = attn_prob.size()
+            hungarian_weight = torch.zeros_like(attn_prob)
+            for b in range(bsz):
+                for h in range(nhead):
+                    attn_matrix = attn_prob[b, h].detach().cpu().numpy()
+                    rows, cols = linear_sum_assignment(attn_matrix, maximize=True)
+                    hungarian_weight[b, h][rows, cols] = 1
+            return hungarian_weight
+
+        attn_module.add_runtime_weight_hooks(hungarian_weight_hook)
+
+    def inject_oracle_weights(self, module: AdaptiveGeneralAttention, align_vec, align_mat, step: int = None):
+        def oracle_weight_hook(attn_prob):
+            """ Force the alignment use every same
+            :param attn_prob: (batch, head, M, N)
+            :return: (batch, head, M, N)
+            """
+            bsz, nhead, inp_len, attn_len = attn_prob.size()
+            # (b, M, N)
+            if step is None:
+                oracle_weight = self._get_oracle_weights_from_alignments(inp_len, attn_len, align_vec, align_mat)
+            else:
+                # during generation, inp_len is always 1, thus a better length is required
+                current_step, max_step = step
+                # inp_len = align_vec.max().item() + 1
+                oracle_weight = self._get_oracle_weights_from_alignments(max_step, attn_len, align_vec, align_mat)
+                oracle_weight = oracle_weight[:, current_step, None, :]     # (b, 1, N)
+            head_weight = oracle_weight.unsqueeze(1).expand_as(attn_prob)
+            return head_weight
+
+        module.add_runtime_weight_hooks(oracle_weight_hook)
+
+    def clear_attn_hooks(self):
+        for m in self.modules():
+            if isinstance(m, AdaptiveGeneralAttention):
+                m.clear_runtime_weight_hooks()
+
+    def get_hungarian_sup_loss(self, attn_weights, vec_mask, mat_mask):
+        bsz, vec_len, mat_len = attn_weights.size()
+        hungarian_target = torch.zeros_like(attn_weights)
+        for b in range(bsz):
+            attn_matrix = attn_weights[b].detach().cpu().numpy()
+            rows, cols = linear_sum_assignment(attn_matrix, maximize=True)
+            hungarian_target[b][rows, cols] = 1
+
+        pad_mask = vec_mask.unsqueeze(-1) * mat_mask.unsqueeze(-2)      # (b, #vec, #mat)
+        l2_loss = (attn_weights - hungarian_target) ** 2 / 2 * pad_mask
+        return l2_loss.sum(dim=(1,2)).mean()
+
+    def get_oracle_sup_loss(self, attn_weights, align_vec, align_mat, vec_mask, mat_mask):
+        """
+        Attention L2 loss under different supervision settings.
+
+        :param attn_weights: (b, #vec, #mat)
+        :param align_vec:   (b, #align), padded by -1
+        :param align_mat:   (b, #align), padded by -1
+        :param vec_mask:    (b, #vec)
+        :param mat_mask:    (b, #mat)
+        :return: (), a torch scalar for the L2 loss
+        """
+        _, vec_len, mat_len = attn_weights.size()
+        attn_target = self._get_oracle_weights_from_alignments(vec_len, mat_len, align_vec, align_mat)
+
+        pad_mask = vec_mask.unsqueeze(-1) * mat_mask.unsqueeze(-2)      # (b, #vec, #mat)
+        # use attn_mask to reset loss at padding locations
+        raw_l2_loss = (attn_weights - attn_target) ** 2 / 2 * pad_mask
+        # following the baseline choice,
+        # attentions related to unaligned vec or unaligned mat must also be trained towards 0
+        return raw_l2_loss.sum(dim=(1, 2)).mean()
+
+    @staticmethod
+    def _get_oracle_weights_from_alignments(vec_len: int, mat_len: int, align_vec, align_mat):
+        """
+        :param vec_len: int
+        :param mat_len: int
+        :param align_vec:   (b, #align), padded by -1
+        :param align_mat:   (b, #align), padded by -1
+        :return: (batch, #vec, #mat)
+        """
+        bsz, dev = align_vec.size(0), align_vec.device
+        oracle_weight = torch.zeros((bsz, vec_len, mat_len), device=align_vec.device, dtype=torch.float)
+        dup_num = (align_vec.unsqueeze(-1) == align_vec.unsqueeze(-2)).sum(-1)  # noqa, (b, #align)
+        align_mask = align_vec >= 0
+        batch = torch.arange(bsz, device=dev).view(bsz, 1)
+        # use align_mask to reset invalid alignments (-1 when padding, for example).
+        # since the target is defaulted to 0, setting invalid alignments to 0 is just fine.
+        oracle_weight[batch, align_vec, align_mat] = dup_num.reciprocal() * align_mask
+        return oracle_weight
 
 
 def logprob(logits, mask=None):

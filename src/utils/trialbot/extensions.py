@@ -54,7 +54,7 @@ def end_with_nan_loss(bot: TrialBot):
             return math.isnan(x)
 
     if _isnan(loss):
-        bot.logger.error("NaN loss encountered, training ended")
+        bot.logger.error(f"NaN loss encountered, training ended at epoch {bot.state.epoch} iter {bot.state.iteration}")
         bot.state.epoch = bot.hparams.TRAINING_LIMIT + 1
         bot.updater.stop_epoch()
 

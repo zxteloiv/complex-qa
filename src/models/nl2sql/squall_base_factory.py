@@ -3,8 +3,8 @@ from torch import nn
 from models.base_s2s.model_factory import EncoderStackMixin
 from models.base_s2s.stacked_rnn_cell import StackedRNNCell
 from models.modules.variational_dropout import VariationalDropout as VDrop, VariationalDropout
-from models.modules.attention_wrapper import get_wrapped_attention as get_attn
-from models.modules.attention_wrapper import PreAttnMappingWrapper
+from models.modules.attention_wrapper import AdaptiveGeneralAttention, AdaptiveAllenLogits
+from allennlp.modules.matrix_attention import MatrixAttention
 
 
 class SquallBaseBuilder(EncoderStackMixin):
@@ -15,6 +15,50 @@ class SquallBaseBuilder(EncoderStackMixin):
         self.vocab: NSVocabulary = vocab
         self.start_tok = START_SYMBOL
         self.end_tok = END_SYMBOL
+
+    def get_mha(self, vector_dim, matrix_dim):
+        p = self.p
+        num_heads = self.p.num_heads
+        attn = AdaptiveGeneralAttention(
+            AdaptiveAllenLogits(MatrixAttention.by_name('dot_product')()),
+            init_tau=(vector_dim // num_heads) ** 0.5,
+            min_tau=p.min_tau,
+            num_heads=num_heads,
+            pre_q_mapping=nn.Linear(vector_dim, matrix_dim),
+            pre_k_mapping=nn.Linear(matrix_dim, matrix_dim),
+            pre_v_mapping=nn.Linear(matrix_dim, matrix_dim),
+            post_ctx_mapping=nn.Linear(matrix_dim, matrix_dim),
+            training_ctx=p.attn_training_ctx,
+            eval_ctx=p.attn_eval_ctx,
+            tau_is_fixed=p.attn_weight_policy != 'tau_schedule',
+        )
+        return attn
+
+    def get_bilinear(self, vector_dim, matrix_dim, use_mapping: bool = True):
+        p = self.p
+        if use_mapping:
+            hid = min(vector_dim, matrix_dim)
+            attn = AdaptiveGeneralAttention(
+                AdaptiveAllenLogits(MatrixAttention.by_name('bilinear')(hid, hid)),
+                pre_q_mapping=nn.Sequential(nn.Linear(vector_dim, hid), nn.Mish()),
+                pre_k_mapping=nn.Sequential(nn.Linear(matrix_dim, hid), nn.Mish()),
+                pre_v_mapping='shared',
+                init_tau=p.init_tau,
+                min_tau=p.min_tau,
+                training_ctx=p.attn_training_ctx,
+                eval_ctx=p.attn_eval_ctx,
+                tau_is_fixed=p.attn_weight_policy != 'tau_schedule',
+            )
+        else:
+            attn = AdaptiveGeneralAttention(
+                AdaptiveAllenLogits(MatrixAttention.by_name('bilinear')(vector_dim, matrix_dim)),
+                init_tau=p.init_tau,
+                min_tau=p.min_tau,
+                training_ctx=p.attn_training_ctx,
+                eval_ctx=p.attn_eval_ctx,
+                tau_is_fixed=p.attn_weight_policy != 'tau_schedule',
+            )
+        return attn
 
     def get_model(self):
         from .squall_base import SquallBaseParser
@@ -41,32 +85,9 @@ class SquallBaseBuilder(EncoderStackMixin):
             ),
             word_enc=word_enc,
             col_enc=col_enc,
-            word_col_attn=get_attn(p.word_col_attn, hid_sz, hid_sz,
-                                   num_heads=p.num_heads,
-                                   use_linear=p.bilinear_use_linear,
-                                   use_bias=p.bilinear_use_bias,
-                                   use_argmax=p.eval_attn_argmax,
-                                   ),
-            col_word_attn=get_attn(p.col_word_attn, hid_sz, hid_sz,
-                                   num_heads=p.num_heads,
-                                   use_linear=p.bilinear_use_linear,
-                                   use_bias=p.bilinear_use_bias,
-                                   use_argmax=p.eval_attn_argmax,
-                                   ),
-            aux_col=PreAttnMappingWrapper(
-                get_attn(p.word_col_attn, hid_sz, hid_sz,
-                         num_heads=p.num_heads,
-                         use_linear=p.bilinear_use_linear,
-                         use_bias=p.bilinear_use_bias),
-                input_map=nn.Sequential(
-                    nn.Linear(hid_sz, hid_sz),
-                    nn.Mish(),
-                ),
-                attend_map=nn.Sequential(
-                    nn.Linear(hid_sz, hid_sz),
-                    nn.Mish()
-                ),
-            ),
+            word_col_attn=self.get_bilinear(hid_sz, hid_sz, use_mapping=False),
+            col_word_attn=self.get_bilinear(hid_sz, hid_sz, use_mapping=False),
+            aux_col=self.get_bilinear(hid_sz, hid_sz),
             kwd_embedding=nn.Sequential(
                 nn.Embedding(vocab.get_vocab_size(p.ns_keyword), p.emb_sz),
                 VDrop(dropout, on_the_fly=False),
@@ -92,20 +113,8 @@ class SquallBaseBuilder(EncoderStackMixin):
                 self.get_stacked_rnns(p.decoder, hid_sz, hid_sz, p.num_dec_layers, dropout),
                 dropout=dropout,    # vertical dropout between cell layers
             ),
-            sql_word_attn=get_attn(p.sql_word_attn, hid_sz, hid_sz,
-                                   num_heads=p.num_heads,
-                                   use_linear=p.bilinear_use_linear,
-                                   use_bias=p.bilinear_use_bias,
-                                   mha_mean_weight=True,
-                                   use_argmax=p.eval_attn_argmax,
-                                   ),
-            sql_col_attn=get_attn(p.sql_col_attn, hid_sz, hid_sz,
-                                  num_heads=p.num_heads,
-                                  use_linear=p.bilinear_use_linear,
-                                  use_bias=p.bilinear_use_bias,
-                                  mha_mean_weight=True,
-                                  use_argmax=p.eval_attn_argmax,
-                                  ),
+            sql_word_attn=self.get_mha(hid_sz, hid_sz),
+            sql_col_attn=self.get_bilinear(hid_sz, hid_sz, use_mapping=False),
             sql_type=nn.Sequential(
                 nn.Linear(hid_sz * 3, hid_sz),
                 nn.Mish(),
@@ -124,51 +133,9 @@ class SquallBaseBuilder(EncoderStackMixin):
                 VDrop(dropout, on_the_fly=True),
                 nn.Linear(hid_sz, vocab.get_vocab_size(p.ns_coltype))
             ),
-            sql_col_copy=PreAttnMappingWrapper(
-                get_attn(p.col_copy, hid_sz, hid_sz,
-                         num_heads=p.num_heads,
-                         use_linear=p.bilinear_use_linear,
-                         use_bias=p.bilinear_use_bias,
-                         mha_mean_weight=True),
-                input_map=nn.Sequential(
-                    nn.Linear(hid_sz * 3, hid_sz),
-                    nn.Mish(),
-                ),
-                attend_map=nn.Sequential(
-                    nn.Linear(hid_sz, hid_sz),
-                    nn.Mish()
-                ),
-            ),
-            sql_span_begin=PreAttnMappingWrapper(
-                get_attn(p.span_begin, hid_sz, hid_sz,
-                         num_heads=p.num_heads,
-                         use_linear=p.bilinear_use_linear,
-                         use_bias=p.bilinear_use_bias,
-                         mha_mean_weight=True),
-                input_map=nn.Sequential(
-                    nn.Linear(hid_sz * 3, hid_sz),
-                    nn.Mish()
-                ),
-                attend_map=nn.Sequential(
-                    nn.Linear(hid_sz, hid_sz),
-                    nn.Mish()
-                )
-            ),
-            sql_span_end=PreAttnMappingWrapper(
-                get_attn(p.span_end, hid_sz, hid_sz,
-                         num_heads=p.num_heads,
-                         use_linear=p.bilinear_use_linear,
-                         use_bias=p.bilinear_use_bias,
-                         mha_mean_weight=True),
-                input_map=nn.Sequential(
-                    nn.Linear(hid_sz * 3, hid_sz),
-                    nn.Mish()
-                ),
-                attend_map=nn.Sequential(
-                    nn.Linear(hid_sz, hid_sz),
-                    nn.Mish()
-                )
-            ),
+            sql_col_copy=self.get_bilinear(hid_sz * 3, hid_sz),
+            sql_span_begin=self.get_bilinear(hid_sz * 3, hid_sz),
+            sql_span_end=self.get_bilinear(hid_sz * 3, hid_sz),
             start_token=self.start_tok,
             end_token=self.end_tok,
             ns_keyword=p.ns_keyword,
@@ -177,6 +144,7 @@ class SquallBaseBuilder(EncoderStackMixin):
             p_tuning=self.get_p_tuning_module(plm_model.config),
             tgt_type_keys=tgt_type_keys,
             decoder_init_strategy=p.decoder_init,
+            attn_weight_policy=p.attn_weight_policy,
         )
         return parser
 
@@ -228,22 +196,11 @@ class SquallBaseBuilder(EncoderStackMixin):
         p.decoder = 'lstm'
         p.num_dec_layers = 2
 
-        p.word_col_attn = 'generalized_bilinear'    # must be matrix attention
-        p.col_word_attn = 'generalized_bilinear'
-        p.sql_word_attn = 'adaptive_mha'
-        p.sql_col_attn = 'generalized_bilinear'
         p.plm_encoder = 'aug_bilstm'
         p.plm_enc_out = p.hidden_sz // 2  # = hid_sz or hid_sz//2 when encoder is bidirectional
         p.plm_enc_layers = 1
 
         p.num_heads = 1     # heads for attention only
-
-        p.col_copy = 'generalized_bilinear'
-        p.span_begin = 'generalized_bilinear'
-        p.span_end = 'generalized_bilinear'
-        p.bilinear_use_linear = True
-        p.bilinear_use_bias = True
-
         p.decoder_init = 'zero_all'
 
         :param p: hyper param set

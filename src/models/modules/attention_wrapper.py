@@ -86,6 +86,7 @@ class AdaptiveGeneralAttention(AdaptiveAttention):
                  post_ctx_mapping: torch.nn.Module = None,
                  training_ctx: str = 'weighted_sum',
                  eval_ctx: str = 'weighted_sum',
+                 tau_is_fixed: bool = True,
                  save_head_reduced_attn: bool = True,
                  shared_scorer_for_heads: bool = True,
                  ):
@@ -102,8 +103,8 @@ class AdaptiveGeneralAttention(AdaptiveAttention):
                 use the same module of pre_k_mapping if set to "shared".
                 Otherwise or set to None, it is set to the identity function.
         :param post_ctx_mapping: map the output context after the attentions.
-        :param training_ctx: weighted_sum, argmax, Hungarian, sample, or normed-topK.
-        :param eval_ctx: weighted_sum, argmax, Hungarian, sample, or normed-topK.
+        :param training_ctx: weighted_sum, argmax, or topK_norm, where K is any positive integer.
+        :param eval_ctx: weighted_sum, argmax, or topK_norm, where K is any positive integer.
         :param shared_scorer_for_heads: True by default. otherwise the attn_scorer needs
                 to be copied into a different module (but with the same attention type) for each head.
                 Since the multihead is usually meant to use with dot-prod attention, we fix it as True
@@ -115,6 +116,7 @@ class AdaptiveGeneralAttention(AdaptiveAttention):
         self.tau = init_tau
         self.init_tau = init_tau
         self.n_head = num_heads
+        self.tau_is_fixed = tau_is_fixed
 
         def _identity(x): return x
 
@@ -167,8 +169,8 @@ class AdaptiveGeneralAttention(AdaptiveAttention):
     def clear_head_mask(self):
         self._head_graph_mask = None
 
-    def set_runtime_weight_hooks(self, hooks: Callable[[torch.Tensor], torch.Tensor]) -> None:
-        self._runtime_weight_hooks = hooks
+    def add_runtime_weight_hooks(self, hook: Callable[[torch.Tensor], torch.Tensor]) -> None:
+        self._runtime_weight_hooks.append(hook)
 
     def clear_runtime_weight_hooks(self):
         self._runtime_weight_hooks = []
@@ -194,7 +196,7 @@ class AdaptiveGeneralAttention(AdaptiveAttention):
         attn = self.attn_scorer(query, key)    # (b * head, M, N)
         attn_logit = attn.view(bsz, self.n_head, *attn.size()[-2:]) # (b, head, M, N)
         attn_prob = self._compute_weight(attn_logit, attend_mask)   # (b, head, M, N)
-        self._save_weight(attn_prob)
+        self._save_weight(attn_prob, inputs.ndim < 3)
         attn_prob = self._call_weight_hooks(attn_prob)
 
         # ctx: (b, M, d)
@@ -243,12 +245,20 @@ class AdaptiveGeneralAttention(AdaptiveAttention):
         if self._head_graph_mask is not None:
             mask *= self._head_graph_mask
 
-        attn_prob = masked_softmax(attn_logit / max(self.tau, self.min_tau), mask.bool())
+        if self.tau_is_fixed:
+            temperature = self.init_tau
+        else:
+            temperature = max(self.tau, self.min_tau) if self.training else self.min_tau
+        attn_prob = masked_softmax(attn_logit / temperature, mask.bool())
         return attn_prob
 
-    def _save_weight(self, attn_prob):
-        # remove the M=1 dimension if required
-        self.save_last_attn_weights(attn_prob.mean(dim=1) if self.save_head_reduced_attn else attn_prob)
+    def _save_weight(self, attn_prob, is_token_attn):
+        if is_token_attn:
+            # remove the M=1 dimension if required
+            attn_prob = attn_prob.mean(dim=-2)
+        if self.save_head_reduced_attn:
+            attn_prob = attn_prob.mean(dim=1)
+        self.save_last_attn_weights(attn_prob)
 
     def _call_weight_hooks(self, attn_prob: torch.Tensor) -> torch.Tensor:
         for hook in self._runtime_weight_hooks:
@@ -257,6 +267,11 @@ class AdaptiveGeneralAttention(AdaptiveAttention):
         return attn_prob
 
     def _ctx_delegation(self, head_weights, value):
+        """
+        :param head_weights: (batch, head, M, N)
+        :param value: (batch, head, N, d_v)
+        :return: (batch, M, d), d == d_v * head
+        """
         method = self.training_ctx if self.training else self.eval_ctx
         if method == 'weighted_sum':
             return _ctx_by_weighted_sum(head_weights, value)
@@ -268,26 +283,6 @@ class AdaptiveGeneralAttention(AdaptiveAttention):
             raise ValueError(f'the specified context delegation {method} '
                              f'for {"training" if self.training else "evaluation"} '
                              f'is unknown.')
-
-
-class PreAttnMappingWrapper(IAttn):
-    def get_latest_attn_weights(self) -> torch.Tensor:
-        return self.attn.get_latest_attn_weights()
-
-    def __init__(self, attn: IAttn, input_map: torch.nn.Module = None,
-                 attend_map: torch.nn.Module = None):
-        super().__init__()
-        self.attn = attn
-        self.input_map = input_map
-        self.attend_map = attend_map
-
-    def forward(self,
-                inputs: torch.Tensor,
-                attend_over: torch.Tensor,
-                attend_mask: Optional[torch.LongTensor] = None, **kwargs) -> torch.Tensor:
-        inputs = self.input_map(inputs) if self.input_map else inputs
-        attend_over = self.attend_map(attend_over) if self.attend_map else attend_over
-        return self.attn(inputs, attend_over, attend_mask, **kwargs)
 
 
 def get_wrapped_attention(attn_type: str,

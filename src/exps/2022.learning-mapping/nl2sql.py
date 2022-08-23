@@ -1,5 +1,5 @@
 import sys
-
+import logging
 from trialbot.training import TrialBot, Registry
 from trialbot.utils.root_finder import find_root
 sys.path.insert(0, find_root('.SRC'))
@@ -42,36 +42,22 @@ def base_param():
     p.num_dec_layers = 2
 
     p.num_heads = 1     # heads for attention only
-    p.word_col_attn = 'adaptive_bilinear'    # must be matrix attention
-    p.col_word_attn = 'adaptive_bilinear'
-    p.sql_word_attn = 'adaptive_mha'
-    p.sql_col_attn = 'adaptive_bilinear'
     p.plm_encoder = 'aug_bilstm'
     p.plm_enc_out = p.hidden_sz // 2  # = hid_sz or hid_sz//2 when encoder is bidirectional
     p.plm_enc_layers = 1
 
     p.decoder_init = 'zero_all'
 
-    p.col_copy = 'adaptive_bilinear'
-    p.span_begin = 'adaptive_bilinear'
-    p.span_end = 'adaptive_bilinear'
-    p.bilinear_use_linear = False
-    p.bilinear_use_bias = False
+    # weight_policy: softmax, tau_schedule, oracle_sup, hungarian_sup, oracle_as_weight, hungarian_as_weight
+    p.attn_weight_policy = "oracle_sup"
+    # ctx: weighted_sum, argmax, topK_norm
+    p.attn_training_ctx = "weighted_sum"  # top2_norm failed at training ep1 iter 105
+    p.attn_eval_ctx = "weighted_sum"
 
-    # default
-    p.supervise_unaligned_attn_mat = True
-    p.supervise_unaligned_attn_vec = True
+    p.min_tau = 0.1
+    p.init_tau = 1
 
     p.prompt_length = 0     # tried: 2, 8, 16, 32, 64, 128, 256
-
-    p.eval_attn_argmax = True
-    return p
-
-
-@Registry.hparamset(name='base-wo-argmax')
-def eval_wo_argmax():
-    p = base_param()
-    p.eval_attn_argmax = False
     return p
 
 
@@ -111,6 +97,13 @@ def setup_bot(args, get_model_func=None, trialname='base'):
         # bot.add_event_handler(Events.EPOCH_COMPLETED, evaluation_on_dev_every_epoch, 80, on_test_data=True)
         bot.add_event_handler(Events.EPOCH_COMPLETED, get_metrics, 100, prefix="Training Metrics: ")
         bot.updater = get_updater(bot)
+
+        @bot.attach_extension(Events.EPOCH_STARTED, 50)
+        def update_epoch_counting(bot: TrialBot):
+            from models.nl2sql.squall_base import SquallBaseParser
+            model: SquallBaseParser = bot.model
+            model.attn_tau_linear_scheduler(bot.state.epoch, bot.hparams.TRAINING_LIMIT)
+
     else:
         bot.add_event_handler(Events.EPOCH_COMPLETED, get_metrics, 100, prefix="Testing Metrics")
 
