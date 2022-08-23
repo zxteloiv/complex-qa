@@ -61,6 +61,50 @@ def base_param():
     return p
 
 
+@Registry.hparamset()
+def softmax():
+    p = base_param()
+    p.attn_weight_policy = 'softmax'
+    return p
+
+
+@Registry.hparamset()
+def tau_schedule():
+    p = base_param()
+    p.attn_weight_policy = 'tau_schedule'
+    p.min_tau = 0.5
+    p.init_tau = 1
+    return p
+
+
+@Registry.hparamset()
+def oracle_sup():
+    p = base_param()
+    p.attn_weight_policy = 'oracle_sup'
+    return p
+
+
+@Registry.hparamset()
+def hungarian_sup():
+    p = base_param()
+    p.attn_weight_policy = 'hungarian_sup'
+    return p
+
+
+@Registry.hparamset()
+def oracle_as_weight():
+    p = base_param()
+    p.attn_weight_policy = 'oracle_as_weight'
+    return p
+
+
+@Registry.hparamset()
+def hungarian_as_weight():
+    p = base_param()
+    p.attn_weight_policy = 'hungarian_as_weight'
+    return p
+
+
 def setup_bot(args, get_model_func=None, trialname='base'):
     from trialbot.training import Events
     from models.nl2sql.squall_base_factory import SquallBaseBuilder
