@@ -479,7 +479,8 @@ class SquallBaseParser(nn.Module):
 
                 elif ttype == self.ttype_map['literal_string']:
                     types.append(type_str_map[ttype])
-                    assert span_end >= span_begin
+                    if span_end < span_begin:
+                        span_end = span_begin   # although mask is applied sometimes the attn is all 0 at all places
                     substring = ' '.join(nl_toks[i][span_begin:span_end + 1])
                     literal = self._process_with_string_patterns(query, substring, tbl_cells[i], types)
                     query.append("{}".format(repr(literal)))
@@ -717,10 +718,11 @@ def logprob(logits, mask=None):
 
 def log(prob, mask=None):
     if mask is None:
-        return prob.clamp(min=1e-20).log()
+        return prob.clamp(min=1e-40).log().clamp(min=-1e30)
     else:
-        scale = (prob * mask).sum(dim=-1, keepdims=True).clamp(min=1e-20)
-        return ((prob * mask) / scale).clamp(min=1e-20).log()
+        prob_mask = prob * mask
+        scale = prob_mask.sum(dim=-1, keepdims=True).clamp(min=1e-20)
+        return (prob_mask / scale).clamp(min=1e-40).log().clamp(min=-1e30)
 
 
 def best_match(candidates, query, col=None):
