@@ -87,7 +87,6 @@ class SquallBaseBuilder(EncoderStackMixin):
             col_enc=col_enc,
             word_col_attn=self.get_bilinear(hid_sz, hid_sz, use_mapping=False),
             col_word_attn=self.get_bilinear(hid_sz, hid_sz, use_mapping=False),
-            aux_col=self.get_bilinear(hid_sz, hid_sz),
             kwd_embedding=nn.Sequential(
                 nn.Embedding(vocab.get_vocab_size(p.ns_keyword), p.emb_sz),
                 VDrop(dropout, on_the_fly=False),

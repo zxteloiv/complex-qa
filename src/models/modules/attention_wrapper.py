@@ -154,7 +154,7 @@ class AdaptiveGeneralAttention(AdaptiveAttention):
         )
 
     def update_tau(self, tau):
-        logging.getLogger(self.__class__.__name__).info(
+        logging.getLogger(self.__class__.__name__).debug(
             f'Update the temperature from {self.tau} to {tau}'
         )
         self.tau = tau

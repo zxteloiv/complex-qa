@@ -71,8 +71,6 @@ class SquallBaseParser(nn.Module):
         self.word_enc = word_enc
         self.col_enc = col_enc
 
-        self.aux_word_col = aux_col
-
         self.word_col_attn = word_col_attn  # encoder use
         self.col_word_attn = col_word_attn
         self.sql_word_attn = sql_word_attn  # decoder use
@@ -107,7 +105,7 @@ class SquallBaseParser(nn.Module):
 
         self.step_prediction_keys = ('ttype', 'keyword', 'col_type', 'col_copy', 'span_begin', 'span_end')
         # the decoder-to-column attention is also meaningful but not used for training and evaluation
-        self.step_attn_keys = ('word_attn',)
+        self.step_attn_keys = ('word_attn', 'col_attn')
 
         # the attention weights are generated dynamically during the forward pass, thus the weighting policies
         # must be controlled by the model.
@@ -128,7 +126,10 @@ class SquallBaseParser(nn.Module):
         self.match_stats = None
 
     def set_attn_weight_policy(self, weight_policy: str):
-        policies = ('softmax', 'tau_schedule', 'oracle_sup', 'hungarian_sup', 'oracle_as_weight', 'hungarian_as_weight')
+        policies = ('softmax', 'tau_schedule',
+                    'oracle_sup', 'hungarian_sup',
+                    'oracle_as_weight', 'hungarian_as_weight',
+                    'oracle_sup_weight', 'hungarian_sup_weight')
         assert weight_policy in policies
 
         attn_trainings = {
@@ -138,15 +139,17 @@ class SquallBaseParser(nn.Module):
             'sql_col_attn': weight_policy,
         }
 
-        generation_eval_policies = ('softmax', 'oracle_sup', 'hungarian_sup', 'oracle_as_weight')
-        encoding_eval_policies = ('softmax', 'oracle_sup', 'hungarian_sup', 'oracle_as_weight', 'hungarian_as_weight')
+        # during generation, the hungarian loss is obtainable
+        # but the hungarian as weight is a global optimum thus not available
+        gen_invalid_policies = ('hungarian_as_weight', 'hungarian_sup_weight')
         fallback = 'softmax'
 
         attn_evals = {
-            'word_col_attn': weight_policy if weight_policy in encoding_eval_policies else fallback,
-            'col_word_attn': weight_policy if weight_policy in encoding_eval_policies else fallback,
-            'sql_word_attn': weight_policy if weight_policy in generation_eval_policies else fallback,
-            'sql_col_attn': weight_policy if weight_policy in generation_eval_policies else fallback,
+            # attentions at the encoding side is not affected
+            'word_col_attn': weight_policy,
+            'col_word_attn': weight_policy,
+            'sql_word_attn': fallback if weight_policy in gen_invalid_policies else weight_policy,
+            'sql_col_attn': fallback if weight_policy in gen_invalid_policies else weight_policy,
         }
         return attn_trainings, attn_evals
 
@@ -182,8 +185,8 @@ class SquallBaseParser(nn.Module):
         hx = self.init_decoder(word_states, word_mask)
 
         mem = SeqCollector()
-        num_decoding_steps = tgt_type.size(1) - 1 if tgt_type is not None else 100    # baseline maximum
-        for step in range(num_decoding_steps):
+        num_steps = tgt_type.size(1) - 1 if tgt_type is not None else 100    # baseline maximum
+        for step in range(num_steps):
             if step == 0:
                 step_emb = self.get_first_step_embedding(word_mask.size(0), word_mask.device)
             elif self.training:
@@ -199,8 +202,8 @@ class SquallBaseParser(nn.Module):
             if self.training:
                 mem(step_out=out)   # save the RNN output only and compute the predictions and losses altogether later
             else:
-                self._rm_and_set_hard_weight('sql_word_attn', align_ws_sql, align_ws_word, step=(step, num_decoding_steps))
-                self._rm_and_set_hard_weight('sql_col_attn', align_sc_sql, align_sc_col, step=(step, num_decoding_steps))
+                self._rm_and_set_hard_weight('sql_word_attn', align_ws_sql, align_ws_word, step=(step, num_steps))
+                self._rm_and_set_hard_weight('sql_col_attn', align_sc_sql, align_sc_col, step=(step, num_steps))
                 word_ctx, col_ctx = self.get_enc_attn(out, word_states, word_mask, col_states, col_mask)
                 hvec = torch.cat([out, word_ctx, col_ctx], dim=-1)   # (b, hidden * 3)
                 self.step_predictions(hvec, word_states, word_mask, col_states, col_mask, mem)
@@ -218,11 +221,10 @@ class SquallBaseParser(nn.Module):
         gold_predictions = (tgt_type[:, 1:], tgt_keyword[:, 1:], tgt_col_type[:, 1:],
                             tgt_col_id[:, 1:], tgt_literal_begin[:, 1:], tgt_literal_end[:, 1:])
         losses, matches, match_stat = self.get_prediction_losses(logprob_dict, *gold_predictions)
-        losses.extend(self.get_alignment_loss(mem, align_ws_word, align_ws_sql, align_wc_word, align_wc_col,
-                                              word_mask, col_mask, tgt_type[:, 1:] != self.ttype_map['pad']))
-        # if self.aux_word_col is not None:
-        #     aux_loss = self.get_aux_loss(word_states, col_states, col_mask, align_wc_word, align_wc_col)
-        #     losses.append(0.2 * aux_loss)
+        losses.extend(self.get_alignment_loss(
+            mem, align_ws_word, align_ws_sql, align_wc_word, align_wc_col, align_sc_sql, align_sc_col,
+            word_mask, col_mask, tgt_type[:, 1:] != self.ttype_map['pad']
+        ))
         final_loss = sum(losses)
 
         self.compute_metrics(word_mask, col_mask, matches, match_stat, tgt_type[:, 1:], final_loss)
@@ -347,12 +349,13 @@ class SquallBaseParser(nn.Module):
         span_begin_prob = self.sql_span_begin.get_latest_attn_weights()  # (b, n)
         self.sql_span_end.forward(hvec, word_state, word_mask)
         span_end_prob = self.sql_span_end.get_latest_attn_weights()  # (b, n)
-        # for encoder attention training supervision
-        word_attn_prob = self.sql_word_attn.get_latest_attn_weights()    # (b, n)
 
         mem(**dict(zip(self.step_prediction_keys, (ttype_logit, keyword_logit, col_type_logit,
                                                    col_copy_prob, span_begin_prob, span_end_prob))))
-        mem(**{self.step_attn_keys[0]: word_attn_prob})
+
+        # for encoder attention training supervision
+        mem(**{self.step_attn_keys[0]: self.sql_word_attn.get_latest_attn_weights(),    # (b, n) or (b, m, n)
+               self.step_attn_keys[1]: self.sql_col_attn.get_latest_attn_weights()})
 
     # ------------- post-decoding steps -------------------
     # for loss and metric computations
@@ -390,21 +393,23 @@ class SquallBaseParser(nn.Module):
 
         return losses, matches, match_stat
 
-    def get_alignment_loss(self, mem: SeqCollector, ws_word, ws_sql, wc_word, wc_col,
+    def get_alignment_loss(self, mem: SeqCollector, ws_word, ws_sql, wc_word, wc_col, sc_sql, sc_col,
                            word_mask, col_mask, sql_mask):
         # decoder to word attention
         if self.training:
-            s2w_attn = mem[self.step_attn_keys[0]][-1]
+            s2w_attn = self.sql_word_attn.get_latest_attn_weights()
+            s2c_attn = self.sql_col_attn.get_latest_attn_weights()
         else:
             s2w_attn = mem.get_stacked_tensor(self.step_attn_keys[0])
+            s2c_attn = mem.get_stacked_tensor(self.step_attn_keys[1])
 
         policy_dict = self.attn_training_policies if self.training else self.attn_eval_policies
 
         def _get_loss(name, attn, vec, mat, vec_mask, mat_mask):
             policy = policy_dict[name]
-            if policy == 'oracle_sup':
+            if policy in ('oracle_sup', 'oracle_sup_weight'):
                 loss = self.get_oracle_sup_loss(attn, vec, mat, vec_mask, mat_mask)
-            elif policy == 'hungarian_sup':
+            elif policy == ('hungarian_sup', 'hungarian_sup_weight'):
                 loss = self.get_hungarian_sup_loss(attn, vec_mask, mat_mask)
             else:
                 loss = 0
@@ -416,21 +421,10 @@ class SquallBaseParser(nn.Module):
             _get_loss('col_word_attn', self.col_word_attn.get_latest_attn_weights(),    # (b, #cols, #words)
                       wc_col, wc_word, col_mask, word_mask),
             _get_loss('sql_word_attn', s2w_attn, ws_sql, ws_word, sql_mask, word_mask), # (b, #sql, #words)
+            _get_loss('sql_col_attn', s2c_attn, sc_sql, sc_col, sql_mask, col_mask),  # (b, #sql, #words)
         ]
         return losses
 
-    # def get_aux_loss(self, word_states, col_states, col_mask, align_word, align_col):
-    #     # NLL loss for the the attention module
-    #     _ = self.aux_word_col.forward(word_states, col_states, col_mask)
-    #     col_attn = self.aux_word_col.get_latest_attn_weights()  # (b, word_len, col_len)
-    #
-    #     batch = torch.arange(align_word.size()[0], device=align_word.device).unsqueeze(-1)
-    #     col_probs = col_attn[batch, align_word, align_col]   # (batch, num_alignments)
-    #     align_mask = align_word >= 0
-    #     col_logprobs = col_probs.clamp(min=1e-20).log() * align_mask     # (batch, num_alignments)
-    #     aux_loss = - col_logprobs.sum(-1).mean()
-    #     return aux_loss
-    #
     def compute_metrics(self, word_pivot, col_pivot, matches, match_stat, tgt_type, final_loss):
         for n in word_pivot.sum(-1):
             self.word_num(n)
@@ -609,9 +603,9 @@ class SquallBaseParser(nn.Module):
         module: AdaptiveGeneralAttention = getattr(self, name)
         module.clear_runtime_weight_hooks()
         policy: str = policy_dict[name]
-        if policy == 'oracle_as_weight':
+        if policy in ('oracle_as_weight', 'oracle_sup_weight'):
             self.inject_oracle_weights(module, align_vec, align_mat, step)
-        elif policy == 'hungarian_as_weight':
+        elif policy in ('hungarian_as_weight', 'hungarian_sup_weight'):
             self.inject_hungarian_weights(module)
 
     def inject_hungarian_weights(self, attn_module: AdaptiveGeneralAttention):

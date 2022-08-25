@@ -99,9 +99,23 @@ def oracle_as_weight():
 
 
 @Registry.hparamset()
+def oracle_sup_weight():
+    p = base_param()
+    p.attn_weight_policy = 'oracle_sup_weight'
+    return p
+
+
+@Registry.hparamset()
 def hungarian_as_weight():
     p = base_param()
     p.attn_weight_policy = 'hungarian_as_weight'
+    return p
+
+
+@Registry.hparamset()
+def hungarian_sup_weight():
+    p = base_param()
+    p.attn_weight_policy = 'hungarian_sup_weight'
     return p
 
 
