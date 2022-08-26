@@ -409,7 +409,7 @@ class SquallBaseParser(nn.Module):
             policy = policy_dict[name]
             if policy in ('oracle_sup', 'oracle_sup_weight'):
                 loss = self.get_oracle_sup_loss(attn, vec, mat, vec_mask, mat_mask)
-            elif policy == ('hungarian_sup', 'hungarian_sup_weight'):
+            elif policy in ('hungarian_sup', 'hungarian_sup_weight'):
                 loss = self.get_hungarian_sup_loss(attn, vec_mask, mat_mask)
             else:
                 loss = 0
