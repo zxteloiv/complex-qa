@@ -119,6 +119,20 @@ def hungarian_sup_weight():
     return p
 
 
+@Registry.hparamset()
+def hungarian_semi():
+    p = base_param()
+    p.attn_weight_policy = 'hungarian_semi'
+    return p
+
+
+@Registry.hparamset()
+def hungarian_reg():
+    p = base_param()
+    p.attn_weight_policy = 'hungarian_reg'
+    return p
+
+
 def setup_bot(args, get_model_func=None, trialname='base'):
     from trialbot.training import Events
     from models.nl2sql.squall_base_factory import SquallBaseBuilder

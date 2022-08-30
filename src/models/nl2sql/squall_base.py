@@ -1,4 +1,5 @@
 import logging
+import random
 from itertools import product, chain
 from typing import Dict, Any, Tuple, List, Union, Literal
 
@@ -129,7 +130,9 @@ class SquallBaseParser(nn.Module):
         policies = ('softmax', 'tau_schedule',
                     'oracle_sup', 'hungarian_sup',
                     'oracle_as_weight', 'hungarian_as_weight',
-                    'oracle_sup_weight', 'hungarian_sup_weight')
+                    'oracle_sup_weight', 'hungarian_sup_weight',
+                    'hungarian_reg', 'hungarian_semi',
+                    )
         assert weight_policy in policies
 
         attn_trainings = {
@@ -411,6 +414,14 @@ class SquallBaseParser(nn.Module):
                 loss = self.get_oracle_sup_loss(attn, vec, mat, vec_mask, mat_mask)
             elif policy in ('hungarian_sup', 'hungarian_sup_weight'):
                 loss = self.get_hungarian_sup_loss(attn, vec_mask, mat_mask)
+            elif policy == 'hungarian_reg':
+                loss = self.get_hungarian_reg_loss(attn, vec_mask, mat_mask)
+            elif policy == 'hungarian_semi':
+                if random.random() < 0.01 and self.training:
+                    logging.info('the few-shot oracle supervision encountered.')
+                    loss = self.get_oracle_sup_loss(attn, vec, mat, vec_mask, mat_mask)
+                else:
+                    loss = self.get_hungarian_sup_loss(attn, vec_mask, mat_mask)
             else:
                 loss = 0
             return loss
@@ -662,6 +673,27 @@ class SquallBaseParser(nn.Module):
         pad_mask = vec_mask.unsqueeze(-1) * mat_mask.unsqueeze(-2)      # (b, #vec, #mat)
         l2_loss = (attn_weights - hungarian_target) ** 2 / 2 * pad_mask
         return l2_loss.sum(dim=(1,2)).mean()
+
+    def get_hungarian_reg_loss(self, attn_weights, vec_mask, mat_mask):
+        bsz, vec_len, mat_len = attn_weights.size()
+        dev = attn_weights.device
+        hungarian_target = torch.zeros_like(attn_weights)
+        for b in range(bsz):
+            attn_matrix = attn_weights[b].detach().cpu().numpy()
+            rows, cols = linear_sum_assignment(attn_matrix, maximize=True)
+            hungarian_target[b][rows, cols] = 1
+
+        max_pos = attn_weights.argmax(dim=-1)   # (bsz, #vec)
+        max_onehot = torch.zeros_like(attn_weights)  # (bsz, #vec, #mat)
+        def tr(*args, **kwargs): return torch.arange(*args, **kwargs, device=dev)
+        max_onehot[tr(bsz).view(-1, 1), tr(vec_len).view(1, -1), max_pos] = 1
+        pad_mask = vec_mask.unsqueeze(-1) * mat_mask.unsqueeze(-2)      # (b, #vec, #mat)
+
+        # if a hungarian target is already the same as softmax onehot, no need to train it anymore
+        reg_mask = (hungarian_target != max_onehot)
+
+        raw_l2_loss = (attn_weights - hungarian_target) ** 2 / 2 * pad_mask * reg_mask
+        return raw_l2_loss.sum(dim=(1, 2)).mean()
 
     def get_oracle_sup_loss(self, attn_weights, align_vec, align_mat, vec_mask, mat_mask):
         """
