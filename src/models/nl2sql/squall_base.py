@@ -132,6 +132,7 @@ class SquallBaseParser(nn.Module):
                     'oracle_as_weight', 'hungarian_as_weight',
                     'oracle_sup_weight', 'hungarian_sup_weight',
                     'hungarian_reg', 'hungarian_semi',
+                    'hungarian_reg_weight', 'hungarian_reg_semi',
                     )
         assert weight_policy in policies
 
@@ -144,7 +145,7 @@ class SquallBaseParser(nn.Module):
 
         # during generation, the hungarian loss is obtainable
         # but the hungarian as weight is a global optimum thus not available
-        gen_invalid_policies = ('hungarian_as_weight', 'hungarian_sup_weight')
+        gen_invalid_policies = ('hungarian_as_weight', 'hungarian_sup_weight', 'hungarian_reg_weight')
         fallback = 'softmax'
 
         attn_evals = {
@@ -414,7 +415,7 @@ class SquallBaseParser(nn.Module):
                 loss = self.get_oracle_sup_loss(attn, vec, mat, vec_mask, mat_mask)
             elif policy in ('hungarian_sup', 'hungarian_sup_weight'):
                 loss = self.get_hungarian_sup_loss(attn, vec_mask, mat_mask)
-            elif policy == 'hungarian_reg':
+            elif policy in ('hungarian_reg', 'hungarian_reg_weight'):
                 loss = self.get_hungarian_reg_loss(attn, vec_mask, mat_mask)
             elif policy == 'hungarian_reg_semi':
                 if random.random() < 0.1 and self.training:
@@ -622,7 +623,7 @@ class SquallBaseParser(nn.Module):
         policy: str = policy_dict[name]
         if policy in ('oracle_as_weight', 'oracle_sup_weight'):
             self.inject_oracle_weights(module, align_vec, align_mat, step)
-        elif policy in ('hungarian_as_weight', 'hungarian_sup_weight'):
+        elif policy in ('hungarian_as_weight', 'hungarian_sup_weight', 'hungarian_reg_weight'):
             self.inject_hungarian_weights(module)
 
     def inject_hungarian_weights(self, attn_module: AdaptiveGeneralAttention):
