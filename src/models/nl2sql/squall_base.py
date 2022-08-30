@@ -416,6 +416,12 @@ class SquallBaseParser(nn.Module):
                 loss = self.get_hungarian_sup_loss(attn, vec_mask, mat_mask)
             elif policy == 'hungarian_reg':
                 loss = self.get_hungarian_reg_loss(attn, vec_mask, mat_mask)
+            elif policy == 'hungarian_reg_semi':
+                if random.random() < 0.1 and self.training:
+                    logging.info('the few-shot oracle supervision encountered.')
+                    loss = self.get_oracle_sup_loss(attn, vec, mat, vec_mask, mat_mask)
+                else:
+                    loss = self.get_hungarian_reg_loss(attn, vec_mask, mat_mask)
             elif policy == 'hungarian_semi':
                 if random.random() < 0.01 and self.training:
                     logging.info('the few-shot oracle supervision encountered.')
