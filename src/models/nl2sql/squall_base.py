@@ -744,18 +744,16 @@ class SquallBaseParser(nn.Module):
 
 
 def logprob(logits, mask=None):
-    if mask is None:
-        return torch.log_softmax(logits, dim=-1)
     return masked_log_softmax(logits, mask, dim=-1)
 
 
 def log(prob, mask=None):
     if mask is None:
-        return prob.clamp(min=1e-40).log().clamp(min=-1e30)
+        return prob.clamp(min=1e-40).log().clamp(min=-1e12)
     else:
         prob_mask = prob * mask
-        scale = prob_mask.sum(dim=-1, keepdims=True).clamp(min=1e-20)
-        return (prob_mask / scale).clamp(min=1e-40).log().clamp(min=-1e30)
+        scale = prob_mask.sum(dim=-1, keepdims=True).clamp(min=1e-8)
+        return (prob_mask / scale).clamp(min=1e-40).log().clamp(min=-1e12)
 
 
 def best_match(candidates, query, col=None):
