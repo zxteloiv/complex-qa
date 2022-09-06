@@ -3,7 +3,6 @@ import torch
 import torch.nn
 import torch.nn.functional
 import re
-import math
 
 
 def add_position_and_timestep_sinusoid(inputs: torch.Tensor,
@@ -378,3 +377,17 @@ def expand_tensor_size_at_dim(t: torch.Tensor, size: int, dim: int =-2) -> torch
         return t.expand(*old_size[:dim + 1], size, *old_size[dim + 1:])
     else:
         return t.expand(*old_size[:dim], size, *old_size[dim:])
+
+
+def masked_sparsemax(t: torch.Tensor, mask: torch.LongTensor = None, dim: int = -1) -> torch.Tensor:
+    from sparsemax import Sparsemax
+    from allennlp.nn.util import min_value_of_dtype
+    if mask is None:
+        result = Sparsemax(dim=dim)(t)
+    else:
+        while mask.dim() < t.dim():
+            mask = mask.unsqueeze(1)
+        masked_vector = t.masked_fill(~mask.bool(), min_value_of_dtype(t.dtype))
+        result = Sparsemax(dim=dim)(masked_vector)
+    return result
+

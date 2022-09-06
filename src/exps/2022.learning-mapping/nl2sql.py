@@ -56,94 +56,44 @@ def base_param():
 
     p.min_tau = 0.1
     p.init_tau = 1
+    p.is_sparse = True
 
     p.prompt_length = 0     # tried: 2, 8, 16, 32, 64, 128, 256
     return p
 
 
 @Registry.hparamset()
-def softmax():
+def sparsemax():
     p = base_param()
     p.attn_weight_policy = 'softmax'
     return p
 
 
 @Registry.hparamset()
-def tau_schedule():
-    p = base_param()
-    p.attn_weight_policy = 'tau_schedule'
-    p.min_tau = 0.5
-    p.init_tau = 1
-    return p
-
-
-@Registry.hparamset()
-def oracle_sup():
+def oracle_sup_sparse():
     p = base_param()
     p.attn_weight_policy = 'oracle_sup'
     return p
 
 
 @Registry.hparamset()
-def hungarian_sup():
+def hungarian_sup_sparse():
     p = base_param()
     p.attn_weight_policy = 'hungarian_sup'
     return p
 
 
 @Registry.hparamset()
-def oracle_as_weight():
-    p = base_param()
-    p.attn_weight_policy = 'oracle_as_weight'
-    return p
-
-
-@Registry.hparamset()
-def oracle_sup_weight():
+def oracle_sup_weight_sparse():
     p = base_param()
     p.attn_weight_policy = 'oracle_sup_weight'
     return p
 
 
 @Registry.hparamset()
-def hungarian_as_weight():
-    p = base_param()
-    p.attn_weight_policy = 'hungarian_as_weight'
-    return p
-
-
-@Registry.hparamset()
-def hungarian_sup_weight():
-    p = base_param()
-    p.attn_weight_policy = 'hungarian_sup_weight'
-    return p
-
-
-@Registry.hparamset()
-def hungarian_semi():
-    p = base_param()
-    p.attn_weight_policy = 'hungarian_semi'
-    return p
-
-
-@Registry.hparamset()
-def hungarian_reg():
+def hungarian_reg_sparse():
     p = base_param()
     p.attn_weight_policy = 'hungarian_reg'
-    return p
-
-
-@Registry.hparamset()
-def hungarian_reg_semi():
-    p = base_param()
-    p.attn_weight_policy = 'hungarian_reg_semi'
-    return p
-
-
-@Registry.hparamset()
-def hungarian_reg_weight():
-    p = base_param()
-    p.attn_weight_policy = 'hungarian_reg_weight'
     return p
 
 

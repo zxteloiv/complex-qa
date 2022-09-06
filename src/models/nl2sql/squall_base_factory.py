@@ -16,7 +16,7 @@ class SquallBaseBuilder(EncoderStackMixin):
         self.start_tok = START_SYMBOL
         self.end_tok = END_SYMBOL
 
-    def get_mha(self, vector_dim, matrix_dim):
+    def get_mha(self, vector_dim, matrix_dim, is_sparse: bool = False):
         p = self.p
         num_heads = self.p.num_heads
         attn = AdaptiveGeneralAttention(
@@ -31,10 +31,11 @@ class SquallBaseBuilder(EncoderStackMixin):
             training_ctx=p.attn_training_ctx,
             eval_ctx=p.attn_eval_ctx,
             tau_is_fixed=p.attn_weight_policy != 'tau_schedule',
+            is_sparse=is_sparse,
         )
         return attn
 
-    def get_bilinear(self, vector_dim, matrix_dim, use_mapping: bool = True):
+    def get_bilinear(self, vector_dim, matrix_dim, use_mapping: bool = True, is_sparse: bool = False):
         p = self.p
         if use_mapping:
             hid = min(vector_dim, matrix_dim)
@@ -48,6 +49,7 @@ class SquallBaseBuilder(EncoderStackMixin):
                 training_ctx=p.attn_training_ctx,
                 eval_ctx=p.attn_eval_ctx,
                 tau_is_fixed=p.attn_weight_policy != 'tau_schedule',
+                is_sparse=is_sparse,
             )
         else:
             attn = AdaptiveGeneralAttention(
@@ -57,6 +59,7 @@ class SquallBaseBuilder(EncoderStackMixin):
                 training_ctx=p.attn_training_ctx,
                 eval_ctx=p.attn_eval_ctx,
                 tau_is_fixed=p.attn_weight_policy != 'tau_schedule',
+                is_sparse=is_sparse,
             )
         return attn
 
@@ -85,8 +88,8 @@ class SquallBaseBuilder(EncoderStackMixin):
             ),
             word_enc=word_enc,
             col_enc=col_enc,
-            word_col_attn=self.get_bilinear(hid_sz, hid_sz, use_mapping=False),
-            col_word_attn=self.get_bilinear(hid_sz, hid_sz, use_mapping=False),
+            word_col_attn=self.get_bilinear(hid_sz, hid_sz, use_mapping=False, is_sparse=p.is_sparse),
+            col_word_attn=self.get_bilinear(hid_sz, hid_sz, use_mapping=False, is_sparse=p.is_sparse),
             kwd_embedding=nn.Sequential(
                 nn.Embedding(vocab.get_vocab_size(p.ns_keyword), p.emb_sz),
                 VDrop(dropout, on_the_fly=False),
@@ -112,8 +115,8 @@ class SquallBaseBuilder(EncoderStackMixin):
                 self.get_stacked_rnns(p.decoder, hid_sz, hid_sz, p.num_dec_layers, dropout),
                 dropout=dropout,    # vertical dropout between cell layers
             ),
-            sql_word_attn=self.get_mha(hid_sz, hid_sz),
-            sql_col_attn=self.get_bilinear(hid_sz, hid_sz, use_mapping=False),
+            sql_word_attn=self.get_mha(hid_sz, hid_sz, is_sparse=p.is_sparse),
+            sql_col_attn=self.get_bilinear(hid_sz, hid_sz, use_mapping=False, is_sparse=p.is_sparse),
             sql_type=nn.Sequential(
                 nn.Linear(hid_sz * 3, hid_sz),
                 nn.Mish(),

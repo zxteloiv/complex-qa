@@ -4,6 +4,8 @@ from typing import Optional, Tuple, Union, List, Callable
 
 from allennlp.modules.matrix_attention import MatrixAttention
 from allennlp.nn.util import masked_softmax
+
+from utils.nn import masked_sparsemax
 from ..interfaces.attention import Attention as IAttn, AdaptiveAttention, AdaptiveAttnLogits
 import torch
 
@@ -89,6 +91,7 @@ class AdaptiveGeneralAttention(AdaptiveAttention):
                  tau_is_fixed: bool = True,
                  save_head_reduced_attn: bool = True,
                  shared_scorer_for_heads: bool = True,
+                 is_sparse: bool = False,
                  ):
         """
         :param attn_scorer: Compute the unnormalized attention score.
@@ -141,6 +144,7 @@ class AdaptiveGeneralAttention(AdaptiveAttention):
         self._runtime_weight_hooks: List[Callable[[torch.Tensor], torch.Tensor]] = []
         self._head_graph_mask = None
 
+        self.is_sparse = is_sparse  # use sparsemax or softmax
         self.save_head_reduced_attn = save_head_reduced_attn
         self.shared_head_scorer = shared_scorer_for_heads
         if not self.shared_head_scorer:
@@ -249,7 +253,11 @@ class AdaptiveGeneralAttention(AdaptiveAttention):
             temperature = self.init_tau
         else:
             temperature = max(self.tau, self.min_tau) if self.training else self.min_tau
-        attn_prob = masked_softmax(attn_logit / temperature, mask.bool())
+
+        if self.is_sparse:
+            attn_prob = masked_sparsemax(attn_logit / temperature, mask.bool())
+        else:
+            attn_prob = masked_softmax(attn_logit / temperature, mask.bool())
         return attn_prob
 
     def _save_weight(self, attn_prob, is_token_attn):
