@@ -43,6 +43,7 @@ class BaseSeq2Seq(torch.nn.Module):
                  scheduled_sampling_ratio: float = 0.,
                  dec_dropout: float = .1,
                  training_average: Literal["token", "batch", "none"] = "batch",
+                 attn_supervision: str = "none",
                  ):
         super().__init__()
         self.vocab = vocab
@@ -71,10 +72,12 @@ class BaseSeq2Seq(torch.nn.Module):
 
         self._tgt_emb_dropout = VariationalDropout(dec_dropout, on_the_fly=False)
         self._proj_inp_dropout = VariationalDropout(dec_dropout, on_the_fly=False)
+        self.mem: Optional[SeqCollector] = None
 
         self._padding_index = padding_index
         self._strategy = decoder_init_strategy
         self._training_avg = training_average
+        self._attn_sup = attn_supervision
 
         self.bleu = BLEU(exclude_indices={padding_index, self._start_id, self._eos_id})
         self.ppl = Perplexity()
@@ -132,7 +135,7 @@ class BaseSeq2Seq(torch.nn.Module):
 
         output = {'source': source_tokens}
         if self.training:
-            output['loss'] = self._compute_loss(logits, target_tokens)
+            output['loss'] = self._compute_loss(logits, target_tokens, state_mask)
 
         if target_tokens is not None:
             total_err = self._compute_metrics(source_tokens, target_tokens, preds, logits)
@@ -154,6 +157,9 @@ class BaseSeq2Seq(torch.nn.Module):
         hx = self._init_decoder(layer_states, state_mask)
         enc_attn_fn = self._get_enc_attn_fn(layer_states[-1], state_mask)
         default_start = state_mask.new_full((state_mask.size()[0],), fill_value=self._start_id)
+        if self.mem is not None:
+            del self.mem
+        self.mem = SeqCollector()
         return hx, enc_attn_fn, default_start
 
     def _forward_dec(self, target_tokens, default_start, enc_attn_fn, hx):
@@ -183,13 +189,16 @@ class BaseSeq2Seq(torch.nn.Module):
 
         return predictions, logits
 
-    def _compute_loss(self, logits, target_tokens):
+    def _compute_loss(self, logits, target_tokens, state_mask):
         target, target_mask = prepare_input_mask(target_tokens)
         gold = target[:, 1:].contiguous()       # skip the first <START> token and corresponding mask
         mask = target_mask[:, 1:].contiguous()
         loss = seq_cross_ent(logits, gold, mask, self._training_avg)
         if isinstance(self._embed_encoder, LossModule):
             loss = loss + self._embed_encoder.get_loss()
+
+        if self._attn_sup.startswith('hungarian'):
+            loss = loss + self._hungarian_loss(target_tokens, state_mask, self._attn_sup == 'hungarian_reg')
         return loss
 
     def _compute_metrics(self, source_tokens, target_tokens, predictions, logits):
@@ -308,6 +317,8 @@ class BaseSeq2Seq(torch.nn.Module):
         prev_output = self._decoder.get_output_state(hx)
         prev_enc_context = enc_attn_fn(prev_output)
         prev_dec_context = dec_hist_attn_fn(prev_output)
+        if self._enc_attn is not None and self._attn_sup != 'none':
+            self.mem(inp_enc_attn=self._enc_attn.get_latest_attn_weights())  # (b, src_len)
 
         prev_context = filter_cat([prev_enc_context, prev_dec_context], dim=-1)
         cell_inp = self._dec_inp_attn_comp(prev_context, inputs_embedding)
@@ -316,6 +327,8 @@ class BaseSeq2Seq(torch.nn.Module):
     def _get_proj_input(self, cell_out, enc_attn_fn, dec_hist_attn_fn):
         step_enc_context = enc_attn_fn(cell_out)
         step_dec_context = dec_hist_attn_fn(cell_out)
+        if self._enc_attn is not None and self._attn_sup != 'none':
+            self.mem(proj_enc_attn=self._enc_attn.get_latest_attn_weights())  # (b, src_len)
         step_context = filter_cat([step_enc_context, step_dec_context], dim=-1)
         proj_inp = self._proj_inp_attn_comp(step_context, cell_out)
         return proj_inp
@@ -325,3 +338,36 @@ class BaseSeq2Seq(torch.nn.Module):
         step_logit = self._output_projection(proj_input)
         return step_logit
 
+    # ============= methods called by _compute_loss ===============
+    # special losses
+
+    def _hungarian_loss(self, target_tokens, state_mask, as_regularizer: bool = True):
+        _, tgt_mask = prepare_input_mask(target_tokens) # (b, tgt_len)
+        tgt_mask = tgt_mask[:, 1:]
+        from scipy.optimize import linear_sum_assignment
+
+        attn_weights = self.mem.get_stacked_tensor('proj_enc_attn') # (b, tgt_len, src_len)
+        bsz, tgt_len, src_len = attn_weights.size()
+        dev = attn_weights.device
+        def tr(*args, **kwargs): return torch.arange(*args, **kwargs, device=dev)
+
+        hungarian_target = torch.zeros_like(attn_weights)
+        for b in range(bsz):
+            attn_matrix = attn_weights[b].detach().cpu().numpy()
+            rows, cols = linear_sum_assignment(attn_matrix, maximize=True)
+            hungarian_target[b][rows, cols] = 1
+
+        pad_mask = tgt_mask.unsqueeze(-1) * state_mask.unsqueeze(-2)      # (b, #vec, #mat)
+        l2_loss = (attn_weights - hungarian_target) ** 2 / 2 * pad_mask
+
+        if as_regularizer:
+            max_pos = attn_weights.argmax(dim=-1)   # (bsz, #vec)
+            max_onehot = torch.zeros_like(attn_weights)  # (bsz, #vec, #mat)
+            max_onehot[tr(bsz).view(-1, 1), tr(tgt_len).view(1, -1), max_pos] = 1
+
+            # if a hungarian target is already the same as softmax onehot, no need to train it anymore
+            reg_mask = (hungarian_target != max_onehot)
+
+            l2_loss = l2_loss * reg_mask
+
+        return l2_loss.sum(dim=(1,2)).mean()
