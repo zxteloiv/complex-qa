@@ -56,44 +56,38 @@ def base_param():
 
     p.min_tau = 0.1
     p.init_tau = 1
-    p.is_sparse = True
+    p.is_sparse = False
 
     p.prompt_length = 0     # tried: 2, 8, 16, 32, 64, 128, 256
     return p
 
 
 @Registry.hparamset()
-def sparsemax():
-    p = base_param()
-    p.attn_weight_policy = 'softmax'
-    return p
-
-
-@Registry.hparamset()
-def oracle_sup_sparse():
-    p = base_param()
-    p.attn_weight_policy = 'oracle_sup'
-    return p
-
-
-@Registry.hparamset()
-def hungarian_sup_sparse():
-    p = base_param()
-    p.attn_weight_policy = 'hungarian_sup'
-    return p
-
-
-@Registry.hparamset()
-def oracle_sup_weight_sparse():
-    p = base_param()
-    p.attn_weight_policy = 'oracle_sup_weight'
-    return p
-
-
-@Registry.hparamset()
-def hungarian_reg_sparse():
+def no_word_col_attn():
     p = base_param()
     p.attn_weight_policy = 'hungarian_reg'
+    p.ablation_attn = 'word_col_attn'
+    return p
+
+
+@Registry.hparamset()
+def no_col_word_attn():
+    p = no_word_col_attn()
+    p.ablation_attn = 'col_word_attn'
+    return p
+
+
+@Registry.hparamset()
+def no_sql_word_attn():
+    p = no_word_col_attn()
+    p.ablation_attn = 'sql_word_attn'
+    return p
+
+
+@Registry.hparamset()
+def no_sql_col_attn():
+    p = no_word_col_attn()
+    p.ablation_attn = 'sql_col_attn'
     return p
 
 

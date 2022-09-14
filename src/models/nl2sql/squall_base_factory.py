@@ -147,6 +147,7 @@ class SquallBaseBuilder(EncoderStackMixin):
             tgt_type_keys=tgt_type_keys,
             decoder_init_strategy=p.decoder_init,
             attn_weight_policy=p.attn_weight_policy,
+            ablation_attn=getattr(p, 'ablation_attn', 'none'),
         )
         return parser
 

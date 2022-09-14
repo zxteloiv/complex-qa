@@ -64,6 +64,7 @@ class SquallBaseParser(nn.Module):
                  tgt_type_keys: tuple = ('pad', 'keyword', 'column', 'literal_string', 'literal_number'),
                  decoder_init_strategy: str = "zero_all",
                  attn_weight_policy: str = "softmax",
+                 ablation_attn: str = 'none',
                  ):
         super().__init__()
         self.pretrained_model = plm_model
@@ -100,6 +101,8 @@ class SquallBaseParser(nn.Module):
         self.vocab = vocab
         self.ns_keyword = ns_keyword
         self.ns_coltype = ns_coltype
+
+        self.ablation_attn = ablation_attn
 
         self.stype_map = dict(zip(src_type_keys, range(len(src_type_keys))))
         self.ttype_map = dict(zip(tgt_type_keys, range(len(tgt_type_keys))))
@@ -410,6 +413,9 @@ class SquallBaseParser(nn.Module):
         policy_dict = self.attn_training_policies if self.training else self.attn_eval_policies
 
         def _get_loss(name, attn, vec, mat, vec_mask, mat_mask):
+            if name == self.ablation_attn:
+                return 0
+
             policy = policy_dict[name]
             if policy in ('oracle_sup', 'oracle_sup_weight'):
                 loss = self.get_oracle_sup_loss(attn, vec, mat, vec_mask, mat_mask)
