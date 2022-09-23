@@ -30,11 +30,12 @@ def base_param():
     p.batch_sz = 32
     p.emb_sz = 256
     p.hidden_sz = 256
-    p.plm_model = 'bert-base-uncased'
+    import os.path as osp
+    p.plm_model = osp.abspath(osp.expanduser('~/.cache/complex_qa/bert-base-uncased'))
 
     p.ns_keyword = 'keyword'
     p.ns_coltype = 'col_type'
-    p.TRANSLATOR_KWARGS = {'ns_keyword': p.ns_keyword, 'ns_coltype': p.ns_coltype}
+    p.TRANSLATOR_KWARGS = {'plm_model': p.plm_model, 'ns_keyword': p.ns_keyword, 'ns_coltype': p.ns_coltype}
 
     p.dropout = 0.2
 

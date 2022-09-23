@@ -16,7 +16,10 @@ from utils.preprocessing import nested_list_numbers_to_tensors
 class SquallTranslator(FieldAwareTranslator):
     def __init__(self, plm_model: str = 'bert-base-uncased', ns_keyword: str = 'keyword', ns_coltype: str = 'col_type'):
         super().__init__(
-            field_list=[SquallAllInOneField(plm_model, ns_keyword, ns_coltype)]
+            field_list=[
+                NLTableField(plm_model),
+                SquallAllInOneField(ns_keyword, ns_coltype),
+            ]
         )
 
 
@@ -37,6 +40,97 @@ class TgtType(IntEnum):
     Column = 2
     LiteralString = 3
     LiteralNumber = 4
+
+
+class NLTableField(Field):
+    def batch_tensor_by_key(self, tensors_by_keys: Mapping[str, List[NullableTensor]]) -> Mapping[str, torch.Tensor]:
+        output = {}
+        for pad_id, keys in self.padded_keys.items():
+            for key in keys:
+                ids = tensors_by_keys[key]
+                output[key] = nested_list_numbers_to_tensors(ids, padding=pad_id)
+        return output
+
+    def generate_namespace_tokens(self, example) -> Generator[Tuple[str, str], None, None]:
+        yield from []   # nothing to vocab, because the pretrained-lm knows all
+
+    def to_tensor(self, example) -> Mapping[str, NullableTensor]:
+        src_params, word_locs, col_locs = self._get_source(example)
+        self._word_locs = word_locs
+        self._col_locs = col_locs
+        return src_params
+
+    def get_loc_mappings(self):
+        return self._word_locs, self._col_locs
+
+    def get_nl_words_list(self, example):
+        return example['nl']
+
+    def get_col_words_list(self, example):
+        return [col[0] for col in example['columns']]
+
+    def _get_source(self, example) -> Tuple[dict, list, list]:
+        tokens, types = [], []
+
+        def _add(tok, toktype):
+            tokens.append(tok)
+            types.append(toktype)
+
+        def _add_nl_tokens(nl):
+            physical_loc = []
+            _add('[CLS]', SrcType.Special)
+
+            for word in nl:
+                # the dataset doesn't have empty word tokens.
+                for piece in self._tokenizer.tokenize(word):
+                    _add(piece, SrcType.Word)
+                types[-1] = SrcType.WordPivot   # the last piece is selected to represent the world
+                physical_loc.append(len(tokens) - 1)
+
+            _add('[SEP]', SrcType.Special)
+            return physical_loc
+
+        def _add_col_tokens(cols):
+            physical_loc = []
+            for col in cols:
+                pieces = self._tokenizer.tokenize(col)
+                for piece in pieces:
+                    _add(piece, SrcType.Column)
+
+                if len(pieces) == 0:    # empty column label, in case that the alignment index is corrupted
+                    _add('.', SrcType.ColPivot)
+                else:
+                    types[-1] = SrcType.ColPivot
+
+                physical_loc.append(len(tokens) - 1)
+                _add('[SEP]', SrcType.Special)
+
+            return physical_loc
+
+        # indicating the pivot index (physical location) w.r.t each word index (virtual location)
+        word_loc_lookup = _add_nl_tokens(self.get_nl_words_list(example))
+        plm_type_ids = [0] * len(tokens)    # 0 for question tokens, 1 for schema tokens in BERT
+
+        # indicating the pivot index (physical location) w.r.t each column index (virtual location)
+        col_loc_lookup = _add_col_tokens(self.get_col_words_list(example))
+        plm_type_ids.extend([1] * (len(tokens) - len(plm_type_ids)))
+
+        token_ids = self._tokenizer.convert_tokens_to_ids(tokens)
+
+        params = {
+            "src_ids": token_ids,
+            "src_types": types,
+            "src_plm_type_ids": plm_type_ids,
+        }
+        return params, word_loc_lookup, col_loc_lookup
+
+    def __init__(self, plm_name: str = 'bert-base-uncased',):
+        super().__init__()
+        from transformers import AutoTokenizer
+        self._tokenizer = AutoTokenizer.from_pretrained(plm_name)
+        self.padded_keys: Dict[int, List[str]] = {
+            0: ['src_ids', 'src_types', 'src_plm_type_ids'],
+        }
 
 
 class SquallAllInOneField(Field):
@@ -70,17 +164,13 @@ class SquallAllInOneField(Field):
         yield self.ns_coltype, 'none'
 
     def to_tensor(self, example):
-
-        src_params, word_locs, col_locs = self._get_source(example)
-
-        alignments = self._get_attn_sup(example, word_locs, col_locs)
-
-        tgt_params = self._get_target(example, word_locs, col_locs)
-
+        alignments = self._get_attn_sup(example)
+        tgt_params = self._get_target(example)
+        col_type_mask = self._get_col_type_mask(example)
         table_cells = self._load_text_cells(example)
 
         id_lists = dict()
-        id_lists.update(src_params)
+        id_lists.update(col_type_mask)
         id_lists.update(alignments)
         id_lists.update(tgt_params)
         id_lists['tbl_cells'] = table_cells
@@ -88,58 +178,7 @@ class SquallAllInOneField(Field):
         id_lists['sql_toks'] = [x[1] for x in example.get('sql')]
         return id_lists
 
-    @staticmethod
-    def _lookup(ids, loc_mapping):
-        return [loc_mapping[x] for x in ids]
-
-    def _get_source(self, example) -> Tuple[dict, list, list]:
-        tokens, types = [], []
-
-        def _add(tok, toktype):
-            tokens.append(tok)
-            types.append(toktype)
-
-        def _add_nl_tokens(nl):
-            physical_loc = []
-            _add('[CLS]', SrcType.Special)
-
-            for word in nl:
-                # the dataset doesn't have empty word tokens.
-                for piece in self._tokenizer.tokenize(word):
-                    _add(piece, SrcType.Word)
-                types[-1] = SrcType.WordPivot   # the last piece is selected to represent the world
-                physical_loc.append(len(tokens) - 1)
-
-            _add('[SEP]', SrcType.Special)
-            return physical_loc
-
-        def _add_col_tokens(cols):
-            physical_loc = []
-            for col in cols:
-                pieces = self._tokenizer.tokenize(col[0])
-                for piece in pieces:
-                    _add(piece, SrcType.Column)
-
-                if len(pieces) == 0:    # empty column label, in case that the alignment index is corrupted
-                    _add('.', SrcType.ColPivot)
-                else:
-                    types[-1] = SrcType.ColPivot
-
-                physical_loc.append(len(tokens) - 1)
-                _add('[SEP]', SrcType.Special)
-
-            return physical_loc
-
-        # indicating the pivot index (physical location) w.r.t each word index (virtual location)
-        word_loc_lookup = _add_nl_tokens(example['nl'])
-        plm_type_ids = [0] * len(tokens)    # 0 for question tokens, 1 for schema tokens in BERT
-
-        # indicating the pivot index (physical location) w.r.t each column index (virtual location)
-        col_loc_lookup = _add_col_tokens(example['columns'])
-        plm_type_ids.extend([1] * (len(tokens) - len(plm_type_ids)))
-
-        token_ids = self._tokenizer.convert_tokens_to_ids(tokens)
-
+    def _get_col_type_mask(self, example) -> dict:
         # in fact, the number of col-types is less than 100,
         # and it is believed not large across different tasks.
         # we can reliably represent the candidate with one-hot masks for the ease of use,
@@ -155,13 +194,7 @@ class SquallAllInOneField(Field):
             one_hot_mask = [1 if i in type_ids else 0 for i in range(self.vocab.get_vocab_size(self.ns_coltype))]
             col_type_candidates.append(one_hot_mask)
 
-        params = {
-            "src_ids": token_ids,
-            "src_types": types,
-            "src_plm_type_ids": plm_type_ids,
-            "col_type_mask": col_type_candidates,
-        }
-        return params, word_loc_lookup, col_loc_lookup
+        return {"col_type_mask": col_type_candidates}
 
     def _load_text_cells(self, example) -> Set[Tuple[str, str]]:
         table = example['tbl_cells']
@@ -177,7 +210,7 @@ class SquallAllInOneField(Field):
                             ret.add((col["col"], str(x)))
         return ret
 
-    def _get_attn_sup(self, example, word_locs, col_locs) -> dict:
+    def _get_attn_sup(self, example) -> dict:
         wsc_graph: Graph[str] = self.get_connectivity_graph(example)    # word, sql, column nodes
         num_w, num_c, num_s = map(lambda k: len(example[k]), ('nl', 'columns', 'sql'))
         ws, wc, sc = set(), set(), set()
@@ -205,18 +238,12 @@ class SquallAllInOneField(Field):
 
         if len(ws) > 0:
             ws_word, ws_sql = map(list, zip(*ws))
-            # ws_word = self._lookup(ws_word, word_locs)
-            # ws_sql = [x + 1 for x in ws_sql]
 
         if len(wc) > 0:
             wc_word, wc_col = map(list, zip(*wc))
-            # wc_word = self._lookup(wc_word, word_locs)
-            # wc_col = self._lookup(wc_col, col_locs)
 
         if len(sc) > 0:
             sc_sql, sc_col = map(list, zip(*sc))
-            # sc_sql = [x + 1 for x in sc_sql]
-            # sc_col = self._lookup(sc_col, col_locs)
 
         alignments = {
             "align_ws_word": ws_word,
@@ -228,7 +255,7 @@ class SquallAllInOneField(Field):
         }
         return alignments
 
-    def _get_target(self, example, word_locs, col_locs) -> dict:
+    def _get_target(self, example) -> dict:
         sql = example['sql']
         tgt = defaultdict(list)
 
@@ -246,18 +273,18 @@ class SquallAllInOneField(Field):
             elif type_str == "Column":
                 step['type'] = TgtType.Column
                 col_id, col_suffix = self._parse_column(value)
-                step['col_id'] = col_id #col_locs[col_id]
+                step['col_id'] = col_id
                 # take the None col_suffix as "none" (e.g. column c5 as c5_none)
                 # must be preprocessed before sent to executors.
                 step['col_type'] = self.vocab.get_token_index(col_suffix if col_suffix else "none", self.ns_coltype)
             elif type_str == "Literal.Number":
                 step['type'] = TgtType.LiteralNumber
-                step['literal_begin'] = span[0] # word_locs[span[0]]
+                step['literal_begin'] = span[0]
             elif type_str == "Literal.String":
                 # only literal.string has an end
                 step['type'] = TgtType.LiteralString
-                step['literal_begin'] = span[0] # word_locs[span[0]]
-                step['literal_end'] = span[1] # word_locs[span[1]]
+                step['literal_begin'] = span[0]
+                step['literal_end'] = span[1]
             else:
                 raise ValueError
 
@@ -339,18 +366,13 @@ class SquallAllInOneField(Field):
                 for sql_id in sqls:
                     wsc_graph.add_e_both(f"word-{word_id}", f"sql-{sql_id}")
 
-    def __init__(self, plm_name: str = 'bert-base-uncased', ns_keyword: str = 'keyword', ns_coltype: str = 'col_type'):
+    def __init__(self, ns_keyword: str = 'keyword', ns_coltype: str = 'col_type'):
         super().__init__()
-        from transformers import AutoTokenizer
-        self._tokenizer = AutoTokenizer.from_pretrained(plm_name)
-
         self.ns_keyword: str = ns_keyword
         self.ns_coltype: str = ns_coltype
 
         self.padded_keys: Dict[int, List[str]] = {
             0: [
-                # src keys
-                'src_ids', 'src_types', 'src_plm_type_ids',
                 # target keys, target_types are acturally general paddings
                 'tgt_type', 'tgt_keyword', 'tgt_col_type',  # prediction-based
                 'tgt_col_id', 'tgt_literal_begin', 'tgt_literal_end',   # copy-based
