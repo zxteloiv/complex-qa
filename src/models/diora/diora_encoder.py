@@ -2,7 +2,7 @@ from typing import Dict, List, Tuple
 import torch
 from torch import nn
 import torch.nn.functional
-from ..interfaces.encoder import EncoderStack
+from ..interfaces.encoder import StackEncoder
 from .base_model import DioraBase
 from utils.preprocessing import nested_list_numbers_to_tensors
 
@@ -19,7 +19,7 @@ CHART = Dict[T_2ndKEY, T_VAL]
 T_INSIDE_TREE = Dict[T_1stKEY, CHART]
 
 
-class DioraEncoder(EncoderStack):
+class DioraEncoder(StackEncoder):
     """Faked Stack, actually only one layer of diora is allowed"""
 
     def forward(self, inputs, mask) -> torch.Tensor:

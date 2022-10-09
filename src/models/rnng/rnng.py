@@ -7,7 +7,7 @@ from torch import nn
 from allennlp.modules import Embedding as AllenEmbedding
 from trialbot.data import NSVocabulary
 
-from models.interfaces.encoder import EncoderStack
+from models.interfaces.encoder import StackEncoder
 from models.interfaces.unified_rnn import RNNStack, T_HIDDEN
 from models.modules.batched_stack import TensorBatchStack
 from models.modules.variational_dropout import VariationalDropout
@@ -19,10 +19,10 @@ class RNNG(nn.Module):
     def __init__(self,
                  # modules
                  # an RNNStack requires an initial state, but an EncoderStack doesn't
-                 action_encoder: RNNStack,      # encodes action history, from h0
-                 buffer_encoder: RNNStack,      # encodes temporary tokens, from h0
-                 stack_encoder: EncoderStack,   # encodes the stack
-                 reducer: EncoderStack,         # compose the popped stack tokens
+                 action_encoder: RNNStack,  # encodes action history, from h0
+                 buffer_encoder: RNNStack,  # encodes temporary tokens, from h0
+                 stack_encoder: StackEncoder,  # encodes the stack
+                 reducer: StackEncoder,  # compose the popped stack tokens
                  action_embedding: Union[nn.Embedding, AllenEmbedding],
                  action_projection: nn.Module,
 

@@ -5,10 +5,10 @@ import torch
 from torch import nn
 from trialbot.data.ns_vocabulary import NSVocabulary
 from ..interfaces.unified_rnn import UnifiedRNN
-from ..interfaces.encoder import EncoderStack, EmbedAndEncode, EmbedAndGraphEncode
+from ..interfaces.encoder import StackEncoder, EmbedAndEncode, EmbedAndGraphEncode
 from .base_seq2seq import BaseSeq2Seq
 from .syngraph2seq import SynGraph2Seq
-from .stacked_encoder import StackedEncoder, ExtLSTM
+from .encoder_stacker import EncoderStacker, ExtLSTM
 from models.transformer.encoder import TransformerEncoder
 from ..modules.attention_wrapper import get_wrapped_attention
 from ..modules.attention_composer import get_attn_composer
@@ -108,7 +108,7 @@ class RNNListMixin:
 class EncoderStackMixin(RNNListMixin):
     """Static method for different kinds of encoders, and an instance method"""
     @staticmethod
-    def get_stacked_rnn_encoder(encoder_type: str, inp_sz, hid_sz, num_layers, dropout=0, num_heads=12) -> EncoderStack:
+    def get_stacked_rnn_encoder(encoder_type: str, inp_sz, hid_sz, num_layers, dropout=0, num_heads=12) -> StackEncoder:
         from allennlp.modules.seq2seq_encoders import PytorchSeq2SeqWrapper as PTRNNWrapper
         from allennlp.modules.seq2seq_encoders import AugmentedLstmSeq2SeqEncoder
         from allennlp.modules.seq2seq_encoders import StackedBidirectionalLstmSeq2SeqEncoder
@@ -152,14 +152,14 @@ class EncoderStackMixin(RNNListMixin):
 
         enc_cls = enc_classes.get(encoder_type)
         assert enc_cls is not None
-        encoder = StackedEncoder([enc_cls(floor) for floor in range(num_layers)],
+        encoder = EncoderStacker([enc_cls(floor) for floor in range(num_layers)],
                                  input_size=inp_sz,
                                  output_size=hid_sz,
                                  input_dropout=dropout)
         return encoder
 
     @staticmethod
-    def get_diora_encoder(encoder_type: str, inp_sz, hid_sz, concat_outside: bool = False) -> EncoderStack:
+    def get_diora_encoder(encoder_type: str, inp_sz, hid_sz, concat_outside: bool = False) -> StackEncoder:
         from ..diora.hard_diora import DioraTopk
         from ..diora.diora import Diora
         from ..diora.diora_encoder import DioraEncoder
@@ -176,24 +176,24 @@ class EncoderStackMixin(RNNListMixin):
         return enc
 
     @staticmethod
-    def get_perturb_parse_gcn_encoder(inp_sz, hid_sz, num_layers) -> EncoderStack:
+    def get_perturb_parse_gcn_encoder(inp_sz, hid_sz, num_layers) -> StackEncoder:
         from ..perturb_and_parse.pp_encoder import PerturbParseEncoder
         enc = PerturbParseEncoder(inp_sz, hid_sz, num_layers)
         return enc
 
     @classmethod
     def get_stacked_cell_encoder(cls, enc_type, inp_sz, hid_sz, num_layers, dropout,
-                                 use_bid=False, use_pseq=False) -> EncoderStack:
+                                 use_bid=False, use_pseq=False) -> StackEncoder:
         rnns = cls.get_stacked_rnns(enc_type, inp_sz, hid_sz, num_layers, dropout)
         b_rnns = cls.get_stacked_rnns(enc_type, inp_sz, hid_sz, num_layers, dropout)
         from .cell_encoder import CellEncoder
-        return StackedEncoder([CellEncoder(rnn, brnn, use_pseq)
+        return EncoderStacker([CellEncoder(rnn, brnn, use_pseq)
                                if use_bid else
                                CellEncoder(rnn, None, use_pseq)
                                for rnn, brnn in zip(rnns, b_rnns)],
                               input_dropout=dropout)
 
-    def get_encoder_stack(self) -> Optional[EncoderStack]:
+    def get_encoder_stack(self) -> Optional[StackEncoder]:
         p = self.p
         dropout = getattr(p, 'enc_dropout', getattr(p, 'dropout', 0.))
         hid_sz = getattr(p, 'enc_out_dim', p.hidden_sz)
@@ -220,7 +220,7 @@ class EncoderStackMixin(RNNListMixin):
 
 
 class EmbEncBundleMixin:
-    def get_embed_encoder_bundle(self, emb, enc: Optional[EncoderStack], padding_idx=0) -> EmbedAndEncode:
+    def get_embed_encoder_bundle(self, emb, enc: Optional[StackEncoder], padding_idx=0) -> EmbedAndEncode:
         p, vocab = self.p, self.vocab
         hid_sz = getattr(p, 'enc_out_dim', p.hidden_sz)
         dropout = getattr(p, 'enc_dropout', getattr(p, 'dropout', 0.))

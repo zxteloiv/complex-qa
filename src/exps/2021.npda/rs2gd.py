@@ -20,7 +20,7 @@ from collections import Counter
 from allennlp.modules.seq2seq_encoders import LstmSeq2SeqEncoder
 from allennlp.training.metrics.perplexity import Average
 from models.neural_pda.tree_action_policy import TreeActionPolicy
-from models.base_s2s.stacked_encoder import StackedEncoder
+from models.base_s2s.encoder_stacker import EncoderStacker
 from models.modules.attention_composer import get_attn_composer
 from models.neural_pda.seq2pda import Seq2PDA
 from models.neural_pda import partial_tree_encoder as partial_tree
@@ -482,7 +482,7 @@ def get_models(p, vocab: NSVocabulary):
     policy_net = TreeActionPolicy(
         node_embedding=nn.Embedding(vocab.get_vocab_size(p.tgt_namespace), p.node_emb_sz),
         pos_embedding=nn.Embedding(p.max_children_num, p.pos_emb_sz),
-        topo_pos_encoder=StackedEncoder([LstmSeq2SeqEncoder(p.pos_emb_sz, p.pos_enc_out)], p.pos_emb_sz, p.pos_enc_out),
+        topo_pos_encoder=EncoderStacker([LstmSeq2SeqEncoder(p.pos_emb_sz, p.pos_enc_out)], p.pos_emb_sz, p.pos_enc_out),
         feature_composer=get_attn_composer(
             p.feature_composer, p.pos_enc_out, p.node_emb_sz, p_hid_dim,
             activation=p.policy_feature_activation

@@ -3,7 +3,7 @@ import torch
 import torch.nn.functional
 from .partial_tree_encoder import TopDownTreeEncoder
 from ..interfaces.composer import TwoVecComposer
-from ..base_s2s.stacked_encoder import StackedEncoder
+from ..base_s2s.encoder_stacker import EncoderStacker
 from utils.nn import get_final_encoder_states
 import utils.nn as utilnn
 import allennlp.nn.util as utilsallen
@@ -13,7 +13,7 @@ class TreeActionPolicy(torch.nn.Module):
     def __init__(self,
                  node_embedding: torch.nn.Module,
                  pos_embedding: torch.nn.Module,
-                 topo_pos_encoder: StackedEncoder,
+                 topo_pos_encoder: EncoderStacker,
                  feature_composer: TwoVecComposer,
                  tree_encoder: TopDownTreeEncoder,
                  node_action_mapper: torch.nn.Module,

@@ -142,7 +142,7 @@ def get_model(p, vocab: NSVocabulary):
     from torch import nn
     from models.neural_pda.seq2pda import Seq2PDA
     from models.neural_pda.npda import NeuralPDA
-    from models.base_s2s.stacked_encoder import StackedEncoder
+    from models.base_s2s.encoder_stacker import EncoderStacker
     from models.modules.attention_wrapper import get_wrapped_attention
     from models.base_s2s.stacked_rnn_cell import StackedRNNCell, StackedLSTMCell
     from models.modules.container import MultiInputsSequential, UnpackedInputsSequential, SelectArgsById
@@ -171,7 +171,7 @@ def get_model(p, vocab: NSVocabulary):
     else:
         raise NotImplementedError
 
-    encoder = StackedEncoder([enc_cls(floor) for floor in range(p.num_enc_layers)], input_dropout=0.)
+    encoder = EncoderStacker([enc_cls(floor) for floor in range(p.num_enc_layers)], input_dropout=0.)
     emb_src = nn.Embedding(vocab.get_vocab_size(p.src_ns), embedding_dim=p.enc_sz)
     emb_s = nn.Embedding(vocab.get_vocab_size(p.tgt_ns), p.emb_sz)
     if getattr(p, 'init_embedding_by_kaiming_normal', False):

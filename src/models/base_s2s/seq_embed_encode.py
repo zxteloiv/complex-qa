@@ -2,7 +2,7 @@ from typing import Tuple, List
 
 import torch.nn
 
-from models.interfaces.encoder import EmbedAndEncode, EncoderStack
+from models.interfaces.encoder import EmbedAndEncode, StackEncoder
 from models.modules.variational_dropout import VariationalDropout
 from utils.nn import prepare_input_mask
 
@@ -10,7 +10,7 @@ from utils.nn import prepare_input_mask
 class SeqEmbedEncoder(EmbedAndEncode):
     def __init__(self,
                  source_embedding: torch.nn.Embedding,
-                 encoder: EncoderStack,
+                 encoder: StackEncoder,
                  padding_index: int = 0,
                  enc_dropout: float = 0.,
                  ):

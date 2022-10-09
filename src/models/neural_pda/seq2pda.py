@@ -2,7 +2,7 @@ import allennlp.nn.util
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from models.base_s2s.stacked_encoder import StackedEncoder
+from models.base_s2s.encoder_stacker import EncoderStacker
 from allennlp.training.metrics.perplexity import Average
 from utils.nn import prepare_input_mask, get_final_encoder_states
 from .npda import NeuralPDA
@@ -17,7 +17,7 @@ from .tensor_typing_util import *
 class Seq2PDA(nn.Module):
     def __init__(self,
                  # modules
-                 encoder: StackedEncoder,
+                 encoder: EncoderStacker,
                  src_embedding: nn.Embedding,
                  enc_attn_net: nn.Module,
                  enc_attn_mapping: nn.Module,

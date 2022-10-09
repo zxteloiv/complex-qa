@@ -2,12 +2,12 @@ from typing import List
 
 import torch
 
-from models.interfaces.encoder import EncoderStack
+from models.interfaces.encoder import StackEncoder
 from .eisner_surrogate import eisner_surrogate
 from .gcn_layer import GCN
 
 
-class PerturbParseEncoder(EncoderStack):
+class PerturbParseEncoder(StackEncoder):
     def get_layer_num(self) -> int:
         return self.num_gcn_layers
 

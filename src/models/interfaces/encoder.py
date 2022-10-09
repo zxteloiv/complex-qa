@@ -25,7 +25,7 @@ class Encoder(_EncoderBase, ABC):
         raise NotImplementedError
 
 
-class EncoderStack(Encoder, ABC):
+class StackEncoder(Encoder, ABC):
     """
     An encoder stack accepts an embedding tensor and output another tensor,
     but stores the intermediate outputs for possible future uses.

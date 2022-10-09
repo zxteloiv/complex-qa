@@ -1,12 +1,12 @@
 from typing import Optional, List
 import torch.nn
 from models.modules.variational_dropout import VariationalDropout
-from ..interfaces.encoder import Encoder, EncoderStack
+from ..interfaces.encoder import Encoder, StackEncoder
 from allennlp.nn.util import sort_batch_by_length
 from torch.nn.utils.rnn import pack_padded_sequence, PackedSequence, pad_packed_sequence
 
 
-class StackedEncoder(EncoderStack):
+class EncoderStacker(StackEncoder):
     """
     Stacked Encoder over a token sequence. The encoder could be either based on RNN or Transformer.
     The Encoder must not be used with any initial hidden states
@@ -24,7 +24,7 @@ class StackedEncoder(EncoderStack):
                  output_size: Optional = None,
                  input_dropout=0.,
                  ):
-        super(StackedEncoder, self).__init__()
+        super(EncoderStacker, self).__init__()
 
         self.layer_encs = torch.nn.ModuleList(encs)
         self.input_size = input_size or encs[0].get_input_dim()

@@ -1,6 +1,6 @@
 import torch
 from typing import Optional, List, Any
-from ..interfaces.unified_rnn import UnifiedRNN
+from models.interfaces.unified_rnn import UnifiedRNN
 from models.interfaces.encoder import Encoder
 from utils.seq_collector import SeqCollector
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence, PackedSequence
@@ -76,13 +76,14 @@ class CellEncoder(Encoder):
         return output
 
     def _forward_pseq_ltr(self, data: torch.Tensor, batch_sizes: torch.Tensor):
-        outputs = []
         input_offset = 0
         last_batch_size = batch_sizes[0]
         max_batch_size = batch_sizes[0].item()
 
+        def is_t(x): return isinstance(x, torch.Tensor)
+
         hx, _ = self.cell.forward(data[:max_batch_size], None)
-        flat_hx = isinstance(hx, torch.Tensor)
+        flat_hx = is_t(hx)
         # print('is_flat_hx:', flat_hx)
         if flat_hx:
             hx = (hx,)
@@ -91,8 +92,7 @@ class CellEncoder(Encoder):
 
         hidden = tuple(h[:max_batch_size] for h in initial_hidden)
 
-        def is_t(x): return isinstance(x, torch.Tensor)
-
+        outputs = []
         for batch_size in batch_sizes:
             step_input = data[input_offset:input_offset + batch_size]
             input_offset += batch_size
@@ -172,34 +172,38 @@ class CellEncoder(Encoder):
 if __name__ == '__main__':
     x = torch.tensor(
         [[16,  3, 18,  9,  5, 22, 17,  3, 21,  1],
-         [27, 21,  1, 17,  7, 17,  6, 17,  0,  0],
          [15,  7, 31,  7, 20,  0,  0,  0,  0,  0],
-         [17, 20, 23, 28, 15,  0,  0,  0,  0,  0],
+         [27, 21,  1, 17,  7, 17,  6, 17,  0,  0],
          [24,  9, 28,  0,  0,  0,  0,  0,  0,  0],
-         [ 4, 17, 27,  1, 24, 31, 19, 10, 23,  0],
          [23, 20, 21, 27, 27,  2, 16,  3,  4, 23],
          [17, 21, 19,  0,  0,  0,  0,  0,  0,  0]], dtype=torch.int32,
     )
     mask = (x > 0).long()
     embedder = torch.nn.Embedding(32, 100, padding_idx=0)
-    print(embedder.weight[0, :4])
+    print(embedder.weight[0, :10])
     emb = embedder(x)
-    print(emb[:, :, 0])
+    print(emb.size(), mask.size())
     print('-' * 50)
 
     from models.modules.torch_rnn_wrapper import TorchRNNWrapper as RNNWrapper
-    enc = CellEncoder(cell=RNNWrapper(torch.nn.GRUCell(100, 128)),
-                      back_cell=RNNWrapper(torch.nn.GRUCell(100, 128)),
+    enc = CellEncoder(cell=RNNWrapper(torch.nn.GRUCell(100, 10)),
+                      back_cell=RNNWrapper(torch.nn.GRUCell(100, 10)),
                       use_packed_sequence_protocol=True)
-    o = enc(emb, mask, None)
+    o = enc(emb, mask)
     print(o.size())
-    print(o[:, :, 0])
+    print(o[:, 2, :])
+    print(o[:, -3, :])
+    print('-' * 50)
+
+    enc.use_packed_seq = False
+    o = enc(emb, mask)
+    print(o.size())
+    print(o[:, 2, :])
+    print(o[:, -3, :])
     print('-' * 50)
     from models.onlstm.onlstm import ONLSTMCell
     onenc = CellEncoder(cell=ONLSTMCell(100, 128, 8),
                         back_cell=ONLSTMCell(100, 128, 8),
                         use_packed_sequence_protocol=True)
-    o = onenc(emb, mask, None)
-    print(o.size())
-    print(o[:, :, 0])
+    o = onenc(emb, mask)
 

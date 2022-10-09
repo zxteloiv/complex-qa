@@ -1,7 +1,7 @@
 import torch
 from .diora_encoder import DioraEncoder
 from ..base_s2s.seq_embed_encode import SeqEmbedEncoder
-from ..interfaces.encoder import EncoderStack
+from ..interfaces.encoder import StackEncoder
 from utils.nn import prepare_input_mask, seq_cross_ent
 from .hard_diora import DioraTopk
 
@@ -9,7 +9,7 @@ from .hard_diora import DioraTopk
 class SeqEmbedAndDiora(SeqEmbedEncoder):
     def __init__(self,
                  source_embedding: torch.nn.Embedding,
-                 encoder: EncoderStack,
+                 encoder: StackEncoder,
                  padding_index: int = 0,
                  enc_dropout: float = 0.,
                  use_diora_loss: bool = False

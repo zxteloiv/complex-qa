@@ -129,7 +129,7 @@ class NLTableField(Field):
         from transformers import AutoTokenizer
         self._tokenizer = AutoTokenizer.from_pretrained(plm_name)
         self.padded_keys: Dict[int, List[str]] = {
-            0: ['src_ids', 'src_types', 'src_plm_type_ids'],
+            SrcType.Padding: ['src_ids', 'src_types', 'src_plm_type_ids'],
         }
 
 
