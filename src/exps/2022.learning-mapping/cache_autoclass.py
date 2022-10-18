@@ -18,6 +18,6 @@ if __name__ == '__main__':
     from argparse import ArgumentParser
     parser = ArgumentParser()
     parser.add_argument('--force', '-f', action='store_true')
-    parser.add_argument('--path', '-p', default='~/.cache/complex_qa')
+    parser.add_argument('--path', '-p', default='~/.cache/complex_qa', help='defaulted to ~/.cache/complex_qa')
     parser.add_argument('target', type=str)
     main(parser.parse_args())
