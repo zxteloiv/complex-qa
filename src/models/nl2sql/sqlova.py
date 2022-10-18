@@ -174,10 +174,10 @@ class SQLova(nn.Module):
         ex_col_idx = torch.arange(where_begin.size(1), device=where_begin.device).unsqueeze(0)    # (1, Nc)
         begin_mask = where_begin >= 0
         end_mask = where_end >= 0
-        begin_loss = - (begin_prob[ex_batch_idx, ex_col_idx, where_begin]
-                        * begin_mask).clamp(min=1e-8).log().sum(-1).mean()
-        end_loss = - (end_prob[ex_batch_idx, ex_col_idx, where_end]
-                      * end_mask).clamp(min=1e-8).log().sum(-1).mean()
+        begin_loss = - (begin_prob[ex_batch_idx, ex_col_idx, where_begin].clamp(min=1e-8).log()
+                        * begin_mask).sum(-1).mean()
+        end_loss = - (end_prob[ex_batch_idx, ex_col_idx, where_end].clamp(min=1e-8).log()
+                      * end_mask).sum(-1).mean()
 
         loss = sum([sel_loss, agg_loss, cond_num_loss, cond_col_loss, ops_loss, begin_loss, end_loss])
         return loss
