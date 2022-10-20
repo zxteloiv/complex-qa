@@ -96,14 +96,31 @@ class SQLova(nn.Module):
         self.word_num = Average()
         self.col_num = Average()
         self.acc = Average()
+        self.acc_select = Average()
+        self.acc_agg = Average()
+        self.acc_num = Average()
+        self.acc_cols = Average()
+        self.acc_ops = Average()
+        self.acc_begin = Average()
+        self.acc_end = Average()
 
     def get_metrics(self, reset=False):
-        metric = {"ACC": round(self.acc.get_metric(reset), 6),
-                  "WORDS": round(self.word_num.get_metric(reset), 2),
-                  "COLUMNS": round(self.col_num.get_metric(reset), 2),
-                  "AVG_LOSS": round(self.mean_loss.get_metric(reset), 6),
-                  "COUNT": self.item_count,
-                  }
+        metric = {
+            "ACC": round(self.acc.get_metric(reset), 6),
+            "WORDS": round(self.word_num.get_metric(reset), 2),
+            "COLUMNS": round(self.col_num.get_metric(reset), 2),
+            "AVG_LOSS": round(self.mean_loss.get_metric(reset), 6),
+            "COUNT": self.item_count,
+            "MODULE_ACC": {
+                "select": round(self.acc_select.get_metric(reset), 2),
+                "agg": round(self.acc_agg.get_metric(reset), 2),
+                "cond_num": round(self.acc_num.get_metric(reset), 2),
+                "cond_cols": round(self.acc_cols.get_metric(reset), 2),
+                "cond_ops": round(self.acc_ops.get_metric(reset), 2),
+                "span_begin": round(self.acc_begin.get_metric(reset), 2),
+                "span_end": round(self.acc_end.get_metric(reset), 2),
+            }
+        }
         if reset:
             self.item_count = 0
         return metric
@@ -121,15 +138,15 @@ class SQLova(nn.Module):
         sel_logp = self.sel_col(words, cols, word_mask, col_mask)   # (b, Nc)
         agg_logp = self.sel_agg(words, cols, word_mask, col_mask)   # (b, Nc, num_aggs)
         cond_num_logp = self.wh_num(words, cols, word_mask, col_mask)    # (b, 1 + max_conds)
-        col_logp = self.wh_col(words, cols, word_mask, col_mask)    # (b, Nc)
+        col_prob = self.wh_col(words, cols, word_mask, col_mask)    # (b, Nc)
         ops_logp = self.wh_op(words, cols, word_mask, col_mask)     # (b, Nc, num_ops)
         begin_prob, end_prob = self.wh_val(words, cols, word_mask, col_mask, ops_logp.exp())    # (b, Nc, Nw)
 
-        loss = self.get_loss(sel_logp, agg_logp, cond_num_logp, col_logp, ops_logp, begin_prob, end_prob,
+        loss = self.get_loss(sel_logp, agg_logp, cond_num_logp, col_prob, ops_logp, begin_prob, end_prob,
                              select, agg, where_num, where_cols, where_ops, where_begin, where_end)
 
         self.compute_metrics(loss, word_mask, col_mask,
-                             sel_logp, agg_logp, cond_num_logp, col_logp, ops_logp, begin_prob, end_prob,
+                             sel_logp, agg_logp, cond_num_logp, col_prob, ops_logp, begin_prob, end_prob,
                              select, agg, where_num, where_cols, where_ops, where_begin, where_end)
 
         output = {'loss': loss}
@@ -158,7 +175,7 @@ class SQLova(nn.Module):
 
         return word_states, word_state_mask, col_states, col_state_mask
 
-    def get_loss(self, sel_logp, agg_logp, cond_num_logp, col_logp, ops_logp, begin_prob, end_prob,
+    def get_loss(self, sel_logp, agg_logp, cond_num_logp, col_prob, ops_logp, begin_prob, end_prob,
                  select, agg, where_num, where_cols, where_ops, where_begin, where_end):
         batch_idx = torch.arange(sel_logp.size(0), device=sel_logp.device)  # (b,)
 
@@ -166,12 +183,14 @@ class SQLova(nn.Module):
         agg_loss = - agg_logp[batch_idx, select, agg].mean()
         cond_num_loss = - cond_num_logp[batch_idx, where_num].mean()
 
-        ex_batch_idx = batch_idx.unsqueeze(-1)  # (b, 1)
-        col_mask = where_cols >= 0
-        cond_col_loss = - (col_logp[ex_batch_idx, where_cols] * col_mask).sum(-1).mean()
-        ops_loss = - (ops_logp[ex_batch_idx, where_cols, where_ops] * col_mask).sum(-1).mean()
+        col_mask = where_cols >= 0  # where_cols contains only 0 or 1 indicating column selection, padded by -1
+        cond_col_loss = (((col_prob - where_cols) ** 2 / 2) * col_mask).sum(-1).mean()
 
-        ex_col_idx = torch.arange(where_begin.size(1), device=where_begin.device).unsqueeze(0)    # (1, Nc)
+        ex_batch_idx = batch_idx.unsqueeze(-1)  # (b, 1)
+        ex_col_idx = torch.arange(where_ops.size(1), device=where_ops.device).unsqueeze(0)    # (1, Nc)
+        ops_mask = where_ops >= 0
+        ops_loss = - (ops_logp[ex_batch_idx, ex_col_idx, where_ops] * ops_mask).sum(-1).mean()
+
         begin_mask = where_begin >= 0
         end_mask = where_end >= 0
         begin_loss = - (begin_prob[ex_batch_idx, ex_col_idx, where_begin].clamp(min=1e-8).log()
@@ -183,8 +202,8 @@ class SQLova(nn.Module):
         return loss
 
     def compute_metrics(self,
-                        loss, word_mask, col_mask,   # (b,)
-                        sel_logp, agg_logp, cond_num_logp, col_logp, ops_logp, begin_prob, end_prob,
+                        loss, word_mask, col_mask,  # (b,)
+                        sel_logp, agg_logp, cond_num_logp, col_prob, ops_logp, begin_prob, end_prob,
                         # oracle labels
                         select, agg, where_num,  # (b,)
                         where_cols, where_ops, where_begin, where_end,  # (b, Nc), padded by -1
@@ -201,35 +220,38 @@ class SQLova(nn.Module):
             batch = torch.arange(sel_logp.size(0), device=sel_logp.device)  # (b,)
             pred_agg = agg_logp[batch, pred_select].argmax(dim=-1)          # (b,)
             pred_num = cond_num_logp.argmax(dim=-1)                         # (b,)
-            pred_cols = col_logp.exp()                                      # (b, Nc)
+            pred_cols = col_prob.clone()                                    # (b, Nc)
             pred_ops = ops_logp.argmax(dim=-1)                              # (b, Nc)
             pred_begin = begin_prob.argmax(dim=-1)                          # (b, Nc)
             pred_end = end_prob.argmax(dim=-1)                              # (b, Nc)
 
-            select_acc = (pred_select == select)    # (b,)
-            agg_acc = (pred_agg == agg)             # (b,)
-            num_acc = (pred_num == where_num)       # (b,)
+            acc_select = (pred_select == select)    # (b,)
+            acc_agg = (pred_agg == agg)             # (b,)
+            acc_num = (pred_num == where_num)       # (b,)
 
-            is_padding_col = where_cols < 0         # (b, Nc)
-
-            ops_acc = is_padding_col.logical_or(pred_ops == where_ops).all(dim=-1)         # (b,)
-            begin_acc = is_padding_col.logical_or(pred_begin == where_begin).all(dim=-1)   # (b,)
-            end_acc = is_padding_col.logical_or(pred_end == where_end).all(dim=-1)         # (b,)
-
-            col_mask = where_cols >= 0
-            topk_cols = torch.zeros_like(col_mask).long()
-            topk_cols[~col_mask] = -1
-            for i, (col, k, mask) in enumerate(zip(pred_cols, where_num, col_mask)):
-                col[~mask] = 0
+            is_padded_col = where_cols < 0         # (b, Nc)
+            topk_cols = torch.zeros_like(is_padded_col).long()
+            topk_cols[is_padded_col] = -1
+            for i, (col, k, padding) in enumerate(zip(pred_cols, where_num, is_padded_col)):
+                col[padding] = 0
                 _, indices = torch.topk(col, k.item())
                 topk_cols[i][indices] = 1
+            acc_col = is_padded_col.logical_or(topk_cols == where_cols).all(dim=-1)    # (b,)
 
-            col_acc = is_padding_col.logical_or(topk_cols == where_cols).all(dim=-1)    # (b,)
+            # padded_cols can be 0 or 1, but the padded_conditions are -1 and 0 in where_cols
+            is_padded_cond = where_ops < 0         # (b, Nc)
+            acc_ops = is_padded_cond.logical_or(pred_ops == where_ops).all(dim=-1)         # (b,)
+            acc_begin = is_padded_cond.logical_or(pred_begin == where_begin).all(dim=-1)   # (b,)
+            acc_end = is_padded_cond.logical_or(pred_end == where_end).all(dim=-1)         # (b,)
 
-            batch_acc = select_acc * agg_acc * num_acc * ops_acc * begin_acc * end_acc * col_acc
+            batch_acc = acc_select * acc_agg * acc_num * acc_col * acc_ops * acc_begin * acc_end
 
-        for acc in batch_acc:
-            self.acc(acc)
+        metric_names = ('acc', 'acc_select', 'acc_agg', 'acc_num', 'acc_cols', 'acc_ops', 'acc_begin', 'acc_end')
+        metric_values = (batch_acc, acc_select, acc_agg, acc_num, acc_col, acc_ops, acc_begin, acc_end)
+        for name, batch_value in zip(metric_names, metric_values):
+            metric = getattr(self, name)
+            for item in batch_value:
+                metric(item)
 
 
 class WordColBiEnc(nn.Module):
@@ -321,13 +343,14 @@ class WhereColumn(nn.Module):
         self.col_word_attn = col_word_attn
         self.map_ctx = nn.Linear(hidden, hidden)
         self.map_col = nn.Linear(hidden, hidden)
-        self.scorer = nn.Sequential(nn.Tanh(), nn.Linear(hidden * 2, 1), nn.LogSigmoid())
+        self.scorer = nn.Sequential(nn.Tanh(), nn.Linear(hidden * 2, 1), nn.Sigmoid())
 
     def forward(self, words, cols, word_mask, col_mask):
         words, cols = self.enc(words, cols, word_mask, col_mask)
         mapped_ctx = self.map_ctx(self.col_word_attn(cols, words, word_mask))   # (b, Nc, h)
         mapped_col = self.map_col(cols)                                         # (b, Nc, h)
-        return self.scorer(torch.cat([mapped_col, mapped_ctx], dim=-1)).squeeze(-1)  # (b, Nc), in logarithm
+        col_repr = torch.cat([mapped_col, mapped_ctx], dim=-1)                  # (b, Nc, h*2)
+        return self.scorer(col_repr).squeeze(-1)    # (b, Nc) <-- (b, Nc, 1), probabilities by sigmoid
 
 
 class WhereOps(nn.Module):
@@ -374,18 +397,3 @@ class WhereValue(nn.Module):
         end_score = self.end_scorer.get_latest_attn_weights()       # (b, Nc, Nw)
 
         return begin_score, end_score
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

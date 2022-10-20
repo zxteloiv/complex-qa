@@ -40,8 +40,7 @@ def decorate_bot(args, bot):
     bot.add_event_handler(Events.COMPLETED, ext_write_info, 100, msg="TrailBot completed.")
     bot.add_event_handler(Events.ITERATION_COMPLETED, loss_reporter, 100)
 
-    if not args.test:
-        # --------------------- Training -------------------------------
+    if not args.test:   # Training, not testing or evaluation
         from trialbot.training.extensions import every_epoch_model_saver
         from utils.trialbot.extensions import end_with_nan_loss
         from utils.trialbot.extensions import evaluation_on_dev_every_epoch, collect_garbage
@@ -49,8 +48,7 @@ def decorate_bot(args, bot):
         bot.add_event_handler(Events.ITERATION_STARTED, reset_variational_dropout, 100)
         bot.add_event_handler(Events.ITERATION_STARTED, collect_garbage, 100)
         bot.add_event_handler(Events.ITERATION_COMPLETED, end_with_nan_loss, 100)
-        # if args.dataset == 'squall0':
-        #     bot.add_event_handler(Events.EPOCH_COMPLETED, every_epoch_model_saver, 100)
+        bot.add_event_handler(Events.EPOCH_COMPLETED, every_epoch_model_saver, 100)
         bot.add_event_handler(Events.EPOCH_COMPLETED, evaluation_on_dev_every_epoch, 90)
         bot.add_event_handler(Events.EPOCH_COMPLETED, evaluation_on_dev_every_epoch, 80, on_test_data=True)
         bot.add_event_handler(Events.EPOCH_COMPLETED, get_metrics, 100, prefix="Training Metrics: ")
@@ -117,14 +115,12 @@ def debug():
     plm_dir = osp.abspath(osp.expanduser('~/.cache/complex_qa/bert-base-uncased'))
     translator = Registry.get_translator('sqlova', plm_name=plm_dir)
     print(len(train), len(dev), len(test))
-    # num_err = num_all = 0
-    # for ex in itertools.chain(train, dev, test):
-    #     num_all += 1
-    #     try:
-    #         obj = translator.to_tensor(ex)
-    #     except:
-    #         num_err += 1
-    # print(f'num_err={num_err} out of {num_all}')
+    for x in train[:10]:
+        pprint.pprint([x[k] for k in ('question', 'sql')])
+        pprint.pprint({k: v for k, v in translator.to_tensor(x).items() if not k.startswith('src_')})
+
+    b = translator.batch_tensor([translator.to_tensor(x) for x in train[:10]])
+    pprint.pprint({k: v for k, v in b.items() if not k.startswith('src_')})
 
 
 if __name__ == '__main__':
