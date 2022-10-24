@@ -1,4 +1,5 @@
 import torch
+import torch.nn.functional as F
 from allennlp.nn.util import masked_softmax, masked_log_softmax
 from allennlp.training.metrics import Average
 from torch import nn
@@ -140,7 +141,13 @@ class SQLova(nn.Module):
         cond_num_logp = self.wh_num(words, cols, word_mask, col_mask)    # (b, 1 + max_conds)
         col_prob = self.wh_col(words, cols, word_mask, col_mask)    # (b, Nc)
         ops_logp = self.wh_op(words, cols, word_mask, col_mask)     # (b, Nc, num_ops)
-        begin_prob, end_prob = self.wh_val(words, cols, word_mask, col_mask, ops_logp.exp())    # (b, Nc, Nw)
+        if not self.training:
+            # ops_inp = F.one_hot(ops_logp.argmax(dim=-1), num_classes=ops_logp.size()[-1]).float()
+            ops_inp = F.one_hot(ops_logp[:, :, :-1].argmax(dim=-1), num_classes=ops_logp.size()[-1]).float()
+        else:
+            # ops_inp = ops_logp.exp()
+            ops_inp = F.one_hot(where_ops * (where_ops >= 0), num_classes=ops_logp.size()[-1]).float()
+        begin_prob, end_prob = self.wh_val(words, cols, word_mask, col_mask, ops_inp)    # (b, Nc, Nw)
 
         loss = self.get_loss(sel_logp, agg_logp, cond_num_logp, col_prob, ops_logp, begin_prob, end_prob,
                              select, agg, where_num, where_cols, where_ops, where_begin, where_end)
@@ -184,7 +191,9 @@ class SQLova(nn.Module):
         cond_num_loss = - cond_num_logp[batch_idx, where_num].mean()
 
         col_mask = where_cols >= 0  # where_cols contains only 0 or 1 indicating column selection, padded by -1
-        cond_col_loss = (((col_prob - where_cols) ** 2 / 2) * col_mask).sum(-1).mean()
+        # cond_col_loss = (((col_prob - where_cols) ** 2 / 2) * col_mask).sum(-1).mean()
+        cond_col_loss = - ((where_cols * col_prob.log() + (1 - where_cols) * (1 - col_prob).log())
+                           * col_mask).sum(-1).mean()
 
         ex_batch_idx = batch_idx.unsqueeze(-1)  # (b, 1)
         ex_col_idx = torch.arange(where_ops.size(1), device=where_ops.device).unsqueeze(0)    # (1, Nc)
