@@ -24,11 +24,12 @@ def main():
 def decorate_bot(args, bot):
     from trialbot.training import Events
 
-    from utils.trialbot.extensions import print_hyperparameters
+    from utils.trialbot.extensions import print_hyperparameters, print_snaptshot_path
     from utils.trialbot.extensions import get_metrics, print_models
     from trialbot.training.extensions import ext_write_info, loss_reporter, time_logger, current_epoch_logger
 
     bot.add_event_handler(Events.STARTED, print_hyperparameters, 90)
+    bot.add_event_handler(Events.STARTED, print_snaptshot_path, 90)
     bot.add_event_handler(Events.STARTED, print_models, 100)
     bot.add_event_handler(Events.STARTED, ext_write_info, 105, msg=("====" * 20))
     bot.add_event_handler(Events.EPOCH_STARTED, ext_write_info, 105, msg=("----" * 20))
@@ -98,9 +99,9 @@ def base_params():
     p.ADAM_BETAS = (0.9, 0.999)
     p.batch_sz = 32
     p.plm_model = osp.abspath(osp.expanduser('~/.cache/complex_qa/bert-base-uncased'))
-    p.hidden_sz = 200
+    p.hidden_sz = 100
     p.num_layers = 2
-    p.dropout = .2
+    p.dropout = .3
     p.max_conds = 4
     p.TRANSLATOR_KWARGS = {'plm_name': p.plm_model}
     return p

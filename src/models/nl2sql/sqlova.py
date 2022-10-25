@@ -21,40 +21,40 @@ class SQLova(nn.Module):
         hid_sz = p.hidden_sz
 
         WIKISQL_AGG_OPS = ['', 'MAX', 'MIN', 'COUNT', 'SUM', 'AVG']
-        WIKISQL_COND_OPS = ['=', '>', '<', 'OP']
+        WIKISQL_COND_OPS = ['=', '>', '<', 'OP']    # nobody knows what the OP is
 
-        def _get_bilinear(hid, is_sparse: bool = False):
-            attn = Attn(AllenLogits(BilinearMatrixAttention(hid, hid)), is_sparse=is_sparse)
+        def _get_bilinear(inp_sz, hid_sz=None, is_sparse: bool = False):
+            hid_sz = hid_sz or inp_sz
+            attn = Attn(AllenLogits(BilinearMatrixAttention(inp_sz, hid_sz)), is_sparse=is_sparse)
             return attn
+
+        inp_sz = plm_out_size * 2
 
         model = cls(
             plm_model=plm_model,
-            word_plm2hidden=nn.Sequential(nn.Linear(plm_out_size, hid_sz // 2, bias=False)),
-            col_plm2hidden=nn.Sequential(nn.Linear(plm_out_size, hid_sz // 2, bias=False)),
-            word_col_attn=_get_bilinear(hid_sz // 2),
-            col_word_attn=_get_bilinear(hid_sz // 2),
             mod_select_column=SelectColumn(
-                WordColBiEnc.build(hid_sz, hid_sz, hid_sz, p.num_layers, p.dropout), _get_bilinear(hid_sz), hid_sz
+                WordColBiEnc.build(inp_sz, hid_sz, p.num_layers, p.dropout), _get_bilinear(hid_sz), hid_sz
             ),
             mod_select_agg=SelectAgg(
-                WordColBiEnc.build(hid_sz, hid_sz, hid_sz, p.num_layers, p.dropout), _get_bilinear(hid_sz), hid_sz,
+                WordColBiEnc.build(inp_sz, hid_sz, p.num_layers, p.dropout), _get_bilinear(hid_sz), hid_sz,
                 len(WIKISQL_AGG_OPS),
             ),
             mod_where_number=WhereNumber(
+                WordColBiEnc.build(inp_sz, hid_sz, p.num_layers, p.dropout), hid_sz, p.num_layers,
                 p.max_conds,
-                WordColBiEnc.build(hid_sz, hid_sz, hid_sz, p.num_layers, p.dropout),
-                hid_sz, p.num_layers,
             ),
             mod_where_column=WhereColumn(
-                WordColBiEnc.build(hid_sz, hid_sz, hid_sz, p.num_layers, p.dropout), _get_bilinear(hid_sz), hid_sz
+                WordColBiEnc.build(inp_sz, hid_sz, p.num_layers, p.dropout), _get_bilinear(hid_sz), hid_sz,
             ),
             mod_where_operator=WhereOps(
+                WordColBiEnc.build(inp_sz, hid_sz, p.num_layers, p.dropout), _get_bilinear(hid_sz), hid_sz,
                 len(WIKISQL_COND_OPS),
-                WordColBiEnc.build(hid_sz, hid_sz, hid_sz, p.num_layers, p.dropout), _get_bilinear(hid_sz), hid_sz
             ),
             mod_where_value=WhereValue(
-                WordColBiEnc.build(hid_sz, hid_sz, hid_sz, p.num_layers, p.dropout), _get_bilinear(hid_sz), hid_sz,
+                WordColBiEnc.build(inp_sz, hid_sz, p.num_layers, p.dropout), _get_bilinear(hid_sz), hid_sz,
                 len(WIKISQL_COND_OPS),
+                begin_scorer=_get_bilinear(hid_sz * 3, hid_sz),
+                end_scorer=_get_bilinear(hid_sz * 3, hid_sz),
             )
         )
         return model
@@ -62,10 +62,6 @@ class SQLova(nn.Module):
     def __init__(self,
                  # encoding modules
                  plm_model: nn.Module,
-                 word_plm2hidden: nn.Module,
-                 col_plm2hidden: nn.Module,
-                 word_col_attn: Attn,
-                 col_word_attn: Attn,
                  mod_select_column: 'SelectColumn',
                  mod_select_agg: 'SelectAgg',
                  mod_where_number: 'WhereNumber',
@@ -76,10 +72,6 @@ class SQLova(nn.Module):
         super().__init__()
         self.plm_model = plm_model
         self.src_type_keys: tuple = ('pad', 'special', 'word', 'word_pivot', 'column', 'col_pivot')
-        self.word_plm2hidden = word_plm2hidden
-        self.col_plm2hidden = col_plm2hidden
-        self.word_col_attn = word_col_attn
-        self.col_word_attn = col_word_attn
 
         self.stype_map = dict(zip(self.src_type_keys, range(len(self.src_type_keys))))
         # all the multi-task (classification) modules accept the inputs of
@@ -142,10 +134,8 @@ class SQLova(nn.Module):
         col_prob = self.wh_col(words, cols, word_mask, col_mask)    # (b, Nc)
         ops_logp = self.wh_op(words, cols, word_mask, col_mask)     # (b, Nc, num_ops)
         if not self.training:
-            # ops_inp = F.one_hot(ops_logp.argmax(dim=-1), num_classes=ops_logp.size()[-1]).float()
             ops_inp = F.one_hot(ops_logp[:, :, :-1].argmax(dim=-1), num_classes=ops_logp.size()[-1]).float()
         else:
-            # ops_inp = ops_logp.exp()
             ops_inp = F.one_hot(where_ops * (where_ops >= 0), num_classes=ops_logp.size()[-1]).float()
         begin_prob, end_prob = self.wh_val(words, cols, word_mask, col_mask, ops_inp)    # (b, Nc, Nw)
 
@@ -163,22 +153,20 @@ class SQLova(nn.Module):
         state_mask: torch.Tensor = (src_types != self.stype_map['pad'])
         enc_out = self.plm_model(input_ids=src_ids,
                                  token_type_ids=plm_type_ids,
-                                 attention_mask=state_mask.float())
-        enc_states = enc_out.last_hidden_state
+                                 attention_mask=state_mask.float(),
+                                 output_hidden_states=True)
+
+        layer_n2, layer_n1 = enc_out.hidden_states[-2:]  # the negative 2 and negative 1, i.e., the last two layers
 
         def st_is(k: str) -> torch.LongTensor: return src_types == self.stype_map[k]    # noqa
 
-        word_states, word_state_mask = compact_mask_select(enc_states, st_is('word_pivot'))
-        col_states, col_state_mask = compact_mask_select(enc_states, st_is('col_pivot'))
-        word_states = self.word_plm2hidden(word_states)
-        col_states = self.col_plm2hidden(col_states)
+        word_n2, word_state_mask = compact_mask_select(layer_n2, st_is('word_pivot'))
+        word_n1, _ = compact_mask_select(layer_n1, st_is('word_pivot'))
+        col_n2, col_state_mask = compact_mask_select(layer_n2, st_is('col_pivot'))
+        col_n1, _ = compact_mask_select(layer_n1, st_is('col_pivot'))
 
-        # ctx: (b, len, hid)
-        # attn: (b, input_len, num_heads=1, attend_len)
-        col_ctx = self.word_col_attn(word_states, col_states, col_state_mask)
-        word_ctx = self.col_word_attn(col_states, word_states, word_state_mask)
-        word_states = torch.cat([word_states, col_ctx], dim=-1)
-        col_states = torch.cat([col_states, word_ctx], dim=-1)
+        word_states = torch.cat([word_n2, word_n1], dim=-1)
+        col_states = torch.cat([col_n2, col_n1], dim=-1)
 
         return word_states, word_state_mask, col_states, col_state_mask
 
@@ -275,9 +263,9 @@ class WordColBiEnc(nn.Module):
         return word_h, col_h
 
     @classmethod
-    def build(cls, word_size: int, col_size: int, hidden: int, num_layers: int, dropout: float):
-        word_enc = EncoderStackMixin.get_stacked_rnn_encoder('bilstm', word_size, hidden // 2, num_layers, dropout)
-        col_enc = EncoderStackMixin.get_stacked_rnn_encoder('bilstm', col_size, hidden // 2, num_layers, dropout)
+    def build(cls, inp_sz: int, hidden: int, num_layers: int, dropout: float):
+        word_enc = EncoderStackMixin.get_stacked_rnn_encoder('bilstm', inp_sz, hidden // 2, num_layers, dropout)
+        col_enc = EncoderStackMixin.get_stacked_rnn_encoder('bilstm', inp_sz, hidden // 2, num_layers, dropout)
         return cls(word_enc, col_enc)
 
 
@@ -315,7 +303,7 @@ class SelectAgg(nn.Module):
 
 
 class WhereNumber(nn.Module):
-    def __init__(self, max_where_number: int, enc: WordColBiEnc, hidden: int, num_layers: int):
+    def __init__(self, enc: WordColBiEnc, hidden: int, num_layers: int, max_where_number: int, ):
         super(WhereNumber, self).__init__()
         self.enc = enc
         self.self_attn = nn.Linear(hidden, 1)
@@ -363,7 +351,7 @@ class WhereColumn(nn.Module):
 
 
 class WhereOps(nn.Module):
-    def __init__(self, num_ops: int, enc: WordColBiEnc, col_word_attn: Attn, hidden: int):
+    def __init__(self, enc: WordColBiEnc, col_word_attn: Attn, hidden: int, num_ops: int,):
         super().__init__()
         self.enc = enc
         # self.col_word_attn = Attn(AllenLogits(BilinearMatrixAttention(hidden, hidden)))
@@ -382,15 +370,18 @@ class WhereOps(nn.Module):
 
 
 class WhereValue(nn.Module):
-    def __init__(self, enc: WordColBiEnc, col_word_attn: Attn, hidden: int, num_ops):
+    def __init__(self, enc: WordColBiEnc, col_word_attn: Attn, hidden: int, num_ops: int,
+                 begin_scorer: Attn,
+                 end_scorer: Attn,
+                 ):
         super().__init__()
         self.enc = enc
         self.col_word_attn = col_word_attn
         self.map_ctx = nn.Linear(hidden, hidden)
         self.map_col = nn.Linear(hidden, hidden)
         self.map_ops = nn.Linear(num_ops, hidden)
-        self.begin_scorer = Attn(AllenLogits(BilinearMatrixAttention(hidden * 3, hidden)))
-        self.end_scorer = Attn(AllenLogits(BilinearMatrixAttention(hidden * 3, hidden)))
+        self.begin_scorer = begin_scorer
+        self.end_scorer = end_scorer
 
     def forward(self, words, cols, word_mask, col_mask, op_soft):
         words, cols = self.enc(words, cols, word_mask, col_mask)                # (b, Nw, h), (b, Nc, h)
