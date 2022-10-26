@@ -1,3 +1,5 @@
+from typing import List
+
 import torch
 import torch.nn.functional as F
 from allennlp.nn.util import masked_softmax, masked_log_softmax
@@ -218,8 +220,20 @@ class SQLova(nn.Module):
         return loss
 
     def get_alignment_losses(self, word_mask, col_mask):
-        attn = self.sel_agg.col_word_attn.get_latest_attn_weights()
-        return get_hungarian_reg_loss(attn, col_mask, word_mask)
+        attns: List[Attn] = [
+            self.sel_col.col_word_attn,
+            self.sel_agg.col_word_attn,
+            self.wh_col.col_word_attn,
+            self.wh_op.col_word_attn,
+            self.wh_val.col_word_attn,
+        ]
+        losses = [
+            get_hungarian_reg_loss(attn.get_latest_attn_weights(), col_mask, word_mask)
+            for attn in attns
+        ]
+        return sum(losses)
+        # attn = self.sel_agg.col_word_attn.get_latest_attn_weights()
+        # return get_hungarian_reg_loss(attn, col_mask, word_mask)
 
     def compute_metrics(self,
                         loss, word_mask, col_mask,  # (b,)
