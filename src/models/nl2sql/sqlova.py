@@ -10,6 +10,7 @@ from models.base_s2s.model_factory import EncoderStackMixin
 from allennlp.modules.matrix_attention import BilinearMatrixAttention
 
 from utils.nn import compact_mask_select, assign_stacked_states
+from models.nl2sql.hungarian_loss import get_hungarian_reg_loss, get_hungarian_sup_loss
 
 
 class SQLova(nn.Module):
@@ -56,7 +57,8 @@ class SQLova(nn.Module):
                 begin_scorer=_get_bilinear(hid_sz * 3, hid_sz),
                 end_scorer=_get_bilinear(hid_sz * 3, hid_sz),
             ),
-            use_metric_adaptive_losses=getattr(p, 'use_metric_adaptive_losses', False)
+            use_metric_adaptive_losses=getattr(p, 'use_metric_adaptive_losses', False),
+            use_hungarian_loss=getattr(p, 'use_hungarian_loss', False),
         )
         return model
 
@@ -70,6 +72,7 @@ class SQLova(nn.Module):
                  mod_where_operator: 'WhereOps',
                  mod_where_value: 'WhereValue',
                  use_metric_adaptive_losses: bool = False,
+                 use_hungarian_loss: bool = False,
                  ):
         super().__init__()
         self.plm_model = plm_model
@@ -100,6 +103,7 @@ class SQLova(nn.Module):
         self.acc_end = Average()
 
         self.use_metric_adaptive_losses = use_metric_adaptive_losses
+        self.use_hungarian_loss = use_hungarian_loss
 
     def get_metrics(self, reset=False):
         metric = {
@@ -145,6 +149,9 @@ class SQLova(nn.Module):
 
         loss = self.get_loss(sel_logp, agg_logp, cond_num_logp, col_prob, ops_logp, begin_prob, end_prob,
                              select, agg, where_num, where_cols, where_ops, where_begin, where_end)
+        if self.use_hungarian_loss:
+            alignment_loss = self.get_alignment_losses(word_mask, col_mask)
+            loss = loss + alignment_loss
 
         self.compute_metrics(loss, word_mask, col_mask,
                              sel_logp, agg_logp, cond_num_logp, col_prob, ops_logp, begin_prob, end_prob,
@@ -209,6 +216,10 @@ class SQLova(nn.Module):
 
         loss = sum(losses)
         return loss
+
+    def get_alignment_losses(self, word_mask, col_mask):
+        attn = self.sel_agg.col_word_attn.get_latest_attn_weights()
+        return get_hungarian_reg_loss(attn, col_mask, word_mask)
 
     def compute_metrics(self,
                         loss, word_mask, col_mask,  # (b,)

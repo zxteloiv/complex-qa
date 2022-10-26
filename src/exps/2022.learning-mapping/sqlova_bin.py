@@ -114,6 +114,13 @@ def adaloss():
     return p
 
 
+@Registry.hparamset('sqlova-hungarian')
+def hungarian():
+    p = base_params()
+    p.use_hungarian_loss = True
+    return p
+
+
 def debug():
     from datasets.wikisql import install_dataset
     from datasets.wikisql_translator import install_translators
