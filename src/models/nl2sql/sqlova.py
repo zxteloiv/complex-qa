@@ -55,7 +55,8 @@ class SQLova(nn.Module):
                 len(WIKISQL_COND_OPS),
                 begin_scorer=_get_bilinear(hid_sz * 3, hid_sz),
                 end_scorer=_get_bilinear(hid_sz * 3, hid_sz),
-            )
+            ),
+            use_metric_adaptive_losses=getattr(p, 'use_metric_adaptive_losses', False)
         )
         return model
 
@@ -68,6 +69,7 @@ class SQLova(nn.Module):
                  mod_where_column: 'WhereColumn',
                  mod_where_operator: 'WhereOps',
                  mod_where_value: 'WhereValue',
+                 use_metric_adaptive_losses: bool = False,
                  ):
         super().__init__()
         self.plm_model = plm_model
@@ -96,6 +98,8 @@ class SQLova(nn.Module):
         self.acc_ops = Average()
         self.acc_begin = Average()
         self.acc_end = Average()
+
+        self.use_metric_adaptive_losses = use_metric_adaptive_losses
 
     def get_metrics(self, reset=False):
         metric = {
@@ -195,7 +199,15 @@ class SQLova(nn.Module):
         end_loss = - (end_prob[ex_batch_idx, ex_col_idx, where_end].clamp(min=1e-8).log()
                       * end_mask).sum(-1).mean()
 
-        loss = sum([sel_loss, agg_loss, cond_num_loss, cond_col_loss, ops_loss, begin_loss, end_loss])
+        losses = [sel_loss, agg_loss, cond_num_loss, cond_col_loss, ops_loss, begin_loss, end_loss]
+        if self.use_metric_adaptive_losses and self.acc._count > 3200:  # >100 iterations with batch size 32
+            metric_names = ('acc_select', 'acc_agg', 'acc_num', 'acc_cols', 'acc_ops', 'acc_begin', 'acc_end')
+            for i, name in enumerate(metric_names):
+                metric = getattr(self, name)
+                if metric.get_metric() > 0.97:
+                    losses[i] = 0
+
+        loss = sum(losses)
         return loss
 
     def compute_metrics(self,

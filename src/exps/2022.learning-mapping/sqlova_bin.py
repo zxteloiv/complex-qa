@@ -107,6 +107,13 @@ def base_params():
     return p
 
 
+@Registry.hparamset('sqlova-adaloss')
+def adaloss():
+    p = base_params()
+    p.use_metric_adaptive_losses = True
+    return p
+
+
 def debug():
     from datasets.wikisql import install_dataset
     from datasets.wikisql_translator import install_translators
