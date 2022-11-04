@@ -479,6 +479,7 @@ class Seq2SeqBuilder(EmbeddingMxin,
             scheduled_sampling_ratio=p.scheduled_sampling,
             dec_dropout=dec_dropout,
             training_average=getattr(p, "training_average", "batch"),
+            attn_supervision=getattr(p, 'attn_supervision', 'none')
         )
         return model
 
