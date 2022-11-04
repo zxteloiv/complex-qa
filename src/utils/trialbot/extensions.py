@@ -34,40 +34,6 @@ def save_multiple_models_per_epoch(bot: TrialBot, interval: int = 1):
             bot.logger.info(f"model {model_id} saved to {filename}")
 
 
-def debug_models(bot: TrialBot):
-    bot.logger.debug(str(bot.models))
-
-
-def end_with_nan_loss(bot: TrialBot):
-    import numpy as np
-    output = getattr(bot.state, 'output', None)
-    if output is None:
-        return
-    loss = output["loss"]
-
-    def _isnan(x):
-        if isinstance(x, torch.Tensor):
-            return bool(torch.isnan(x).any())
-        elif isinstance(x, np.ndarray):
-            return bool(np.isnan(x).any())
-        else:
-            return math.isnan(x)
-
-    if _isnan(loss):
-        bot.logger.error(f"NaN loss encountered, training ended at epoch {bot.state.epoch} iter {bot.state.iteration}")
-        bot.state.epoch = bot.hparams.TRAINING_LIMIT + 1
-        bot.updater.stop_epoch()
-
-
-def print_hyperparameters(bot: TrialBot):
-    bot.logger.info(f"Cmd Arguments Used:\n{bot.args}")
-    bot.logger.info(f"Hyperparamset Used: {bot.args.hparamset}\n{str(bot.hparams)}")
-
-
-def print_models(bot: TrialBot):
-    bot.logger.info("Model Specs:\n" + str(bot.models))
-
-
 def track_pytorch_module_forward_time(bot: TrialBot, max_depth: int = -1, timefmt="%H:%M:%S.%f"):
     models = bot.models
 
@@ -133,18 +99,6 @@ def evaluation_on_dev_every_epoch(bot: TrialBot, interval: int = 1,
         get_metrics(bot, prefix="Testing Metrics: " if on_test_data else "Evaluation Metrics: ")
 
 
-def collect_garbage(bot: TrialBot):
-    for optim in bot.updater._optims:
-        optim.zero_grad()
-
-    if hasattr(bot.state, "output") and bot.state.output is not None:
-        bot.state.output = None
-    gc.collect()
-    if bot.args.device >= 0:
-        import torch.cuda
-        torch.cuda.empty_cache()
-
-
 def get_metrics(bot: TrialBot, prefix: str = ""):
     import json
     for i, model in enumerate(bot.models):
@@ -154,10 +108,6 @@ def get_metrics(bot: TrialBot, prefix: str = ""):
             bot.logger.info(prefix + json.dumps(model.get_metrics(reset=True)))
         else:
             bot.logger.warning(f'neither get_metric nor get_metrics method is found')
-
-
-def print_snaptshot_path(bot: TrialBot):
-    bot.logger.info("Snapshot Dir: " + bot.savepath)
 
 
 def reset_variational_dropout(bot: TrialBot):

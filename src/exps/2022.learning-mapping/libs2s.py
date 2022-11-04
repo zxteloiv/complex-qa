@@ -49,42 +49,17 @@ def setup_common_bot(args: argparse.Namespace, get_model_func=None, trialname: s
     from models.base_s2s.model_factory import Seq2SeqBuilder
     get_model_func = get_model_func or Seq2SeqBuilder.from_param_and_vocab
     trialname = trialname or f'enc2dec-{args.hparamset}'
-    bot = TrialBot(trial_name=trialname, get_model_func=get_model_func, args=args, clean_engine=True)
-
-    from utils.trialbot.extensions import print_hyperparameters
-    from utils.trialbot.extensions import get_metrics, print_models
-    from trialbot.training.extensions import ext_write_info, current_epoch_logger, time_logger, loss_reporter
-
-    bot.add_event_handler(Events.STARTED, print_hyperparameters, 90)
-    bot.add_event_handler(Events.STARTED, print_models, 100)
-    bot.add_event_handler(Events.STARTED, ext_write_info, 100, msg="TrailBot started")
-    bot.add_event_handler(Events.STARTED, time_logger, 99)
-    bot.add_event_handler(Events.STARTED, ext_write_info, 105, msg=("====" * 20))
-
-    bot.add_event_handler(Events.EPOCH_STARTED, ext_write_info, 105, msg=("----" * 20))
-    bot.add_event_handler(Events.EPOCH_STARTED, ext_write_info, 100, msg="Epoch started")
-    bot.add_event_handler(Events.EPOCH_STARTED, current_epoch_logger, 99)
-    bot.add_event_handler(Events.ITERATION_COMPLETED, loss_reporter, 100)
-
-    bot.add_event_handler(Events.COMPLETED, time_logger, 101)
-    bot.add_event_handler(Events.COMPLETED, ext_write_info, 100, msg="TrailBot completed.")
+    bot = TrialBot(trial_name=trialname, get_model_func=get_model_func, args=args)
+    from utils.trialbot.setup_bot import setup_bot, add_metric_printing
 
     if not args.test:
-        # --------------------- Training -------------------------------
+        bot = setup_bot(bot, epoch_model_saving=False)
         from trialbot.training.extensions import every_epoch_model_saver
-        from utils.trialbot.extensions import end_with_nan_loss, reset_variational_dropout
-        from utils.trialbot.extensions import evaluation_on_dev_every_epoch, collect_garbage
-        bot.add_event_handler(Events.ITERATION_STARTED, collect_garbage, 100)
-        bot.add_event_handler(Events.ITERATION_STARTED, reset_variational_dropout, 100)
-        bot.add_event_handler(Events.ITERATION_COMPLETED, end_with_nan_loss, 100)
-        bot.add_event_handler(Events.EPOCH_COMPLETED, evaluation_on_dev_every_epoch, 90)
-        bot.add_event_handler(Events.EPOCH_COMPLETED, evaluation_on_dev_every_epoch, 80, on_test_data=True)
         if args.seed == 2021 or args.seed == '2021':
             bot.add_event_handler(Events.EPOCH_COMPLETED, every_epoch_model_saver, 100)
-        bot.add_event_handler(Events.EPOCH_COMPLETED, get_metrics, 100, prefix="Training Metrics: ")
         bot.updater = get_updater(bot)
     else:
-        bot.add_event_handler(Events.EPOCH_COMPLETED, get_metrics, 100, prefix="Testing Metrics")
+        bot = add_metric_printing(bot, 'Testing Metrics')
 
     return bot
 
