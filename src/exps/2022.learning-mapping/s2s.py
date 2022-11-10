@@ -7,7 +7,7 @@ def main():
     import datasets.comp_gen_bundle as cg_bundle
     cg_bundle.install_parsed_qa_datasets(Registry._datasets)
     import datasets.cg_bundle_translator
-    bot = setup_common_bot(setup_cli(seed=2021, device=0, translator='s2s'))
+    bot = setup_common_bot(setup_cli(seed=2021, device=0, translator='tranx'))
     bot.run()
 
 
@@ -17,7 +17,7 @@ def s2s():
     p.TRAINING_LIMIT = 400
     p.batch_sz = 16
     p.src_namespace = 'sent'
-    p.tgt_namespace = 'sql'
+    p.tgt_namespace = 'rule_seq'
     p.decoder_init_strategy = "forward_last_parallel"
     p.encoder = 'bilstm'
     return p
