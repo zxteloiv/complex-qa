@@ -16,19 +16,32 @@ def main():
 
 
 @Registry.hparamset()
-def plm2s():
+def s2s():
     p = base_hparams()
     p.TRAINING_LIMIT = 400
     p.batch_sz = 16
+    p.src_namespace = 'sent'
+    p.tgt_namespace = 'sql'
+    p.encoder = 'bilstm'
+    return p
+
+
+@Registry.hparamset()
+def plm2s():
+    p = s2s()
     p.lr_scheduler_kwargs = None
     p.src_namespace = None
-    # p.src_namespace = 'sent'
-    p.tgt_namespace = 'sql'
-    # p.decoder_init_strategy = "forward_last_parallel"
     p.decoder_init_strategy = "avg_all"
     plm_path = osp.abspath(osp.expanduser('~/.cache/complex_qa/bert-base-uncased'))
     p.encoder = 'plm:' + plm_path
     p.TRANSLATOR_KWARGS = {"model_name": plm_path}
+    return p
+
+
+@Registry.hparamset()
+def hungarian_reg():
+    p = s2s()
+    p.attn_supervision = 'hungarian_reg'
     return p
 
 
