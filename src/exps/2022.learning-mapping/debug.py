@@ -13,13 +13,20 @@ def foo():
     train, dev, test = Registry.get_dataset('squall0')
     print('lengths:', len(train), len(dev), len(test))
     from trialbot.data.translator import FieldAwareTranslator
-    translator: FieldAwareTranslator = Registry.get_translator('squall-base')
+    import os.path as osp
+    translator: FieldAwareTranslator = Registry.get_translator('squall-base',
+                                                               plm_model=osp.abspath(
+                                                                   osp.expanduser(
+                                                                       '~/.cache/complex_qa/bert-base-uncased'))
+                                                               )
     from utils.vocab_builder import get_ns_counter
 
+    print('---------------------')
     vocab = NSVocabulary(get_ns_counter(train, translator))
-    vocab.save_to_files('temp-vocab')
+    # vocab.save_to_files('temp-vocab')
     translator.index_with_vocab(vocab)
     print(vocab)
+    print('---------------------')
 
     from datasets.squall_translator import SquallAllInOneField
     field: SquallAllInOneField = translator.fields[0]
@@ -93,5 +100,34 @@ def inspect_ex(example, ex, field):
         print(get_sql_i(i))
 
 
+def bar():
+    import datasets.comp_gen_bundle as cg_bundle
+    import logging
+    logging.getLogger().setLevel(logging.INFO)
+    cg_bundle.install_raw_qa_datasets(Registry._datasets)
+    cg_bundle.install_raw_sql_datasets(Registry._datasets)
+    #
+    cg_bundle.install_parsed_sql_datasets(Registry._datasets)
+    cg_bundle.install_parsed_qa_datasets(Registry._datasets)
+
+    # print(Registry._datasets.keys())
+    # print(list(map(len, Registry.get_dataset('qa.ati_iid.handcrafted'))))
+    # print(list(map(len, Registry.get_dataset('qa.adv_iid.handcrafted'))))
+    # print(list(map(len, Registry.get_dataset('qa.sch_iid.handcrafted'))))
+    # print(list(map(len, Registry.get_dataset('qa.geo_iid.handcrafted'))))
+
+    print('---------------------')
+
+    cg_bundle.install_cross_domain_raw_qa_datasets(Registry._datasets)
+    train, dev, test = Registry.get_dataset('raw_qa.all_iid')
+    print(len(train), len(dev), len(test))
+
+    count = 0
+    for x in train:
+        count += 1
+    print(count)
+    return
+
+
 if __name__ == '__main__':
-    foo()
+    bar()

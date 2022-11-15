@@ -5,9 +5,12 @@
 # https://www.aclweb.org/anthology/2020.findings-emnlp.225/
 # https://github.com/inbaroren/improving-compgen-in-semparse
 # ##
+from itertools import product
 
 from trialbot.data import JsonDataset
 from trialbot.data import CompositionalDataset, RedisDataset
+
+from utils.trialbot.chain_dataset import ChainDataset
 from utils.trialbot.volatile_mem import VolatileDataset
 from utils.trialbot.id_supplement_dataset import IDSupplement
 from utils.trialbot.transform_dataset import TransformData
@@ -114,55 +117,65 @@ def _get_grammar_start(grammar_file: str):
     return startpoint
 
 
-def _get_raw_sql_ds(data_name: str, *, use_iid: bool, sql_only: bool = True):
-    ds_dir = join(CG_DATA_PATH, data_name, 'new_question_split' if use_iid else 'schema_full_split')
+SPLIT_PATH = {
+    'iid': 'new_question_split',
+    'cg': 'schema_full_split'
+}
 
+
+DATA_PATH = {
+    'ati': 'atis',
+    'geo': 'geography',
+    'adv': 'advising',
+    'sch': 'scholar',
+}
+
+
+def _get_ds_full_dir(data_tag: str, split_tag: str):
+    return join(CG_DATA_PATH, DATA_PATH[data_tag], SPLIT_PATH[split_tag])
+
+
+def _get_raw_ds(ds_full_dir, *, sql_only: bool):
     def _build_ds(filename: str):
-        nonlocal ds_dir
-        ds = IDSupplement(FlattenSeqDS(JsonDataset(join(ds_dir, filename)), sql_only=sql_only))
+        ds = IDSupplement(FlattenSeqDS(JsonDataset(join(ds_full_dir, filename)), sql_only=sql_only))
         return ds
 
     train = _build_ds('aligned_train.json')
     dev = _build_ds('aligned_final_dev.json')
     test = _build_ds('final_test.json')
-    logging.info(f"load dataset: {ds_dir}")
+    logging.info(f"load dataset: {ds_full_dir}")
     return train, dev, test
 
 
 def install_raw_sql_datasets(reg: dict = None):
-    if reg is None:
-        reg = CG_DATA_REG
-    domains = ["atis", "geo", "advising", "scholar"]
-    path_names = ["atis", "geography", "advising", "scholar"]
-    for domain, path in zip(domains, path_names):
-        reg[f"raw_sql.{domain}_iid"] = partial(_get_raw_sql_ds, path, use_iid=True)
-        logging.debug(f"registered raw_sql.{domain}_iid lazily")
-        reg[f"raw_sql.{domain}_cg"] = partial(_get_raw_sql_ds, path, use_iid=False)
-        logging.debug(f"registered raw_sql.{domain}_cg lazily")
+    reg = CG_DATA_REG if reg is None else reg
+    for ds_tag, split_tag in product(DATA_PATH.keys(), SPLIT_PATH.keys()):
+        key = f"raw_sql.{ds_tag}_{split_tag}"
+        reg[key] = partial(_get_raw_ds, _get_ds_full_dir(ds_tag, split_tag), sql_only=True)
+        logging.debug(f"registered {key} lazily")
 
 
 def install_raw_qa_datasets(reg: dict = None):
-    if reg is None:
-        reg = CG_DATA_REG
-    domains = ["atis", "geo", "advising", "scholar"]
-    path_names = ["atis", "geography", "advising", "scholar"]
-    for domain, path in zip(domains, path_names):
-        reg[f"raw_qa.{domain}_iid"] = partial(_get_raw_sql_ds, path, use_iid=True, sql_only=False)
-        logging.debug(f"registered raw_sql.{domain}_iid lazily")
-        reg[f"raw_qa.{domain}_cg"] = partial(_get_raw_sql_ds, path, use_iid=False, sql_only=False)
-        logging.debug(f"registered raw_sql.{domain}_cg lazily")
+    reg = CG_DATA_REG if reg is None else reg
+    for ds_tag, split_tag in product(DATA_PATH.keys(), SPLIT_PATH.keys()):
+        key = f"raw_qa.{ds_tag}_{split_tag}"
+        reg[key] = partial(_get_raw_ds, _get_ds_full_dir(ds_tag, split_tag), sql_only=False)
+        logging.debug(f"registered {key} lazily")
 
 
-def _get_parsed_ds(data_name: str, *,
-                   use_iid: bool,
+GRAMMAR_FILES = [
+    join(SRC_PATH, 'statics', 'grammar', 'MySQL.lark'),
+    join(SRC_PATH, 'statics', 'grammar', 'SQLite.lark'),
+    join(SRC_PATH, 'statics', 'grammar', 'sql_handcrafted.lark'),
+]
+
+
+def _get_parsed_ds(ds_tag: str,
+                   split_tag: str,
                    grammar_file: str,
                    sql_only: bool,
                    conn: tuple = ('localhost', 6379, 2),
                    ):
-    ds_dir = join(CG_DATA_PATH, data_name, 'new_question_split' if use_iid else 'schema_full_split')
-    grammar_tag = _get_grammar_tag_by_filename(grammar_file)
-    iid_tag = 'iid' if use_iid else 'cg'
-
     def _add_runtime(x):
         if x.get('sql_tree') is None:
             x['runtime_tree'] = None
@@ -172,11 +185,8 @@ def _get_parsed_ds(data_name: str, *,
             x['runtime_tree'] = build_from_lark_tree(x.get('sql_tree'), add_eps_nodes=True)
         return x
 
-    def _build_ds(filename: str, split_tag: str):
-        nonlocal ds_dir, grammar_tag
-        prefix = f"{split_tag}.{iid_tag}.{data_name}.{grammar_tag}_"
-        if sql_only:
-            prefix = 'pure_sql.' + prefix
+    def _build_ds(filename: str, prefix: str):
+        data_file = join(_get_ds_full_dir(ds_tag, split_tag), filename)
 
         # the read-only redis dataset will only cache the parsed trees,
         # while the volatile memory will store the runtime tree
@@ -186,7 +196,7 @@ def _get_parsed_ds(data_name: str, *,
                     grammar_filename=grammar_file,
                     startpoint=_get_grammar_start(grammar_file),
                     parse_keys=['sql'],
-                    dataset=IDSupplement(FlattenSeqDS(JsonDataset(join(ds_dir, filename)), sql_only=sql_only)),
+                    dataset=IDSupplement(FlattenSeqDS(JsonDataset(data_file), sql_only=sql_only)),
                 ),
                 conn=conn,
                 prefix=prefix,
@@ -195,10 +205,13 @@ def _get_parsed_ds(data_name: str, *,
         ))
         return ds
 
-    train = _build_ds('aligned_train.json', 'train')
-    dev = _build_ds('aligned_final_dev.json', 'dev')
-    test = _build_ds('final_test.json', 'test')
-    logging.info(f"load dataset: {ds_dir}")
+    g_tag = _get_grammar_tag_by_filename(grammar_file)
+    prefix = f"{'sql' if sql_only else 'qa'}.{ds_tag}.{split_tag}.{g_tag}" + ".{}_"
+
+    train = _build_ds('aligned_train.json', prefix.format('train'))
+    dev = _build_ds('aligned_final_dev.json', prefix.format('dev'))
+    test = _build_ds('final_test.json', prefix.format('test'))
+    logging.info(f"load dataset: {_get_ds_full_dir(ds_tag, split_tag)}")
     return train, dev, test
 
 
@@ -206,17 +219,12 @@ def install_parsed_sql_datasets(reg: dict = None):
     if reg is None:
         reg = CG_DATA_REG
 
-    domains = ["atis", "geo", "advising", "scholar"]
-    path_names = ["atis", "geography", "advising", "scholar"]
-    grammar_path = join(SRC_PATH, 'statics', 'grammar')
-    for domain, path in zip(domains, path_names):
-        grammars = [join(grammar_path, x) for x in ('MySQL.lark', 'SQLite.lark', 'sql_handcrafted.lark')]
-        for g in grammars:
-            tag = _get_grammar_tag_by_filename(g)
-            reg[f"pure_sql.{domain}_iid.{tag}"] = partial(_get_parsed_ds, path, use_iid=True, grammar_file=g, sql_only=True)
-            logging.debug(f"registered pure_sql.{domain}_iid.{tag} lazily")
-            reg[f"pure_sql.{domain}_cg.{tag}"] = partial(_get_parsed_ds, path, use_iid=False, grammar_file=g, sql_only=True)
-            logging.debug(f"registered pure_sql.{domain}_cg.{tag} lazily")
+    for ds_tag, split_tag in product(DATA_PATH.keys(), SPLIT_PATH.keys()):
+        for g in GRAMMAR_FILES:
+            g_tag = _get_grammar_tag_by_filename(g)
+            key = f"sql.{ds_tag}_{split_tag}.{g_tag}"
+            reg[key] = partial(_get_parsed_ds, ds_tag, split_tag, g, sql_only=True)
+            logging.debug(f"registered {key} lazily")
 
 
 def install_parsed_qa_datasets(reg: dict = None):
@@ -240,19 +248,49 @@ def install_parsed_qa_datasets(reg: dict = None):
     """
     if reg is None:
         reg = CG_DATA_REG
-    domains = ["atis", "geo", "advising", "scholar"]
-    path_names = ["atis", "geography", "advising", "scholar"]
-    for domain, path_name in zip(domains, path_names):
-        grammar_path = join(SRC_PATH, 'statics', 'grammar')
-        grammars = [join(grammar_path, x) for x in ('MySQL.lark', 'SQLite.lark', 'sql_handcrafted.lark')]
+
+    for ds_tag, split_tag in product(DATA_PATH.keys(), SPLIT_PATH.keys()):
+        grammars = []
         run_path = join(SRC_PATH, 'run')
         if osp.exists(run_path):
             grammars += list(join(run_path, f) for f in os.listdir(run_path)
-                             if f.endswith('.lark') and f.startswith(domain))
-        for g in grammars:
-            tag = _get_grammar_tag_by_filename(g)
-            reg[domain + '_iid.' + tag] = partial(_get_parsed_ds, path_name, use_iid=True, grammar_file=g, sql_only=False)
-            logging.debug(f"registered {domain}_iid.{tag} lazily")
-            reg[domain + '_cg.' + tag] = partial(_get_parsed_ds, path_name, use_iid=False, grammar_file=g, sql_only=False)
-            logging.debug(f"registered {domain}_cg.{tag} lazily")
+                             if f.endswith('.lark') and f.startswith(ds_tag))
+
+        for g in GRAMMAR_FILES:
+            g_tag = _get_grammar_tag_by_filename(g)
+            key = f"qa.{ds_tag}_{split_tag}.{g_tag}"
+            reg[key] = partial(_get_parsed_ds, ds_tag, split_tag, g, sql_only=False, conn=None)
+            logging.debug(f"registered {key} lazily")
+
+
+def _get_all_ds(keys: list, reg: dict):
+    train_dss, dev_dss, test_dss = zip(*[reg[k]() for k in keys])
+    train = ChainDataset(train_dss)
+    dev = ChainDataset(dev_dss)
+    test = ChainDataset(test_dss)
+    return train, dev, test
+
+
+def install_cross_domain_parsed_qa_datasets(reg: dict = None, ds_tags: list = None):
+    reg = CG_DATA_REG if reg is None else reg
+    ds_tags = ds_tags or DATA_PATH.keys()
+
+    for split_tag in SPLIT_PATH.keys():
+        for g in GRAMMAR_FILES:
+            g_tag = _get_grammar_tag_by_filename(g)
+            chain_keys = [f"qa.{ds_tag}_{split_tag}.{g_tag}" for ds_tag in ds_tags]
+            key = f"qa.all_{split_tag}.{g_tag}"
+            reg[key] = partial(_get_all_ds, keys=chain_keys, reg=reg)
+            logging.debug(f"registered {key} lazily")
+
+
+def install_cross_domain_raw_qa_datasets(reg: dict = None, ds_tags: list = None):
+    reg = CG_DATA_REG if reg is None else reg
+    ds_tags = ds_tags or DATA_PATH.keys()
+
+    for split_tag in SPLIT_PATH.keys():
+        chain_keys = [f"raw_qa.{ds_tag}_{split_tag}" for ds_tag in ds_tags]
+        key = f"raw_qa.all_{split_tag}"
+        reg[key] = partial(_get_all_ds, keys=chain_keys, reg=reg)
+        logging.debug(f"registered {key} lazily")
 
