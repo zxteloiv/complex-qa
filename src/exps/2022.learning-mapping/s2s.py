@@ -46,6 +46,20 @@ def hungarian_reg():
 
 
 @Registry.hparamset()
+def hungarian_xent():
+    p = s2s()
+    p.attn_supervision = 'hungarian_xent'
+    return p
+
+
+@Registry.hparamset()
+def hungarian_reg_xent():
+    p = s2s()
+    p.attn_supervision = 'hungarian_reg_xent'
+    return p
+
+
+@Registry.hparamset()
 def plm2s_hungarian_reg():
     p = plm2s()
     p.attn_supervision = 'hungarian_reg'

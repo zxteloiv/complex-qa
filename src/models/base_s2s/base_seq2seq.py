@@ -198,7 +198,7 @@ class BaseSeq2Seq(torch.nn.Module):
             loss = loss + self._embed_encoder.get_loss()
 
         if self._attn_sup.startswith('hungarian'):
-            loss = loss + self._hungarian_loss(target_tokens, state_mask, self._attn_sup == 'hungarian_reg')
+            loss = loss + self._hungarian_loss(mask, state_mask)
         return loss
 
     def _compute_metrics(self, source_tokens, target_tokens, predictions, logits):
@@ -341,20 +341,25 @@ class BaseSeq2Seq(torch.nn.Module):
     # ============= methods called by _compute_loss ===============
     # special losses
 
-    def _hungarian_loss(self, target_tokens, state_mask, as_regularizer: bool = True):
-        _, tgt_mask = prepare_input_mask(target_tokens)     # (b, tgt_len)
-        tgt_mask = tgt_mask[:, 1:]
-
+    def _hungarian_loss(self, tgt_mask, state_mask):
         from ..nl2sql.hungarian_loss import (
             get_hungarian_target_by_weight,
             hungarian_l2_loss,
             hungarian_regularized_l2_loss,
+            hungarian_xent_loss,
+            hungarian_regularized_xent_loss,
         )
 
         attn_weights = self.mem.get_stacked_tensor('proj_enc_attn')     # (b, tgt_len, src_len)
         hungarian_target = get_hungarian_target_by_weight(attn_weights, maximize=True)
 
-        if as_regularizer:
+        if self._attn_sup == 'hungarian_reg':
             return hungarian_regularized_l2_loss(attn_weights, hungarian_target, tgt_mask, state_mask)
-        else:
+        elif self._attn_sup == 'hungarian_sup':
             return hungarian_l2_loss(attn_weights, hungarian_target, tgt_mask, state_mask)
+        elif self._attn_sup == 'hungarian_xent':
+            return hungarian_xent_loss(attn_weights, hungarian_target, tgt_mask, state_mask)
+        elif self._attn_sup == 'hungarian_reg_xent':
+            return hungarian_regularized_xent_loss(attn_weights, hungarian_target, tgt_mask, state_mask)
+        else:
+            return 0
