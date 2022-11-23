@@ -197,7 +197,7 @@ class BaseSeq2Seq(torch.nn.Module):
         if isinstance(self._embed_encoder, LossModule):
             loss = loss + self._embed_encoder.get_loss()
 
-        if self._attn_sup.startswith('hungarian'):
+        if 'hungarian' in self._attn_sup:
             loss = loss + self._hungarian_loss(mask, state_mask)
         return loss
 
@@ -344,22 +344,34 @@ class BaseSeq2Seq(torch.nn.Module):
     def _hungarian_loss(self, tgt_mask, state_mask):
         from ..nl2sql.hungarian_loss import (
             get_hungarian_target_by_weight,
+            reverse_probabilities,
             hungarian_l2_loss,
-            hungarian_regularized_l2_loss,
             hungarian_xent_loss,
-            hungarian_regularized_xent_loss,
         )
 
         attn_weights = self.mem.get_stacked_tensor('proj_enc_attn')     # (b, tgt_len, src_len)
-        hungarian_target = get_hungarian_target_by_weight(attn_weights, maximize=True)
+        if self._attn_sup.startswith('rev_'):
+            attn_weights = reverse_probabilities(attn_weights, tgt_mask, state_mask)
+
+        target = get_hungarian_target_by_weight(attn_weights)
 
         if self._attn_sup == 'hungarian_reg':
-            return hungarian_regularized_l2_loss(attn_weights, hungarian_target, tgt_mask, state_mask)
+            return hungarian_l2_loss(attn_weights, target, tgt_mask, state_mask, regularized=True)
+
         elif self._attn_sup == 'hungarian_sup':
-            return hungarian_l2_loss(attn_weights, hungarian_target, tgt_mask, state_mask)
+            return hungarian_l2_loss(attn_weights, target, tgt_mask, state_mask)
+
         elif self._attn_sup == 'hungarian_xent':
-            return hungarian_xent_loss(attn_weights, hungarian_target, tgt_mask, state_mask)
+            return hungarian_xent_loss(attn_weights, target, tgt_mask, state_mask)
+
         elif self._attn_sup == 'hungarian_reg_xent':
-            return hungarian_regularized_xent_loss(attn_weights, hungarian_target, tgt_mask, state_mask)
+            return hungarian_xent_loss(attn_weights, target, tgt_mask, state_mask, regularized=True)
+
+        elif self._attn_sup == 'rev_hungarian_reg_xent':
+            return hungarian_xent_loss(attn_weights, target, tgt_mask, state_mask, regularized=True)
+
+        elif self._attn_sup == 'rev_hungarian_xent':
+            return hungarian_xent_loss(attn_weights, target, tgt_mask, state_mask)
+
         else:
             return 0

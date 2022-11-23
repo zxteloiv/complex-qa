@@ -11,7 +11,7 @@ def main():
     cg_bundle.install_raw_qa_datasets(Registry._datasets)
     cg_bundle.install_cross_domain_raw_qa_datasets(Registry._datasets)
     import datasets.cg_bundle_translator
-    bot = setup_common_bot(setup_cli(seed=2021, device=0, translator='plm2s'))
+    bot = setup_common_bot(setup_cli(seed=2021, device=0, translator='s2s', dataset='raw_qa.all_iid', epoch=40))
     bot.run()
 
 
@@ -56,6 +56,20 @@ def hungarian_xent():
 def hungarian_reg_xent():
     p = s2s()
     p.attn_supervision = 'hungarian_reg_xent'
+    return p
+
+
+@Registry.hparamset()
+def rev_hungarian_xent():
+    p = s2s()
+    p.attn_supervision = 'rev_hungarian_xent'
+    return p
+
+
+@Registry.hparamset()
+def rev_hungarian_reg_xent():
+    p = s2s()
+    p.attn_supervision = 'rev_hungarian_reg_xent'
     return p
 
 
