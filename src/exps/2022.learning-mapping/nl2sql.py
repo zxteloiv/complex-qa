@@ -12,7 +12,7 @@ def main():
     install_squall_datasets()
 
     args = setup_cli(seed=2021, translator='squall-base', dataset='squall0', hparamset='squall-base')
-    bot = setup_bot(args)
+    bot = setup_common_bot(args)
     bot.run()
 
 
@@ -63,71 +63,19 @@ def base_param():
     return p
 
 
-@Registry.hparamset()
-def no_word_col_attn():
-    p = base_param()
-    p.attn_weight_policy = 'hungarian_reg'
-    p.ablation_attn = 'word_col_attn'
-    return p
-
-
-@Registry.hparamset()
-def no_col_word_attn():
-    p = no_word_col_attn()
-    p.ablation_attn = 'col_word_attn'
-    return p
-
-
-@Registry.hparamset()
-def no_sql_word_attn():
-    p = no_word_col_attn()
-    p.ablation_attn = 'sql_word_attn'
-    return p
-
-
-@Registry.hparamset()
-def no_sql_col_attn():
-    p = no_word_col_attn()
-    p.ablation_attn = 'sql_col_attn'
-    return p
-
-
-def setup_bot(args, get_model_func=None, trialname='base'):
+def setup_common_bot(args, get_model_func=None, trialname='base'):
     from trialbot.training import Events
     from models.nl2sql.squall_base_factory import SquallBaseBuilder
     get_model_func = get_model_func or SquallBaseBuilder.from_param_vocab
-    bot = TrialBot(trial_name=trialname, get_model_func=get_model_func, args=args, clean_engine=True)
+    bot = TrialBot(trial_name=trialname, get_model_func=get_model_func, args=args)
 
-    from utils.trialbot.extensions import print_hyperparameters
-    from utils.trialbot.extensions import get_metrics, print_models
-    from trialbot.training.extensions import ext_write_info, loss_reporter, time_logger, current_epoch_logger
-
-    bot.add_event_handler(Events.STARTED, print_hyperparameters, 90)
-    bot.add_event_handler(Events.STARTED, print_models, 100)
-    bot.add_event_handler(Events.STARTED, ext_write_info, 105, msg=("====" * 20))
-    bot.add_event_handler(Events.EPOCH_STARTED, ext_write_info, 105, msg=("----" * 20))
-    bot.add_event_handler(Events.EPOCH_STARTED, ext_write_info, 100, msg="Epoch started")
-    bot.add_event_handler(Events.EPOCH_STARTED, current_epoch_logger, 99)
-    bot.add_event_handler(Events.STARTED, ext_write_info, 100, msg="TrailBot started")
-    bot.add_event_handler(Events.STARTED, time_logger, 99)
-    bot.add_event_handler(Events.COMPLETED, time_logger, 101)
-    bot.add_event_handler(Events.COMPLETED, ext_write_info, 100, msg="TrailBot completed.")
-    bot.add_event_handler(Events.ITERATION_COMPLETED, loss_reporter, 100)
+    from utils.trialbot.setup_bot import setup_bot, add_metric_printing
 
     if not args.test:
-        # --------------------- Training -------------------------------
+        bot = setup_bot(bot, epoch_model_saving=False, epoch_test_eval=False)
         from trialbot.training.extensions import every_epoch_model_saver
-        from utils.trialbot.extensions import end_with_nan_loss
-        from utils.trialbot.extensions import evaluation_on_dev_every_epoch, collect_garbage
-        from utils.trialbot.extensions import reset_variational_dropout
-        bot.add_event_handler(Events.ITERATION_STARTED, reset_variational_dropout, 100)
-        bot.add_event_handler(Events.ITERATION_STARTED, collect_garbage, 100)
-        bot.add_event_handler(Events.ITERATION_COMPLETED, end_with_nan_loss, 100)
         if args.dataset == 'squall0':
             bot.add_event_handler(Events.EPOCH_COMPLETED, every_epoch_model_saver, 100)
-        bot.add_event_handler(Events.EPOCH_COMPLETED, evaluation_on_dev_every_epoch, 90)
-        # bot.add_event_handler(Events.EPOCH_COMPLETED, evaluation_on_dev_every_epoch, 80, on_test_data=True)
-        bot.add_event_handler(Events.EPOCH_COMPLETED, get_metrics, 100, prefix="Training Metrics: ")
         bot.updater = get_updater(bot)
 
         @bot.attach_extension(Events.EPOCH_STARTED, 50)
@@ -137,7 +85,7 @@ def setup_bot(args, get_model_func=None, trialname='base'):
             model.attn_tau_linear_scheduler(bot.state.epoch, bot.hparams.TRAINING_LIMIT)
 
     else:
-        bot.add_event_handler(Events.EPOCH_COMPLETED, get_metrics, 100, prefix="Testing Metrics")
+        bot = add_metric_printing(bot, "Testing Metrics: ")
 
     return bot
 
