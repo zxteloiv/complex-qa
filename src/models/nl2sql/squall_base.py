@@ -1,12 +1,13 @@
 import logging
 import random
 from itertools import product, chain
+from math import prod
 from typing import Dict, Any, Tuple, List, Union, Literal
 
 import torch
 import re
 from allennlp.training.metrics import Average
-from allennlp.nn.util import masked_log_softmax
+from allennlp.nn.util import masked_log_softmax, masked_mean
 from fuzzywuzzy import fuzz
 from torch import nn
 from trialbot.data import NSVocabulary
@@ -129,6 +130,7 @@ class SquallBaseParser(nn.Module):
         self.dec_acc_pred = Average()
         self.item_count = 0
         self.match_stats = None
+        self.sparsity = [Average(), Average(), Average(), Average()]
 
     def set_attn_weight_policy(self, weight_policy: str):
         policies = ('softmax', 'tau_schedule',
@@ -170,6 +172,7 @@ class SquallBaseParser(nn.Module):
                   "AVG_LOSS": round(self.mean_loss.get_metric(reset), 6),
                   "COUNT": self.item_count,
                   "TaskAcc": [round(n / d, 4) if d > 0 else 'nan' for n, d in self.match_stats],
+                  "Sparsity": [round(m.get_metric(reset), 4) for m in self.sparsity]
                   }
         if reset:
             self.item_count = 0
@@ -229,9 +232,10 @@ class SquallBaseParser(nn.Module):
         gold_predictions = (tgt_type[:, 1:], tgt_keyword[:, 1:], tgt_col_type[:, 1:],
                             tgt_col_id[:, 1:], tgt_literal_begin[:, 1:], tgt_literal_end[:, 1:])
         losses, matches, match_stat = self.get_prediction_losses(logprob_dict, *gold_predictions)
+        sql_mask = tgt_type[:, 1:] != self.ttype_map['pad']
         losses.extend(self.get_alignment_loss(
             mem, align_ws_word, align_ws_sql, align_wc_word, align_wc_col, align_sc_sql, align_sc_col,
-            word_mask, col_mask, tgt_type[:, 1:] != self.ttype_map['pad']
+            word_mask, col_mask, sql_mask
         ))
         final_loss = sum(losses)
 
@@ -448,6 +452,7 @@ class SquallBaseParser(nn.Module):
             _get_loss('sql_word_attn', s2w_attn, ws_sql, ws_word, sql_mask, word_mask), # (b, #sql, #words)
             _get_loss('sql_col_attn', s2c_attn, sc_sql, sc_col, sql_mask, col_mask),  # (b, #sql, #words)
         ]
+        self._compute_sparsity_metrics(mem, word_mask, col_mask, sql_mask)
         return losses
 
     def compute_metrics(self, word_pivot, col_pivot, matches, match_stat, tgt_type, final_loss):
@@ -468,6 +473,31 @@ class SquallBaseParser(nn.Module):
             for i, (n, d) in enumerate(match_stat):
                 self.match_stats[i][0] += n
                 self.match_stats[i][1] += d
+
+    def _compute_sparsity_metrics(self, mem: SeqCollector,
+                                  word_mask, col_mask, sql_mask
+                                  ):
+        if self.training:
+            return
+        # sparsity metrics
+        s2w_attn = mem.get_stacked_tensor(self.step_attn_keys[0])
+        s2c_attn = mem.get_stacked_tensor(self.step_attn_keys[1])
+        w2c_attn = self.word_col_attn.get_latest_attn_weights()
+        c2w_attn = self.col_word_attn.get_latest_attn_weights()
+
+        word_len, col_len = word_mask.sum(-1), col_mask.sum(-1)
+
+        s2w_gini = self._slow_gini_index(s2w_attn, word_len)    # (b, sql_len)
+        s2c_gini = self._slow_gini_index(s2c_attn, col_len)     # (b, sql_len)
+        w2c_gini = self._slow_gini_index(w2c_attn, col_len)     # (b, word_len)
+        c2w_gini = self._slow_gini_index(c2w_attn, word_len)    # (b, col_len)
+        s2w_sparsity = masked_mean(s2w_gini, sql_mask, dim=-1)
+        s2c_sparsity = masked_mean(s2c_gini, sql_mask, dim=-1)
+        w2c_sparsity = masked_mean(w2c_gini, word_mask, dim=-1)
+        c2w_sparsity = masked_mean(c2w_gini, col_mask, dim=-1)
+        for m, vs in zip(self.sparsity, (s2w_sparsity, s2c_sparsity, w2c_sparsity, c2w_sparsity)):
+            for v in vs:
+                m(v)
 
     def decode_logprob(self, logprob_dict: dict):
         return tuple(logprob_dict[k].argmax(dim=-1) for k in self.step_prediction_keys)
@@ -716,6 +746,29 @@ class SquallBaseParser(nn.Module):
         oracle_weight[batch, align_vec, align_mat] = dup_num.reciprocal() * align_mask
         return oracle_weight
 
+    @staticmethod
+    def _slow_gini_index(weights: torch.Tensor, lengths: torch.LongTensor):
+        """
+
+        :param weights: (b, *, max_num_classes)
+        :param lengths: (b,) indicating valid num_classes
+        :return:
+        """
+        old_size = weights.size()   # (b, *, num_classes)
+        row_len = prod(old_size[1:-1])
+        rw = weights.reshape(-1, old_size[-1])  # (-1, num_classes)
+        sw, _ = rw.sort(dim=-1)
+
+        def gini_1d(w: torch.Tensor) -> torch.Tensor:
+            acc: torch.Tensor = 0   # noqa
+            N = w.size(0)   # w is a 1-d vector
+            for k, c in enumerate(w):
+                acc += c * (N - (k + 1) + .5) / N
+            return 1 - 2 * acc
+
+        indices = torch.stack([gini_1d(row[-lengths[i // row_len]:]) for i, row in enumerate(sw)])
+        return indices.reshape(old_size[:-1])   # (b, *)
+
 
 def logprob(logits, mask=None):
     return masked_log_softmax(logits, mask, dim=-1)
@@ -748,58 +801,12 @@ def parse_number(s):
 
 
 NUM_MAPPING = {
-    'half': 0.5,
-    'one': 1,
-    'two': 2,
-    'three': 3,
-    'four': 4,
-    'five': 5,
-    'six': 6,
-    'seven': 7,
-    'eight': 8,
-    'nine': 9,
-    'ten': 10,
-    'eleven': 11,
-    'twelve': 12,
-    'twenty': 20,
-    'thirty': 30,
-    'once': 1,
-    'twice': 2,
-    'first': 1,
-    'second': 2,
-    'third': 3,
-    'fourth': 4,
-    'fifth': 5,
-    'sixth': 6,
-    'seventh': 7,
-    'eighth': 8,
-    'ninth': 9,
-    'tenth': 10,
-    'hundred': 100,
-    'thousand': 1000,
-    'million': 1000000,
-    'jan': 1,
-    'feb': 2,
-    'mar': 3,
-    'apr': 4,
-    'may': 5,
-    'jun': 6,
-    'jul': 7,
-    'aug': 8,
-    'sep': 9,
-    'oct': 10,
-    'nov': 11,
-    'dec': 12,
-    'january': 1,
-    'february': 2,
-    'march': 3,
-    'april': 4,
-    'june': 6,
-    'july': 7,
-    'august': 8,
-    'september': 9,
-    'october': 10,
-    'november': 11,
-    'december': 12,
+    'half': 0.5, 'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5, 'six': 6, 'seven': 7, 'eight': 8, 'nine': 9,
+    'ten': 10, 'eleven': 11, 'twelve': 12, 'twenty': 20, 'thirty': 30,
+    'once': 1, 'twice': 2, 'first': 1, 'second': 2, 'third': 3, 'fourth': 4, 'fifth': 5, 'sixth': 6, 'seventh': 7,
+    'eighth': 8, 'ninth': 9, 'tenth': 10, 'hundred': 100, 'thousand': 1000, 'million': 1000000,
+    'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4, 'may': 5, 'jun': 6, 'jul': 7, 'aug': 8, 'sep': 9, 'oct': 10, 'nov': 11,
+    'dec': 12, 'january': 1, 'february': 2, 'march': 3, 'april': 4, 'june': 6, 'july': 7, 'august': 8, 'september': 9,
+    'october': 10, 'november': 11, 'december': 12,
 }
 
