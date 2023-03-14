@@ -491,6 +491,7 @@ class SquallBaseParser(nn.Module):
         s2c_gini = self._slow_gini_index(s2c_attn, col_len)     # (b, sql_len)
         w2c_gini = self._slow_gini_index(w2c_attn, col_len)     # (b, word_len)
         c2w_gini = self._slow_gini_index(c2w_attn, word_len)    # (b, col_len)
+        logger = logging.getLogger(self.__class__.__name__)
         s2w_sparsity = masked_mean(s2w_gini, sql_mask, dim=-1)
         s2c_sparsity = masked_mean(s2c_gini, sql_mask, dim=-1)
         w2c_sparsity = masked_mean(w2c_gini, word_mask, dim=-1)
@@ -498,6 +499,22 @@ class SquallBaseParser(nn.Module):
         for m, vs in zip(self.sparsity, (s2w_sparsity, s2c_sparsity, w2c_sparsity, c2w_sparsity)):
             for v in vs:
                 m(v)
+
+        sql_len = sql_mask.sum(-1)
+        for i in range(sql_mask.size(0)):
+            logger.debug(f"gini stat (s2w): "
+                         f"num({sql_len[i].item()}) "
+                         f"mean({round(s2w_sparsity[i].item(), 4)})"
+                         f" ------- "
+                         f"gini stat (s2c): "
+                         f"num({sql_len[i].item()}) "
+                         f"mean({round(s2c_sparsity[i].item(), 4)})")
+            for j in range(sql_mask.size(1)):
+                if sql_mask[i, j] > 0:
+                    logger.debug(f"gini-s2w: {s2w_gini[i, j].item()} "
+                                 f"weight: {list(round(x, 4) for x in s2w_attn[i, j, :word_len[i]].tolist())}")
+                    logger.debug(f"gini-s2c: {s2c_gini[i, j].item()} "
+                                 f"weight: {list(round(x, 4) for x in s2c_attn[i, j, :col_len[i]].tolist())}")
 
     def decode_logprob(self, logprob_dict: dict):
         return tuple(logprob_dict[k].argmax(dim=-1) for k in self.step_prediction_keys)
