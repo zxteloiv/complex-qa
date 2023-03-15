@@ -799,9 +799,8 @@ class SquallBaseParser(nn.Module):
         def gini_1d(w: torch.Tensor) -> torch.Tensor:
             acc: torch.Tensor = 0   # noqa
             N = w.size(0)   # w is a 1-d vector
-            l1norm = torch.abs(w).sum()
             for k, c in enumerate(w):
-                acc += c / l1norm * (N - (k + 1) + .5) / N
+                acc += c * (N - (k + 1) + .5) / N
             return 1 - 2 * acc
 
         indices = torch.stack([gini_1d(row[-lengths[i // row_len]:]) for i, row in enumerate(sw)])
