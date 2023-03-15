@@ -131,6 +131,7 @@ class SquallBaseParser(nn.Module):
         self.item_count = 0
         self.match_stats = None
         self.sparsity = [Average(), Average(), Average(), Average()]
+        self.nonzeros = [Average(), Average(), Average(), Average()]
 
     def set_attn_weight_policy(self, weight_policy: str):
         policies = ('softmax', 'tau_schedule',
@@ -172,7 +173,8 @@ class SquallBaseParser(nn.Module):
                   "AVG_LOSS": round(self.mean_loss.get_metric(reset), 6),
                   "COUNT": self.item_count,
                   "TaskAcc": [round(n / d, 4) if d > 0 else 'nan' for n, d in self.match_stats],
-                  "Sparsity": [round(m.get_metric(reset), 4) for m in self.sparsity]
+                  "Sparsity": [round(m.get_metric(reset), 4) for m in self.sparsity],
+                  "NonZeros": [round(m.get_metric(reset), 4) for m in self.nonzeros],
                   }
         if reset:
             self.item_count = 0
@@ -479,14 +481,15 @@ class SquallBaseParser(nn.Module):
                                   ):
         if self.training:
             return
-        # sparsity metrics
+        # sparsity on the attention weights
         s2w_attn = mem.get_stacked_tensor(self.step_attn_keys[0])
         s2c_attn = mem.get_stacked_tensor(self.step_attn_keys[1])
         w2c_attn = self.word_col_attn.get_latest_attn_weights()
         c2w_attn = self.col_word_attn.get_latest_attn_weights()
 
-        word_len, col_len = word_mask.sum(-1), col_mask.sum(-1)
+        word_len, col_len = word_mask.sum(-1), col_mask.sum(-1) # (b,)
 
+        # gini index as the sparsity metric
         s2w_gini = self._slow_gini_index(s2w_attn, word_len)    # (b, sql_len)
         s2c_gini = self._slow_gini_index(s2c_attn, col_len)     # (b, sql_len)
         w2c_gini = self._slow_gini_index(w2c_attn, col_len)     # (b, word_len)
@@ -515,6 +518,23 @@ class SquallBaseParser(nn.Module):
                                  f"weight: {list(round(x, 4) for x in s2w_attn[i, j, :word_len[i]].tolist())}")
                     logger.debug(f"gini-s2c: {s2c_gini[i, j].item()} "
                                  f"weight: {list(round(x, 4) for x in s2c_attn[i, j, :col_len[i]].tolist())}")
+
+        # nonzero ratio as the sparsity metric
+        def mean_nonzero(t, n1_length, n2_mask, eps=1e-8):
+            # t: (batch, n2, n1)
+            # n1_length: (batch,)
+            # n2_mask: (batch, n2)
+            nzr = (t > 5e-5).sum(dim=-1) / (n1_length.unsqueeze(-1) + eps)
+            mean_nzr = masked_mean(nzr, n2_mask, dim=-1)
+            return mean_nzr     # (b,)
+
+        s2w_nzr = mean_nonzero(s2w_attn, word_len, sql_mask)
+        s2c_nzr = mean_nonzero(s2c_attn, col_len, sql_mask)
+        w2c_nzr = mean_nonzero(w2c_attn, col_len, word_mask)
+        c2w_nzr = mean_nonzero(c2w_attn, word_len, col_mask)
+        for m, vs in zip(self.nonzeros, (s2w_nzr, s2c_nzr, w2c_nzr, c2w_nzr)):
+            for v in vs:
+                m(v)
 
     def decode_logprob(self, logprob_dict: dict):
         return tuple(logprob_dict[k].argmax(dim=-1) for k in self.step_prediction_keys)
