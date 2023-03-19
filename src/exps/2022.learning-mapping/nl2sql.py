@@ -64,6 +64,13 @@ def base_param():
 
 
 @Registry.hparamset()
+def even_mha():
+    p = base_param()
+    p.even_mha = True
+    return p
+
+
+@Registry.hparamset()
 def oracle_as_weight():
     p = base_param()
     p.attn_weight_policy = 'oracle_as_weight'

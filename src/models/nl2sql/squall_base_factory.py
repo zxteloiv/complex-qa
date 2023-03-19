@@ -1,3 +1,4 @@
+import torch
 from torch import nn
 
 from models.base_s2s.model_factory import EncoderStackMixin
@@ -16,8 +17,35 @@ class SquallBaseBuilder(EncoderStackMixin):
         self.start_tok = START_SYMBOL
         self.end_tok = END_SYMBOL
 
+    def get_even_attn(self, vector_dim, matrix_dim, is_sparse: bool = False):
+        from models.interfaces.attention import AdaptiveAttnLogits
+
+        class EvenLogits(AdaptiveAttnLogits):
+            def matrix_attn_logits(self, inputs, attend_over) -> torch.Tensor:
+                """
+                :param inputs: (b, M, inp)
+                :param attend_over: (b, N, att)
+                :return: (b, M, N)
+                """
+                b, M, _ = inputs.size()
+                N = attend_over.size(1)
+                return torch.zeros((b, M, N), device=attend_over.device).softmax(dim=-1)
+
+        attn = AdaptiveGeneralAttention(
+            EvenLogits(),
+            pre_q_mapping=nn.Linear(vector_dim, matrix_dim),
+            pre_k_mapping=nn.Linear(matrix_dim, matrix_dim),
+            pre_v_mapping=nn.Linear(matrix_dim, matrix_dim),
+            post_ctx_mapping=nn.Linear(matrix_dim, matrix_dim),
+            is_sparse=is_sparse,
+        )
+        return attn
+
     def get_mha(self, vector_dim, matrix_dim, is_sparse: bool = False):
         p = self.p
+        if getattr(p, 'even_mha', False):
+            return self.get_even_attn(vector_dim, matrix_dim, is_sparse)
+
         num_heads = self.p.num_heads
         attn = AdaptiveGeneralAttention(
             AdaptiveAllenLogits(MatrixAttention.by_name('dot_product')()),
