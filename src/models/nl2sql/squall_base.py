@@ -133,6 +133,13 @@ class SquallBaseParser(nn.Module):
         self.sparsity = [Average(), Average(), Average(), Average()]
         self.nonzeros = [Average(), Average(), Average(), Average()]
 
+        self.prfs = {
+            "s2w": [0, 0, 0, 0],   # s2w, precision total, valid, recall total, valid
+            "s2c": [0, 0, 0, 0],   # s2c
+            "w2c": [0, 0, 0, 0],   # w2c
+            "c2w": [0, 0, 0, 0],   # c2w
+        }
+
     def set_attn_weight_policy(self, weight_policy: str):
         policies = ('softmax', 'tau_schedule',
                     'oracle_sup', 'hungarian_sup',
@@ -176,6 +183,16 @@ class SquallBaseParser(nn.Module):
                   "Sparsity": [round(m.get_metric(reset), 4) for m in self.sparsity],
                   "NonZeros": [round(m.get_metric(reset), 4) for m in self.nonzeros],
                   }
+
+        prf_metrics = {}
+        for k in ('s2w', 's2c', 'w2c', 'c2w'):
+            t = self.prfs[k]
+            p = t[1] / (t[0] + 1e-12)
+            r = t[3] / (t[2] + 1e-12)
+            f1 = 2 * p * r / (p + r)
+            prf_metrics[k] = [round(v, 4) for v in (p, r, f1)]
+        metric['PRF'] = prf_metrics
+
         if reset:
             self.item_count = 0
             self.match_stats = None
@@ -242,6 +259,10 @@ class SquallBaseParser(nn.Module):
         final_loss = sum(losses)
 
         self.compute_metrics(word_mask, col_mask, matches, match_stat, tgt_type[:, 1:], final_loss)
+        self._compute_sparsity_metrics(mem, word_mask, col_mask, sql_mask,  # noqa
+                                       align_ws_word, align_ws_sql,
+                                       align_wc_word, align_wc_col,
+                                       align_sc_sql, align_sc_col)
 
         output = {"src_id": src_ids, "src_type": src_types, "tgt_type": tgt_type,
                   "tgt_keyword": tgt_keyword, "tgt_col_type": tgt_col_type, "tgt_col_id": tgt_col_id,
@@ -454,7 +475,6 @@ class SquallBaseParser(nn.Module):
             _get_loss('sql_word_attn', s2w_attn, ws_sql, ws_word, sql_mask, word_mask), # (b, #sql, #words)
             _get_loss('sql_col_attn', s2c_attn, sc_sql, sc_col, sql_mask, col_mask),  # (b, #sql, #words)
         ]
-        self._compute_sparsity_metrics(mem, word_mask, col_mask, sql_mask)
         return losses
 
     def compute_metrics(self, word_pivot, col_pivot, matches, match_stat, tgt_type, final_loss):
@@ -477,7 +497,8 @@ class SquallBaseParser(nn.Module):
                 self.match_stats[i][1] += d
 
     def _compute_sparsity_metrics(self, mem: SeqCollector,
-                                  word_mask, col_mask, sql_mask
+                                  word_mask, col_mask, sql_mask,
+                                  ws_w, ws_s, wc_w, wc_c, sc_s, sc_c,
                                   ):
         if self.training:
             return
@@ -535,6 +556,16 @@ class SquallBaseParser(nn.Module):
         for m, vs in zip(self.nonzeros, (s2w_nzr, s2c_nzr, w2c_nzr, c2w_nzr)):
             for v in vs:
                 m(v)
+
+        # argmax decoding for F1
+        def add_to_prfs(attn_stat, index):
+            for j, s in enumerate(attn_stat):
+                self.prfs[index][j] += s
+
+        add_to_prfs(self.get_attn_prf(s2w_attn, ws_s, ws_w, sql_mask, word_mask), 's2w')
+        add_to_prfs(self.get_attn_prf(s2c_attn, sc_s, sc_c, sql_mask, col_mask), 's2c')
+        add_to_prfs(self.get_attn_prf(w2c_attn, wc_w, wc_c, word_mask, col_mask), 'w2c')
+        add_to_prfs(self.get_attn_prf(c2w_attn, wc_c, wc_w, col_mask, word_mask), 'c2w')
 
     def decode_logprob(self, logprob_dict: dict):
         return tuple(logprob_dict[k].argmax(dim=-1) for k in self.step_prediction_keys)
@@ -763,6 +794,27 @@ class SquallBaseParser(nn.Module):
         # following the baseline choice,
         # attentions related to unaligned vec or unaligned mat must also be trained towards 0
         return raw_l2_loss.sum(dim=(1, 2)).mean()
+
+    def get_attn_prf(self, weights, align_vec, align_mat, vec_mask, mat_mask):
+        bsz, vec_len, mat_len = weights.size()
+        dev = weights.device
+        # (b, #vec, #mat)
+        tgt = 0 < self._get_oracle_weights_from_alignments(vec_len, mat_len, align_vec, align_mat)
+
+        weights = weights * vec_mask.unsqueeze(-1) * mat_mask.unsqueeze(-2)
+        decoded = torch.zeros_like(tgt)
+        batch_range = torch.arange(bsz, device=dev).unsqueeze(-1)   # (b, 1)
+        vec_range = torch.arange(vec_len, device=dev).unsqueeze(0)  # (1, #vec)
+        decoded[batch_range, vec_range, weights.argmax(dim=-1)] = 1
+        comp = decoded == tgt   # (b, #v, #m)
+
+        # precision, both (b,)
+        p_total = decoded.sum().item()
+        p_valid = (comp * decoded).sum().item()
+        # recall, both (b,)
+        r_total = tgt.sum().item()
+        r_valid = (comp * tgt).sum().item()
+        return p_total, p_valid, r_total, r_valid
 
     @staticmethod
     def _get_oracle_weights_from_alignments(vec_len: int, mat_len: int, align_vec, align_mat):
