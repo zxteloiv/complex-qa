@@ -115,13 +115,13 @@ class SQLova(nn.Module):
             "AVG_LOSS": round(self.mean_loss.get_metric(reset), 6),
             "COUNT": self.item_count,
             "MODULE_ACC": {
-                "select": round(self.acc_select.get_metric(reset), 2),
-                "agg": round(self.acc_agg.get_metric(reset), 2),
-                "cond_num": round(self.acc_num.get_metric(reset), 2),
-                "cond_cols": round(self.acc_cols.get_metric(reset), 2),
-                "cond_ops": round(self.acc_ops.get_metric(reset), 2),
-                "span_begin": round(self.acc_begin.get_metric(reset), 2),
-                "span_end": round(self.acc_end.get_metric(reset), 2),
+                "select": round(self.acc_select.get_metric(reset), 4),
+                "agg": round(self.acc_agg.get_metric(reset), 4),
+                "cond_num": round(self.acc_num.get_metric(reset), 4),
+                "cond_cols": round(self.acc_cols.get_metric(reset), 4),
+                "cond_ops": round(self.acc_ops.get_metric(reset), 4),
+                "span_begin": round(self.acc_begin.get_metric(reset), 4),
+                "span_end": round(self.acc_end.get_metric(reset), 4),
             }
         }
         if reset:
