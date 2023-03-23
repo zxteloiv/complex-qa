@@ -60,7 +60,7 @@ class SQLova(nn.Module):
                 end_scorer=_get_bilinear(hid_sz * 3, hid_sz),
             ),
             use_metric_adaptive_losses=getattr(p, 'use_metric_adaptive_losses', False),
-            use_hungarian_loss=getattr(p, 'use_hungarian_loss', False),
+            use_hungarian_loss=getattr(p, 'use_hungarian_loss', 'none'),
         )
         return model
 
@@ -74,7 +74,7 @@ class SQLova(nn.Module):
                  mod_where_operator: 'WhereOps',
                  mod_where_value: 'WhereValue',
                  use_metric_adaptive_losses: bool = False,
-                 use_hungarian_loss: bool = False,
+                 use_hungarian_loss: str = 'none',  # none, partial, and full
                  ):
         super().__init__()
         self.plm_model = plm_model
@@ -151,7 +151,7 @@ class SQLova(nn.Module):
 
         loss = self.get_loss(sel_logp, agg_logp, cond_num_logp, col_prob, ops_logp, begin_prob, end_prob,
                              select, agg, where_num, where_cols, where_ops, where_begin, where_end)
-        if self.use_hungarian_loss:
+        if self.use_hungarian_loss != 'none':
             alignment_loss = self.get_alignment_losses(word_mask, col_mask)
             loss = loss + alignment_loss
 
@@ -220,13 +220,18 @@ class SQLova(nn.Module):
         return loss
 
     def get_alignment_losses(self, word_mask, col_mask):
-        attns: List[Attn] = [
-            self.sel_col.col_word_attn,
-            self.sel_agg.col_word_attn,
-            self.wh_col.col_word_attn,
-            self.wh_op.col_word_attn,
-            self.wh_val.col_word_attn,
-        ]
+        if self.use_hungarian_loss == 'partial':
+            attns: List[Attn] = [
+                self.sel_agg.col_word_attn,
+            ]
+        else:
+            attns: List[Attn] = [
+                self.sel_col.col_word_attn,
+                self.sel_agg.col_word_attn,
+                self.wh_col.col_word_attn,
+                self.wh_op.col_word_attn,
+                self.wh_val.col_word_attn,
+            ]
         losses = [
             get_hungarian_reg_loss(attn.get_latest_attn_weights(), col_mask, word_mask)
             for attn in attns

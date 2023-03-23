@@ -84,7 +84,14 @@ def adaloss():
 @Registry.hparamset('sqlova-hungarian')
 def hungarian():
     p = base_params()
-    p.use_hungarian_loss = True
+    p.use_hungarian_loss = 'full'
+    return p
+
+
+@Registry.hparamset('partial-hungarian')
+def partial_hungarian():
+    p = base_params()
+    p.use_hungarian_loss = 'partial'  # will only apply the Hungarian tweak to the sel_agg attention
     return p
 
 
