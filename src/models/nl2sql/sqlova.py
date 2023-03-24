@@ -193,7 +193,8 @@ class SQLova(nn.Module):
 
         col_mask = where_cols >= 0  # where_cols contains only 0 or 1 indicating column selection, padded by -1
         # cond_col_loss = (((col_prob - where_cols) ** 2 / 2) * col_mask).sum(-1).mean()
-        cond_col_loss = - ((where_cols * col_prob.log() + (1 - where_cols) * (1 - col_prob).log())
+        cond_col_loss = - ((where_cols * col_prob.clamp(min=1e-8).log()
+                            + (1 - where_cols) * (1 - col_prob).clamp(min=1e-8).log())
                            * col_mask).sum(-1).mean()
 
         ex_batch_idx = batch_idx.unsqueeze(-1)  # (b, 1)
