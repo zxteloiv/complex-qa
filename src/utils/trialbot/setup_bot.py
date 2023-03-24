@@ -25,8 +25,8 @@ def setup_bot(bot: TrialBot,
 
 
 def add_model_saving(bot: TrialBot):
-    from utils.trialbot.extensions import reset_variational_dropout
-    bot.add_event_handler(Events.ITERATION_STARTED, reset_variational_dropout, 100)
+    from trialbot.training.extensions import every_epoch_model_saver
+    bot.add_event_handler(Events.ITERATION_STARTED, every_epoch_model_saver, 100)
     return bot
 
 
