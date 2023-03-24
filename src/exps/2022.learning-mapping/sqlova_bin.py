@@ -58,7 +58,7 @@ def base_params():
     from trialbot.training.hparamset import HyperParamSet
     from trialbot.utils.root_finder import find_root
     p = HyperParamSet.common_settings(find_root())
-    p.TRAINING_LIMIT = 80
+    p.TRAINING_LIMIT = 50
     p.WEIGHT_DECAY = 0
     p.OPTIM = "adabelief"
     p.optim_kwargs = {"rectify": False}
