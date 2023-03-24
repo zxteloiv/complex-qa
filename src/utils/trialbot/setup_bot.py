@@ -26,7 +26,7 @@ def setup_bot(bot: TrialBot,
 
 def add_model_saving(bot: TrialBot):
     from trialbot.training.extensions import every_epoch_model_saver
-    bot.add_event_handler(Events.ITERATION_STARTED, every_epoch_model_saver, 100)
+    bot.add_event_handler(Events.EPOCH_COMPLETED, every_epoch_model_saver, 100)
     return bot
 
 
