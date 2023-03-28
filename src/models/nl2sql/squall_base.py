@@ -20,6 +20,7 @@ from models.modules.attention_wrapper import AdaptiveGeneralAttention
 from models.nl2sql.p_tuning_v2 import PTuningV2Prompt
 from models.nl2sql.hungarian_loss import get_hungarian_reg_loss, get_hungarian_sup_loss
 from utils.nn import aggregate_layered_state, assign_stacked_states, compact_mask_select
+from utils.gini import slow_gini_index
 from utils.seq_collector import SeqCollector
 
 IAttn = AdaptiveGeneralAttention
@@ -511,10 +512,10 @@ class SquallBaseParser(nn.Module):
         word_len, col_len = word_mask.sum(-1), col_mask.sum(-1) # (b,)
 
         # gini index as the sparsity metric
-        s2w_gini = self._slow_gini_index(s2w_attn, word_len)    # (b, sql_len)
-        s2c_gini = self._slow_gini_index(s2c_attn, col_len)     # (b, sql_len)
-        w2c_gini = self._slow_gini_index(w2c_attn, col_len)     # (b, word_len)
-        c2w_gini = self._slow_gini_index(c2w_attn, word_len)    # (b, col_len)
+        s2w_gini = slow_gini_index(s2w_attn, word_len)    # (b, sql_len)
+        s2c_gini = slow_gini_index(s2c_attn, col_len)     # (b, sql_len)
+        w2c_gini = slow_gini_index(w2c_attn, col_len)     # (b, word_len)
+        c2w_gini = slow_gini_index(c2w_attn, word_len)    # (b, col_len)
         logger = logging.getLogger(self.__class__.__name__)
         s2w_sparsity = masked_mean(s2w_gini, sql_mask, dim=-1)
         s2c_sparsity = masked_mean(s2c_gini, sql_mask, dim=-1)
@@ -834,29 +835,6 @@ class SquallBaseParser(nn.Module):
         # since the target is defaulted to 0, setting invalid alignments to 0 is just fine.
         oracle_weight[batch, align_vec, align_mat] = dup_num.reciprocal() * align_mask
         return oracle_weight
-
-    @staticmethod
-    def _slow_gini_index(weights: torch.Tensor, lengths: torch.LongTensor):
-        """
-
-        :param weights: (b, *, max_num_classes)
-        :param lengths: (b,) indicating valid num_classes
-        :return:
-        """
-        old_size = weights.size()   # (b, *, num_classes)
-        row_len = prod(old_size[1:-1])
-        rw = weights.reshape(-1, old_size[-1])  # (-1, num_classes)
-        sw, _ = rw.sort(dim=-1)
-
-        def gini_1d(w: torch.Tensor) -> torch.Tensor:
-            acc: torch.Tensor = 0   # noqa
-            N = w.size(0)   # w is a 1-d vector
-            for k, c in enumerate(w):
-                acc += c * (N - (k + 1) + .5) / N
-            return 1 - 2 * acc
-
-        indices = torch.stack([gini_1d(row[-lengths[i // row_len]:]) for i, row in enumerate(sw)])
-        return indices.reshape(old_size[:-1])   # (b, *)
 
 
 def logprob(logits, mask=None):

@@ -1,3 +1,4 @@
+import logging
 from typing import Union, Optional, Tuple, Dict, Any, Literal, List
 import numpy as np
 import torch
@@ -85,13 +86,15 @@ class BaseSeq2Seq(torch.nn.Module):
         self.src_len = Average()
         self.tgt_len = Average()
         self.item_count = 0
+        self.sparsity = Average()
 
     def get_metric(self, reset=False):
-        metric = {"PPL": self.ppl.get_metric(reset),
-                  "ERR": self.err_rate.get_metric(reset),
+        metric = {"PPL": round(self.ppl.get_metric(reset), 6),
+                  "ERR": round(self.err_rate.get_metric(reset), 6),
                   "COUNT": self.item_count,
-                  "SLEN": self.src_len.get_metric(reset),
-                  "TLEN": self.tgt_len.get_metric(reset),
+                  "SLEN": round(self.src_len.get_metric(reset), 2),
+                  "TLEN": round(self.tgt_len.get_metric(reset), 2),
+                  "GINI": round(self.sparsity.get_metric(reset), 6),
                   }
         metric.update(self.bleu.get_metric(reset))
         if reset:
@@ -133,12 +136,14 @@ class BaseSeq2Seq(torch.nn.Module):
         if not isinstance(source_tokens, torch.Tensor):
             source_tokens = source_tokens['input_ids']  # if the source token is a UserDict for PLM models
 
-        output = {'source': source_tokens}
+        output = {'source': source_tokens, "loss": 0}
         if self.training:
             output['loss'] = self._compute_loss(logits, target_tokens, state_mask)
 
         if target_tokens is not None:
             total_err = self._compute_metrics(source_tokens, target_tokens, preds, logits)
+            target_mask = prepare_input_mask(target_tokens)[1][:, 1:].contiguous().bool()
+            self._compute_gini_index(state_mask, target_mask)
             output.update(errno=total_err.tolist())
 
         output.update(predictions=preds, logits=logits, target=target_tokens)
@@ -375,3 +380,22 @@ class BaseSeq2Seq(torch.nn.Module):
 
         else:
             return 0
+
+    def _compute_gini_index(self, state_mask, tgt_mask):
+        if self.training:
+            return
+
+        from utils.gini import slow_gini_index
+        from allennlp.nn.util import masked_mean
+
+        attn_weight = self.mem.get_stacked_tensor('proj_enc_attn')  # (b, tgt_len, src_len)
+        if attn_weight is None:
+            logging.getLogger(self.__class__.__name__).warning(
+                "attention not saved and thus unfetchable"
+            )
+            return
+
+        gini = slow_gini_index(attn_weight, state_mask.sum(dim=-1)) # (b, tgt_len)
+        sparsities = masked_mean(gini, tgt_mask, dim=-1)    # (b,)
+        for v in sparsities:
+            self.sparsity(v)
