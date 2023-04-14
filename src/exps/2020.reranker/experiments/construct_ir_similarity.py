@@ -19,11 +19,11 @@ from functools import partial
 
 def nl_ngram(args):
     if args.dataset == "atis":
-        from datasets.atis_rank import atis_pure_none
+        from shujuji.atis_rank import atis_pure_none
         fn_load_data = atis_pure_none
         core = "atis_none_lf"
     elif args.dataset == "django":
-        from datasets.django_rank import django_pure_none
+        from shujuji.django_rank import django_pure_none
         fn_load_data = django_pure_none
         core = "django_none_lf"
     else:
@@ -54,11 +54,11 @@ def nl_ngram(args):
 
 def lf_ngram(args):
     if args.dataset == "atis":
-        from datasets.atis_rank import atis_five
+        from shujuji.atis_rank import atis_five
         fn_load_data = atis_five
         core = "atis_5_lf"
     elif args.dataset == "django":
-        from datasets.django_rank import django_15
+        from shujuji.django_rank import django_15
         fn_load_data = django_15
         core = "django_15_lf"
     else:
@@ -69,7 +69,7 @@ def lf_ngram(args):
 
     # find similarities for training, dev, and test set
     output = []
-    from datasets.cached_retriever import get_hyp_key
+    from shujuji.cached_retriever import get_hyp_key
     for dataset in datasets:
         ds_rtn = defaultdict(list)
         for ex in tqdm(dataset, total=len(dataset)):
@@ -91,10 +91,10 @@ def lf_ngram(args):
 
 def lf_ted(args):
     if args.dataset == "atis":
-        from datasets.atis_rank import atis_five as fn_load_data
+        from shujuji.atis_rank import atis_five as fn_load_data
         core, ted_key, transform = "atis_5_lf", "hyp", CodeTransform.dump_lambda
     elif args.dataset == "django":
-        from datasets.django_rank import django_15 as fn_load_data
+        from shujuji.django_rank import django_15 as fn_load_data
         core, ted_key, transform = "django_15_lf", "hyp_tree", CodeTransform.dump_python_ast_tree
     else:
         raise ValueError("dataset not found")
@@ -104,7 +104,7 @@ def lf_ted(args):
 
     # find similarities for training, dev, and test set
     output = []
-    from datasets.cached_retriever import get_hyp_key
+    from shujuji.cached_retriever import get_hyp_key
     for dataset in datasets:
         ds_rtn = defaultdict(list)
         # pool = multiprocessing.Pool(processes=min(multiprocessing.cpu_count(), 6))

@@ -2,9 +2,9 @@ import sys
 sys.path = ['..'] + sys.path
 import os.path
 
-import datasets.cached_retriever as libretriever
-from datasets.atis_rank import atis_five
-from datasets.django_rank import django_five
+import shujuji.cached_retriever as libretriever
+from shujuji.atis_rank import atis_five
+from shujuji.django_rank import django_five
 
 from utils.root_finder import find_root
 

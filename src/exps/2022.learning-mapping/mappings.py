@@ -29,7 +29,7 @@ def get_all_ngrams(s: Sequence, n_min=1, n_max=None):
 
 
 def main(args):
-    from datasets.comp_gen_bundle import install_raw_qa_datasets
+    from shujuji.comp_gen_bundle import install_raw_qa_datasets
     from trialbot.training import Registry
     install_raw_qa_datasets(Registry._datasets)
     train, dev, test = Registry.get_dataset(args.dataset)

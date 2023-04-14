@@ -7,9 +7,9 @@ def main():
     from libs2s import setup_common_bot
     from models.transformer.model_factory import TransformerBuilder
 
-    import datasets.comp_gen_bundle as cg_bundle
+    import shujuji.comp_gen_bundle as cg_bundle
     cg_bundle.install_parsed_qa_datasets(Registry._datasets)
-    import datasets.cg_bundle_translator
+    import shujuji.cg_bundle_translator
 
     install_hparamsets()
 

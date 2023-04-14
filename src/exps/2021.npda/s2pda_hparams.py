@@ -7,8 +7,8 @@ from trialbot.training.hparamset import HyperParamSet
 from trialbot.utils.root_finder import find_root
 
 sys.path.insert(0, osp.abspath(osp.join(osp.dirname(__file__), '..', '..')))
-import datasets.cfq_translator
-import datasets.cg_bundle_translator
+import shujuji.cfq_translator
+import shujuji.cg_bundle_translator
 
 @Registry.hparamset()
 def cfq_pda():
@@ -25,7 +25,7 @@ def cfq_pda():
     p.GRAD_CLIPPING = .2    # grad norm required to be <= 2
 
     p.src_ns = 'questionPatternModEntities'
-    p.tgt_ns = datasets.cfq_translator.TREE_NS
+    p.tgt_ns = shujuji.cfq_translator.TREE_NS
 
     # transformer requires input embedding equal to hidden size
     p.encoder = "bilstm"
@@ -80,7 +80,7 @@ def sql_pda():
     p.GRAD_CLIPPING = 1    # grad norm required to be <= 2
 
     p.src_ns = 'sent'
-    p.tgt_ns = datasets.cg_bundle_translator.TREE_NS
+    p.tgt_ns = shujuji.cg_bundle_translator.TREE_NS
 
     # transformer requires input embedding equal to hidden size
     p.encoder = "lstm"

@@ -1,6 +1,6 @@
 import sys
 sys.path.insert(0, '../..')
-import datasets.cfq as cfq
+import shujuji.cfq as cfq
 
 def get_dataset():
     ds_functions = [

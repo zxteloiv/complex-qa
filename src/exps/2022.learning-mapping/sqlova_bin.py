@@ -8,9 +8,9 @@ from trialbot.training import TrialBot
 
 
 def main():
-    from datasets.wikisql import install_dataset
+    from shujuji.wikisql import install_dataset
     install_dataset()
-    from datasets.wikisql_translator import install_translators
+    from shujuji.wikisql_translator import install_translators
     install_translators()
     from utils.trialbot.setup_cli import setup as setup_cli
     from utils.trialbot.setup_bot import setup_bot, add_metric_printing
@@ -96,8 +96,8 @@ def partial_hungarian():
 
 
 def debug():
-    from datasets.wikisql import install_dataset
-    from datasets.wikisql_translator import install_translators
+    from shujuji.wikisql import install_dataset
+    from shujuji.wikisql_translator import install_translators
     install_translators()
     install_dataset()
     train, dev, test = Registry.get_dataset('wikisql')

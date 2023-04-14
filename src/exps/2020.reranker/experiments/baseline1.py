@@ -37,10 +37,10 @@ def django_neo_none():
     hparams.TRAINING_LIMIT = 60
     return hparams
 
-import datasets.atis_rank
-import datasets.atis_rank_translator
-import datasets.django_rank
-import datasets.django_rank_translator
+import shujuji.atis_rank
+import shujuji.atis_rank_translator
+import shujuji.django_rank
+import shujuji.django_rank_translator
 
 def get_model(hparams, vocab):
     from experiments.build_model import get_re2_variant

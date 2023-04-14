@@ -7,8 +7,8 @@ sys.path.insert(0, find_root('.SRC'))
 
 def foo():
     from trialbot.data import NSVocabulary
-    from datasets.squall import install_squall_datasets
-    import datasets.squall_translator
+    from shujuji.squall import install_squall_datasets
+    import shujuji.squall_translator
     install_squall_datasets()
     train, dev, test = Registry.get_dataset('squall0')
     print('lengths:', len(train), len(dev), len(test))
@@ -28,7 +28,7 @@ def foo():
     print(vocab)
     print('---------------------')
 
-    from datasets.squall_translator import SquallAllInOneField
+    from shujuji.squall_translator import SquallAllInOneField
     field: SquallAllInOneField = translator.fields[0]
 
     for i, example in enumerate(train):
@@ -39,7 +39,7 @@ def foo():
 
 
 def inspect_ex(example, ex, field):
-    from datasets.squall_translator import SquallAllInOneField
+    from shujuji.squall_translator import SquallAllInOneField
     field: SquallAllInOneField
     from transformers import BertTokenizer
     berttok: BertTokenizer = field._tokenizer
@@ -101,7 +101,7 @@ def inspect_ex(example, ex, field):
 
 
 def bar():
-    import datasets.comp_gen_bundle as cg_bundle
+    import shujuji.comp_gen_bundle as cg_bundle
     import logging
     logging.getLogger().setLevel(logging.INFO)
     cg_bundle.install_raw_qa_datasets(Registry._datasets)

@@ -5,12 +5,12 @@ from os import path as osp
 
 def main():
     from utils.trialbot.setup_cli import setup as setup_cli
-    import datasets.comp_gen_bundle as cg_bundle
+    import shujuji.comp_gen_bundle as cg_bundle
     cg_bundle.install_parsed_qa_datasets(Registry._datasets)
     cg_bundle.install_cross_domain_parsed_qa_datasets(Registry._datasets)
     cg_bundle.install_raw_qa_datasets(Registry._datasets)
     cg_bundle.install_cross_domain_raw_qa_datasets(Registry._datasets)
-    import datasets.cg_bundle_translator
+    import shujuji.cg_bundle_translator
     bot = setup_common_bot(setup_cli(seed=2021, device=0, translator='s2s', dataset='raw_qa.all_iid', epoch=40))
     bot.run()
 

@@ -4,9 +4,9 @@ from trialbot.training import Registry
 def main():
     from utils.trialbot.setup_cli import setup as setup_cli
     from libs2s import setup_common_bot
-    import datasets.comp_gen_bundle as cg_bundle
+    import shujuji.comp_gen_bundle as cg_bundle
     cg_bundle.install_parsed_qa_datasets(Registry._datasets)
-    import datasets.cg_bundle_translator
+    import shujuji.cg_bundle_translator
     install_hparamsets()
 
     args = setup_cli(seed=2021, device=0)

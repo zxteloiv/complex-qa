@@ -7,7 +7,7 @@ from trialbot.data import NSVocabulary
 from utils.vocab_builder import get_ns_counter
 
 def atis(g):
-    from datasets import atis_rank, atis_rank_translator
+    from shujuji import atis_rank, atis_rank_translator
     if g == 'word':
         translator = atis_rank_translator.AtisRankTranslator(70)
     else:
@@ -27,7 +27,7 @@ def atis(g):
     print(vocab)
 
 def django(g):
-    from datasets import django_rank, django_rank_translator
+    from shujuji import django_rank, django_rank_translator
     if g == 'word':
         translator = django_rank_translator.DjangoRankTranslator(70)
     else:

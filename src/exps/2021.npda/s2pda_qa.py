@@ -18,12 +18,12 @@ if __name__ == '__main__':
 from utils.trialbot.setup_cli import setup
 from utils.select_optim import select_optim
 from trialbot.data.iterators import RandomIterator
-import datasets.cfq
-import datasets.cfq_translator as cfq_translator
-datasets.cfq.install_cfq_to_trialbot()
-import datasets.comp_gen_bundle as cg_bundle
+import shujuji.cfq
+import shujuji.cfq_translator as cfq_translator
+shujuji.cfq.install_cfq_to_trialbot()
+import shujuji.comp_gen_bundle as cg_bundle
 cg_bundle.install_parsed_qa_datasets(Registry._datasets)
-import datasets.cg_bundle_translator as sql_translator
+import shujuji.cg_bundle_translator as sql_translator
 
 import s2pda_hparams
 

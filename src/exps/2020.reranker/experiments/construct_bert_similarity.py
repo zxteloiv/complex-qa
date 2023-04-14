@@ -84,12 +84,12 @@ if __name__ == '__main__':
 
     if args.dataset == "atis":
         bert_sim_path = os.path.join(args.output_dir, 'atis_bert_nl.bin')
-        from datasets.atis_rank import atis_pure_none
+        from shujuji.atis_rank import atis_pure_none
         nbridx = cons.build(30, atis_pure_none)
 
     elif args.dataset == "django":
         bert_sim_path = os.path.join(args.output_dir, 'django_bert_nl.bin')
-        from datasets.django_rank import django_pure_none
+        from shujuji.django_rank import django_pure_none
         nbridx = cons.build(30, django_pure_none)
 
     else:

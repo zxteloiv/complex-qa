@@ -128,8 +128,8 @@ if __name__ == '__main__':
     # import datasets.cfq_translator
 
     from utils.trialbot.setup_cli import setup
-    import datasets.comp_gen_bundle as cg_bundle
+    import shujuji.comp_gen_bundle as cg_bundle
     cg_bundle.install_parsed_qa_datasets(Registry._datasets)
-    import datasets.cg_bundle_translator
+    import shujuji.cg_bundle_translator
 
     setup_common_bot(setup(seed=2021)).run()

@@ -1,9 +1,9 @@
 import sys
 sys.path.insert(0, '../../..')
-import datasets.django_rank
+import shujuji.django_rank
 from collections import defaultdict
 
-_, dev, _ = datasets.django_rank.django_five()
+_, dev, _ = shujuji.django_rank.django_five()
 
 def process_hyp(e):
     hyp_rank, src, tgt, hyp, is_correct = list(map(e.get, ("hyp_rank", "src", "tgt", "hyp", "is_correct")))

@@ -9,7 +9,7 @@ from trialbot.training.hparamset import HyperParamSet
 from trialbot.data.iterators import RandomIterator
 from trialbot.utils.move_to_device import move_to_device
 from trialbot.training.updater import Updater
-from datasets.cached_retriever import IDCacheRetriever, HypIDCacheRetriever
+from shujuji.cached_retriever import IDCacheRetriever, HypIDCacheRetriever
 import functools
 import copy
 import os.path
