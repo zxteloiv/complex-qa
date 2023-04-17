@@ -526,3 +526,58 @@ class Seq2SeqBuilder(EmbeddingMxin,
     def from_param_and_vocab(cls, p, vocab: NSVocabulary):
         return Seq2SeqBuilder(p, vocab).get_model()
 
+    @classmethod
+    def base_hparams(cls):
+        from trialbot.training.hparamset import HyperParamSet
+        from trialbot.utils.root_finder import find_root
+        p = HyperParamSet.common_settings(find_root())
+        p.TRAINING_LIMIT = 150
+        p.WEIGHT_DECAY = 0.
+        p.OPTIM = "adabelief"
+        p.ADAM_BETAS = (0.9, 0.999)
+        p.batch_sz = 16
+
+        p.lr_scheduler_kwargs = {'model_size': 400, 'warmup_steps': 50}
+        p.src_emb_pretrained_file = "~/.glove/glove.6B.100d.txt.gz"
+
+        p.hidden_sz = 300
+        p.dropout = .5
+        p.decoder = "lstm"
+        p.max_decoding_step = 100
+        p.scheduled_sampling = .1
+
+        p.num_enc_layers = 1
+        p.num_dec_layers = 1
+
+        p.tied_decoder_embedding = False
+        p.emb_sz = 100
+
+        p.enc_out_dim = p.hidden_sz
+        p.dec_in_dim = p.hidden_sz
+        p.dec_out_dim = p.hidden_sz
+
+        p.enc_dec_trans_usage = 'consistent'
+        p.enc_dec_trans_act = 'mish'
+        p.enc_dec_trans_forced = True
+
+        p.proj_in_dim = p.emb_sz
+
+        p.enc_dropout = 0
+        p.dec_dropout = 0.5
+        p.enc_attn = "dot_product"
+        p.dec_hist_attn = "none"
+        p.dec_inp_composer = 'cat_mapping'
+        p.dec_inp_comp_activation = 'mish'
+        p.proj_inp_composer = 'cat_mapping'
+        p.proj_inp_comp_activation = 'mish'
+
+        p.decoder_init_strategy = "forward_last_all"
+        p.encoder = 'bilstm'
+        p.use_cell_based_encoder = False
+        # cell-based encoders: typed_rnn, ind_rnn, onlstm, lstm, gru, rnn; see models.base_s2s.base_seq2seq.py file
+        # seq-based encoders: lstm, transformer, bilstm, aug_lstm, aug_bilstm; see models.base_s2s.stacked_encoder.py file
+        p.cell_encoder_is_bidirectional = True     # any cell-based RNN encoder above could be bidirectional
+        p.cell_encoder_uses_packed_sequence = False
+
+        return p
+

@@ -3,10 +3,9 @@ from trialbot.training import Registry
 
 def main():
     from utils.trialbot.setup_cli import setup as setup_cli
-    from libs2s import setup_common_bot
+    from utils.libs2s import setup_common_bot
     import shujuji.comp_gen_bundle as cg_bundle
     cg_bundle.install_parsed_qa_datasets(Registry._datasets)
-    import shujuji.cg_bundle_translator
     from shujuji import cogs, cogs_translator
     cogs.install_dataset()
     install_hparamsets()
@@ -20,7 +19,7 @@ def main():
 
 @Registry.hparamset('cogs-base')
 def cogs_base():
-    from libs2s import base_hparams
+    from utils.libs2s import base_hparams
     p = base_hparams()
     p.TRAINING_LIMIT = 10
     p.src_namespace = 'nl'
@@ -188,7 +187,7 @@ def guess_translator(pname: str) -> str:
 
 
 def _compose_hp_func(funcname, efunc, dfunc):
-    from libs2s import base_hparams
+    from utils.libs2s import base_hparams
 
     def _func():
         return dfunc(efunc(base_hparams()))
