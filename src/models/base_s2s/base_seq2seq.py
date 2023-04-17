@@ -382,7 +382,7 @@ class BaseSeq2Seq(torch.nn.Module):
             return 0
 
     def _compute_gini_index(self, state_mask, tgt_mask):
-        if self.training:
+        if self.training or self._attn_sup == 'none':
             return
 
         from utils.gini import slow_gini_index

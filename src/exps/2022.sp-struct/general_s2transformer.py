@@ -10,6 +10,8 @@ def main():
     import shujuji.comp_gen_bundle as cg_bundle
     cg_bundle.install_parsed_qa_datasets(Registry._datasets)
     import shujuji.cg_bundle_translator
+    from shujuji import cogs, cogs_translator
+    cogs.install_dataset()
 
     install_hparamsets()
 

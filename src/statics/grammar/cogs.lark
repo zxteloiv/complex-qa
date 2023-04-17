@@ -1,0 +1,52 @@
+// A handcrafted grammar to explain the neo-davidsonia semantic representation
+
+start: preludes formulas
+     | formulas
+     | lambdas formulas
+     | PROPER_NOUN
+
+lambdas: lambda DOT lambdas?
+
+lambda: LAMBDA var
+
+preludes: prelude SEMICOLON
+        | prelude SEMICOLON preludes
+
+prelude: ASTERISK? NOUN LPAR var RPAR
+
+var: LETTER
+   | LETTER UNDERSCORE NUMBER
+
+formulas: formula
+        | formula AND formulas
+
+formula: predicate LPAR params RPAR
+
+predicate: NOUN
+         | NOUN DOT NOUN
+         | NOUN DOT NOUN DOT NOUN
+
+params: param
+      | param COMMA params
+
+param: var
+     | PROPER_NOUN
+
+AND: "AND"
+NOUN: WORD
+LETTER: /[a-z]/
+NUMBER: /\d+/
+LPAR: "("
+RPAR: ")"
+WORD: /[a-z]+/
+PROPER_NOUN: /[A-Z][a-z]+/
+DOT: "."
+COMMA: ","
+SEMICOLON: ";"
+ASTERISK: "*"
+UNDERSCORE: "_"
+LAMBDA: "LAMBDA"
+
+%import common.WS
+%ignore WS
+

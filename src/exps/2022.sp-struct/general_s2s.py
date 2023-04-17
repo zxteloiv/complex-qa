@@ -7,6 +7,8 @@ def main():
     import shujuji.comp_gen_bundle as cg_bundle
     cg_bundle.install_parsed_qa_datasets(Registry._datasets)
     import shujuji.cg_bundle_translator
+    from shujuji import cogs, cogs_translator
+    cogs.install_dataset()
     install_hparamsets()
 
     args = setup_cli(seed=2021, device=0)
@@ -14,6 +16,16 @@ def main():
         args.translator = guess_translator(args.hparamset)
     bot = setup_common_bot(args=args)
     bot.run()
+
+
+@Registry.hparamset('cogs-base')
+def cogs_base():
+    from libs2s import base_hparams
+    p = base_hparams()
+    p.TRAINING_LIMIT = 10
+    p.src_namespace = 'nl'
+    p.tgt_namespace = 'lf'
+    return p
 
 
 def encoder_decorators():
