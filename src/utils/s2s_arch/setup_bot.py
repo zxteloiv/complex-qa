@@ -1,10 +1,8 @@
 import argparse
 from trialbot.training import TrialBot, Events
-from models.base_s2s.model_factory import Seq2SeqBuilder
 
 
 # an alias to the mappings
-base_hparams = Seq2SeqBuilder.base_hparams
 
 
 def get_updater(bot: TrialBot):
@@ -77,13 +75,12 @@ if __name__ == '__main__':
     from trialbot.training import Registry
     import sys
     import os.path as osp
-    sys.path.insert(0, osp.abspath(osp.join(osp.dirname(__file__), '../exps', '..')))  # up to src
+    sys.path.insert(0, osp.abspath(osp.join(osp.dirname(__file__), '../../exps', '..')))  # up to src
     # import datasets.cfq
     # import datasets.cfq_translator
 
     from utils.trialbot.setup_cli import setup
     import shujuji.comp_gen_bundle as cg_bundle
     cg_bundle.install_parsed_qa_datasets(Registry._datasets)
-    import shujuji.cg_bundle_translator
 
     setup_common_bot(setup(seed=2021)).run()

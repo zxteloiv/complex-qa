@@ -1,71 +1,57 @@
 from trialbot.training import Registry
 from trialbot.data.translator import FieldAwareTranslator
-from trialbot.data.fields import SeqField
-from trialbot.data.translators import KnownFieldTranslator
-from .cg_bundle_fields import TerminalRuleSeqField, ProcessedSentField, RNNGField, BeNeParField, PretrainedLMAutoField
+from .cg_bundle_fields import ProcessedSentField, RNNGField
 from .cfq_fields import TreeTraversalField, TutorBuilderField
 from .cfq_fields import PolicyValidity
+from utils.s2s_arch.translators import PLM2SeqTranslator, Seq2SeqTranslator, Seq2ProdTranslator, PLM2ProdTranslator, \
+    Syn2SeqTranslator, Syn2ProdTranslator
 
 
 @Registry.translator('s2s')
-class SQLSeq(FieldAwareTranslator):
+class SQLSeq(Seq2SeqTranslator):
     def __init__(self):
-        super().__init__(field_list=[
-            SeqField(source_key='sql', renamed_key="target_tokens", max_seq_len=200),
-            SeqField(source_key='sent', renamed_key='source_tokens', add_start_end_toks=False, max_seq_len=20)
-        ])
+        super().__init__('sql', 'sent', 20, 200,)
 
 
 @Registry.translator('plm2s')
-class PLMSeq(FieldAwareTranslator):
+class PLMSeq(PLM2SeqTranslator):
     def __init__(self, model_name: str = 'bert-base-uncased'):
-        super().__init__(field_list=[
-            PretrainedLMAutoField(source_key='sent', pretrained_name=model_name, renamed_key='source_tokens',
-                                  preprocess_hooks=[ProcessedSentField.process_sentence]),
-            SeqField(source_key='sql', renamed_key="target_tokens", max_seq_len=200),
-        ])
+        super().__init__(model_name, 'sent', 'sql', 200,
+                         source_preprocess_hooks=[ProcessedSentField.process_sentence])
 
 
 @Registry.translator('plm2tranx')
-class PLMTranX(FieldAwareTranslator):
+class PLMTranX(PLM2ProdTranslator):
     def __init__(self, model_name: str = 'bert-base-uncased'):
-        super().__init__(field_list=[
-            PretrainedLMAutoField(source_key='sent', pretrained_name=model_name, renamed_key='source_tokens',
-                                  preprocess_hooks=[ProcessedSentField.process_sentence]),
-            TerminalRuleSeqField(no_preterminals=True, source_key='sql_tree', renamed_key="target_tokens",
-                                 namespace="rule_seq", max_seq_len=280),
-        ])
+        super().__init__(
+            model_name, 'sent', 'sql_tree', 280,
+            source_preprocess_hooks=[ProcessedSentField.process_sentence],
+            no_preterminals=True,
+        )
 
 
 @Registry.translator('syn2s')
-class SynSeq(FieldAwareTranslator):
+class SynSeq(Syn2SeqTranslator):
     def __init__(self):
-        super().__init__(field_list=[
-            BeNeParField(source_key='sent', token_key='source_tokens', graph_key='source_graph',
-                         preprocess_hooks=[ProcessedSentField.process_sentence],),
-            SeqField(source_key='sql', renamed_key="target_tokens", max_seq_len=200),
-        ])
+        super().__init__('sent', 'sql', 200,
+                         source_preprocess_hooks=[ProcessedSentField.process_sentence]
+                         )
 
 
 @Registry.translator('syn2tranx')
-class SynTranX(FieldAwareTranslator):
+class SynTranX(Syn2ProdTranslator):
     def __init__(self):
-        super().__init__(field_list=[
-            BeNeParField(source_key='sent', token_key='source_tokens', graph_key='source_graph',
-                         preprocess_hooks=[ProcessedSentField.process_sentence]),
-            TerminalRuleSeqField(no_preterminals=True, source_key='sql_tree', renamed_key="target_tokens",
-                                 namespace="rule_seq", max_seq_len=280),
-        ])
+        super().__init__(
+            'sent', 'sql_tree', 280,
+            source_preprocess_hooks=[ProcessedSentField.process_sentence],
+            no_preterminals=True,
+        )
 
 
 @Registry.translator('tranx')
-class NoTermTranXTranslator(FieldAwareTranslator):
+class TranXTranslator(Seq2ProdTranslator):
     def __init__(self):
-        super().__init__(field_list=[
-            ProcessedSentField(source_key='sent', renamed_key='source_tokens', add_start_end_toks=False, max_seq_len=20),
-            TerminalRuleSeqField(no_preterminals=True, source_key='sql_tree', renamed_key="target_tokens",
-                                 namespace="rule_seq", max_seq_len=280),
-        ])
+        super().__init__('sent', 'sql_tree', 20, 280, no_preterminals=True)
 
 
 @Registry.translator('rnng')

@@ -24,7 +24,7 @@ class SynGraph2Seq(BaseSeq2Seq):
 
         output = {}
         if self.training:
-            output['loss'] = self._compute_loss(logits, target_tokens)
+            output['loss'] = self._compute_loss(logits, target_tokens, state_mask)
 
         if target_tokens is not None:
             total_err = self._compute_metrics(source_tokens, target_tokens, preds, logits)

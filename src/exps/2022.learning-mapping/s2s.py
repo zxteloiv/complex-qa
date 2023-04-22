@@ -1,5 +1,4 @@
-from trialbot.training import Registry, TrialBot, Events
-import argparse
+from trialbot.training import Registry
 from os import path as osp
 
 
@@ -10,8 +9,7 @@ def main():
     cg_bundle.install_cross_domain_parsed_qa_datasets(Registry._datasets)
     cg_bundle.install_raw_qa_datasets(Registry._datasets)
     cg_bundle.install_cross_domain_raw_qa_datasets(Registry._datasets)
-    import shujuji.cg_bundle_translator
-    from utils.libs2s import setup_common_bot
+    from utils.s2s_arch.setup_bot import setup_common_bot
     bot = setup_common_bot(setup_cli(seed=2021, device=0, translator='s2s', dataset='raw_qa.all_iid', epoch=40))
     bot.run()
 

@@ -539,6 +539,8 @@ class Seq2SeqBuilder(EmbeddingMxin,
 
         p.lr_scheduler_kwargs = {'model_size': 400, 'warmup_steps': 50}
         p.src_emb_pretrained_file = "~/.glove/glove.6B.100d.txt.gz"
+        p.src_namespace = 'source_tokens'
+        p.tgt_namespace = 'target_tokens'
 
         p.hidden_sz = 300
         p.dropout = .5
