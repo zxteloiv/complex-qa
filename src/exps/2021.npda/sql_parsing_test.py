@@ -1,6 +1,6 @@
 import sys
 sys.path.insert(0, '../..')
-import shujuji.comp_gen_bundle as cg_bundle
+import shujuji.cg_bundle as cg_bundle
 from os.path import join
 
 def _get_parsed_sql_ds(data_name: str, *, use_iid: bool, grammar_file: str, startpoint: str = None):

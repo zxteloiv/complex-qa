@@ -1,6 +1,6 @@
 import sys
 sys.path.insert(0, '../..')
-import shujuji.comp_gen_bundle as cg_bundle
+import shujuji.cg_bundle as cg_bundle
 cg_bundle.install_parsed_qa_datasets()
 cg_bundle.install_parsed_sql_datasets()
 

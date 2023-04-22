@@ -6,7 +6,7 @@ sys.path.insert(0, join('..', '..'))
 import lark
 TREE, TOKEN = lark.Tree, lark.Token
 import utils.cfg as cfg
-import shujuji.comp_gen_bundle as cg_bundle
+import shujuji.cg_bundle as cg_bundle
 from idioms.miner import GreedyIdiomMiner
 from idioms.export_conf import get_export_conf
 

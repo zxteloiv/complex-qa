@@ -5,7 +5,7 @@ import logging
 logging.basicConfig(level=logging.INFO)
 from utils.lark.stat import RuleCollector
 from idioms.eval import step_evaluation
-import shujuji.comp_gen_bundle as cg_bundle
+import shujuji.cg_bundle as cg_bundle
 cg_bundle.install_raw_sql_datasets()
 cg_bundle.install_raw_qa_datasets()
 import lark

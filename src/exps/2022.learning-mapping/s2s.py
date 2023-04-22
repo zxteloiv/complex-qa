@@ -4,7 +4,7 @@ from os import path as osp
 
 def main():
     from utils.trialbot.setup_cli import setup as setup_cli
-    import shujuji.comp_gen_bundle as cg_bundle
+    import shujuji.cg_bundle as cg_bundle
     cg_bundle.install_parsed_qa_datasets(Registry._datasets)
     cg_bundle.install_cross_domain_parsed_qa_datasets(Registry._datasets)
     cg_bundle.install_raw_qa_datasets(Registry._datasets)

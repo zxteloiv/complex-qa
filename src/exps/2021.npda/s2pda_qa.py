@@ -21,7 +21,7 @@ from trialbot.data.iterators import RandomIterator
 import shujuji.cfq
 import shujuji.cfq_translator as cfq_translator
 shujuji.cfq.install_cfq_to_trialbot()
-import shujuji.comp_gen_bundle as cg_bundle
+import shujuji.cg_bundle as cg_bundle
 cg_bundle.install_parsed_qa_datasets(Registry._datasets)
 import shujuji.cg_bundle_translator as sql_translator
 

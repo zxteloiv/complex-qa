@@ -31,7 +31,7 @@ from utils.lark.id_tree import build_from_lark_tree
 
 from trialbot.training import TrialBot, Events, Registry, Updater
 from trialbot.data import NSVocabulary
-import shujuji.comp_gen_bundle as cg_bundle
+import shujuji.cg_bundle as cg_bundle
 cg_bundle.install_parsed_qa_datasets(Registry._datasets)
 
 from utils.trialbot.extensions import print_hyperparameters, get_metrics, print_models, print_snaptshot_path

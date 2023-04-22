@@ -8,7 +8,7 @@ sys.path.insert(0, find_root('.SRC'))
 def main():
     from utils.trialbot.setup_cli import setup as setup_cli
     from utils.s2s_arch.setup_bot import setup_common_bot
-    import shujuji.comp_gen_bundle as cg_bundle
+    import shujuji.cg_bundle as cg_bundle
     cg_bundle.install_parsed_qa_datasets(Registry._datasets)
     from models.rnng.model_factory import RNNGBuilder
 

@@ -5,7 +5,7 @@ from trialbot.training import TrialBot, Events, Registry
 from utils.trialbot.setup_cli import setup
 # import datasets.cfq
 # import datasets.cfq_translator
-import shujuji.comp_gen_bundle as cg_bundle
+import shujuji.cg_bundle as cg_bundle
 cg_bundle.install_parsed_qa_datasets(Registry._datasets)
 import shujuji.cg_bundle_translator
 import tranx_hparamset

@@ -21,7 +21,7 @@ def main():
     from utils.s2s_arch.setup_bot import setup_common_bot
     from utils.s2s_arch.base_hparams import base_hparams
     from shujuji import cogs
-    import shujuji.comp_gen_bundle as cg_bundle
+    import shujuji.cg_bundle as cg_bundle
 
     cg_bundle.install_parsed_qa_datasets(Registry._datasets)
     cogs.install_dataset()

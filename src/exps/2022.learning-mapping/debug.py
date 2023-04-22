@@ -101,7 +101,7 @@ def inspect_ex(example, ex, field):
 
 
 def bar():
-    import shujuji.comp_gen_bundle as cg_bundle
+    import shujuji.cg_bundle as cg_bundle
     import logging
     logging.getLogger().setLevel(logging.INFO)
     cg_bundle.install_raw_qa_datasets(Registry._datasets)
