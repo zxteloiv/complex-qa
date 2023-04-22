@@ -36,8 +36,7 @@ def main():
     install_runtime_modifiers(args, get_runtime_modifiers)
 
     bot = setup_common_bot(args=args)
-    print(bot.hparams)
-    # bot.run()
+    bot.run()
 
 
 def get_runtime_modifiers(args) -> List[MODIFIER]:
