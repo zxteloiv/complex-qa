@@ -60,6 +60,7 @@ class PLM2SeqTranslator(FieldAwareTranslator):
         super().__init__(field_list=[
             AutoPLMField(source_key=source_field,
                          auto_plm_name=auto_plm_name,
+                         renamed_key="source_tokens",
                          preprocess_hooks=source_preprocess_hooks,
                          **auto_tokenizer_kwargs,
                          ),
