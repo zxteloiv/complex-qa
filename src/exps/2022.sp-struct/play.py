@@ -1,21 +1,14 @@
+from itertools import chain
 
 
 def main():
-    from shujuji.cogs import install_dataset, cogs_iid, cogs_gen
+    from shujuji.cogs import install_dataset, cogs_iid, cogs_gen, cogs_iid_parsed, cogs_gen_parsed
     from lark import Lark
-    parser = Lark(open('../../statics/grammar/cogs.lark'), keep_all_tokens=True)
-    train, dev, test = cogs_iid()
-    train2, dev2, test2 = cogs_gen()
-    print(list(map(len, cogs_iid())))
-    print(list(map(len, cogs_gen())))
-
-    from itertools import chain
-    for i, x in enumerate(chain(train, dev, test, train2, dev2, test2)):
-        nl, lf, tag = x[:3]
-        # if tag == 'primitive':
-        #     continue
-        tree = parser.parse(lf)
-    print('done!')
+    train, dev, test = cogs_gen_parsed()
+    print(list(map(len, (train, dev, test))))
+    from tqdm import tqdm
+    for x in tqdm(chain(train, dev, test)):
+        print(x.keys(), file=open('a.out', 'w'))
 
 
 if __name__ == '__main__':

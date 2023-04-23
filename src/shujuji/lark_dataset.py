@@ -3,6 +3,7 @@ import lark
 import logging
 from typing import List, Union, Tuple, Optional
 
+
 class LarkGrammarDataset(Dataset):
     def __init__(self, grammar_filename, startpoint, ):
         self.filename = grammar_filename
@@ -44,6 +45,7 @@ class LarkGrammarDataset(Dataset):
         self.read_data()
         return len(self.data)
 
+
 class LarkParserDatasetWrapper(Dataset):
     PARSER_REG = dict()
 
@@ -53,7 +55,7 @@ class LarkParserDatasetWrapper(Dataset):
         self.grammar_file = grammar_filename
         self.startpoint = startpoint
         self.dataset = dataset
-        self.keys = parse_keys
+        self.keys = [parse_keys] if isinstance(parse_keys, str) else parse_keys
         self.logger = logging.getLogger(self.__class__.__name__)
 
     @classmethod
