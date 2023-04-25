@@ -22,9 +22,11 @@ def main():
     from utils.s2s_arch.base_hparams import base_hparams
     from shujuji import cogs
     import shujuji.cg_bundle as cg_bundle
+    import shujuji.smcalflow_cs as smcalflow_cs
 
     cg_bundle.install_parsed_qa_datasets(Registry._datasets)
     cogs.install_dataset()
+    smcalflow_cs.install()
 
     install_general_translators()
     install_hparamsets(base_hparams)
@@ -91,7 +93,7 @@ def dataset_modifiers() -> MOD_DICT:
         'ati': medium,
         'adv': medium,
         # 'cfq': cogs,
-        # 'smc': cogs,
+        'smc': cogs,
     }
 
 
@@ -105,6 +107,10 @@ def translator_modifiers() -> MOD_DICT:
         return translator_kwargs_pool('sent', 'sql', source_max_token=20, target_max_token=200,
                                       auto_plm_name=getattr(p, 'plm_name', None))
 
+    def get_smc_pool(p):
+        return translator_kwargs_pool('utterance', 'plan', source_max_token=40, target_max_token=200,
+                                      auto_plm_name=getattr(p, 'plm_name', None))
+
     default_pool_factory_by_ds = {
         'cogs': get_cogs_pool,
         'geo': get_cg_pool,
@@ -112,7 +118,7 @@ def translator_modifiers() -> MOD_DICT:
         'ati': get_cg_pool,
         'adv': get_cg_pool,
         # 'cfq': cogs,
-        # 'smc': cogs,
+        'smc': get_smc_pool,
     }
 
     # modifiers can not be create in a loop context, nor as lambda functions,
@@ -142,15 +148,15 @@ def translator_modifiers() -> MOD_DICT:
     # e.g., translators for the cogs dataset ending with "prod" use different field
     def create_updated_modifiers(modifier):
         @wraps(modifier)
-        def cogs_rule1_target_fields_for_prod(p):
+        def prod_rule(p):
             p = modifier(p)
-            p.TRANSLATOR_KWARGS.update(target_field='lf_tree')
+            default = p.TRANSLATOR_KWARGS['target_field']
+            p.TRANSLATOR_KWARGS.update(target_field=f'{default}_tree')
             return p
-        return cogs_rule1_target_fields_for_prod
+        return prod_rule
 
-    for translator in general_translators:
-        if translator.endswith('prod'):
-            mod_name = f'cogs_{translator}'
+    for mod_name in modifiers.keys():
+        if mod_name.endswith('prod'):
             modifiers[mod_name] = create_updated_modifiers(modifiers[mod_name])
 
     return modifiers

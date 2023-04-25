@@ -1,0 +1,98 @@
+
+VALID_CHAR: /[a-zA-Z0-9\"\#\(\)\+\.\:\<\>\=\?\[\]\~]/
+QUOTE: "\""
+LPAR: "("
+RPAR: ")"
+LBRA: "["
+RBRA: "]"
+COLON: ":"
+DOT: "."
+LET: "let"
+DO: "do"
+META: "^"
+MACRO: "#"
+
+SYMBOL_CHAR: /[a-zA-Z0-9\+\<\>\=\?\~]/
+CAP_CHAR: /[A-Z]/
+NONCAP_CHAR: /[a-z0-9\+\<\>\=\?\~]/
+
+CAP_SYMBOL: CAP_CHAR SYMBOL_CHAR*
+NONCAP_SYMBOL: NONCAP_CHAR SYMBOL_CHAR*
+ANY_SYMBOL: SYMBOL_CHAR+
+
+// a string is a character sequence that is
+// - enclosed by double quotes, and
+// - containing characters that are either escaped by backslash, or
+// - any character except the backslash and the double quote.
+PLAIN_STRING: /(\\.|[^\\\"])+/
+
+// used as function names of comparison
+COMP_SYMBOL: /\?[^ ]+/
+
+REAL_NUMBER: /\d+(\.\d+)/    // the real number always contain the integer part
+INT_NUMBER:  /\d+/
+LONG_NUMBER: /\d+L/
+
+TYPE_CONSTRUCTION: "apply"
+STRING_TYPENAME: "String"
+NUMBER_TYPENAME: "Number"
+BOOLEAN_TYPENAME: "Boolean"
+
+%import common.WS
+%ignore WS
+
+start: s_exp
+
+s_exp: LPAR type_args? fn_call RPAR
+     | LPAR value RPAR
+
+type_args: META LPAR (NUMBER_TYPENAME | BOOLEAN_TYPENAME | STRING_TYPENAME) RPAR
+
+fn_call: kwarg_fn | arg_fn
+
+kwarg_fn: kwarg_fn_name kwarg*
+arg_fn: arg_fn_name arg*
+
+kwarg_fn_name: CAP_SYMBOL
+             | CAP_SYMBOL LBRA ANY_SYMBOL RBRA
+
+arg_fn_name: kw_name
+           | LET
+           | DO
+           | NONCAP_SYMBOL
+           | type_name DOT attribute
+
+kwarg: kw_name arg
+kw_name: COLON ANY_SYMBOL    // although in the data colons are always followed by lowercase letters
+
+arg: s_exp
+   | value
+   | variable
+
+variable: NONCAP_SYMBOL
+
+value: typed_literal | old_typed_literal
+
+old_typed_literal: MACRO LPAR STRING_TYPENAME QUOTE string_literal QUOTE RPAR
+                 | MACRO LPAR STRING_TYPENAME QUOTE QUOTE RPAR  // empty string
+                 | MACRO LPAR NUMBER_TYPENAME number_literal RPAR
+                 | MACRO LPAR BOOLEAN_TYPENAME boolean_literal RPAR
+                 | MACRO LPAR type_name QUOTE string_literal QUOTE RPAR
+
+typed_literal: boolean_literal
+             | META BOOLEAN_TYPENAME boolean_literal
+             | QUOTE string_literal QUOTE
+             | QUOTE QUOTE  // empty string
+             | META STRING_TYPENAME QUOTE string_literal QUOTE
+             | META STRING_TYPENAME QUOTE QUOTE // empty string
+             | number_literal
+             | META NUMBER_TYPENAME number_literal
+             | type_name DOT TYPE_CONSTRUCTION
+
+string_literal: PLAIN_STRING
+number_literal: REAL_NUMBER | INT_NUMBER | LONG_NUMBER
+boolean_literal: "true" | "false"
+type_name: CAP_SYMBOL
+attribute: NONCAP_SYMBOL
+
+
