@@ -4,29 +4,41 @@ from itertools import chain
 from tqdm import tqdm
 
 
+from lark import Lark
+
+
 def main():
     # from shujuji.cogs import install_dataset, cogs_iid, cogs_gen, cogs_iid_parsed, cogs_gen_parsed
-    # from lark import Lark
     # train, dev, test = cogs_gen_parsed()
     # print(list(map(len, (train, dev, test))))
     # for x in tqdm(chain(train, dev, test)):
     #     print(x.keys(), file=open('a.out', 'w'))
-    from shujuji.smcalflow_cs import smc_by_num, GRAMMAR_FILE
-    train, dev, test = smc_by_num(128)
-    from lark import Lark
+    # from shujuji.smcalflow_cs import smc_by_num, GRAMMAR_FILE
+    # train, dev, test = smc_by_num(128)
+    # parser = Lark(open(GRAMMAR_FILE), keep_all_tokens=True)
+    # print(list(map(len, (train, dev, test))))
+    # for x in tqdm(train):
+    #     s = x['plan']
+    #     tree = parser.parse(s)
+    #
+    # for x in tqdm(dev):
+    #     s = x['plan']
+    #     tree = parser.parse(s)
+    #
+    # for x in tqdm(test):
+    #     s = x['plan']
+    #     tree = parser.parse(s)
+    from shujuji.compact_cfq import get_ccfq, GRAMMAR_FILE
+    ds = get_ccfq(2)
+    print(list(map(len, ds)))
+    train, dev, test = ds
     parser = Lark(open(GRAMMAR_FILE), keep_all_tokens=True)
-    print(list(map(len, (train, dev, test))))
     for x in tqdm(train):
-        s = x['plan']
-        tree = parser.parse(s)
-
+        parser.parse(x['target'])
     for x in tqdm(dev):
-        s = x['plan']
-        tree = parser.parse(s)
-
+        parser.parse(x['target'])
     for x in tqdm(test):
-        s = x['plan']
-        tree = parser.parse(s)
+        parser.parse(x['target'])
 
 
 if __name__ == '__main__':

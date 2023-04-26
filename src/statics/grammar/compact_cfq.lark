@@ -1,0 +1,43 @@
+LBRACE: "{"
+RBRACE: "}"
+SYMBOL: /[a-zA-Z_0-9]+/
+DOT: "."
+SLASH: "/"
+COLON: ":"
+ENTITY_VAR: /M\d+/ // anonymous entities are M0 to M9 across the datasets
+VAR: /\?x\d+/   // variables across the total dataset are ?x0 to ?x5
+OR: "|"
+NS: SYMBOL COLON
+NOT: "^"
+
+start: agg graph
+
+agg: "DISTINCT" | "COUNT"
+
+graph: subgraph+
+
+subgraph: node LBRACE edges RBRACE
+
+edges: edge+
+
+edge: "a" LBRACE predicates RBRACE
+    | NOT? altered_predicates LBRACE nodes RBRACE
+
+?predicates: predicate+
+
+?altered_predicates: predicate (OR predicate)*
+
+?nodes: node+
+node: var | entity
+
+?predicate: path | path SLASH predicate
+
+path: (NS)? SYMBOL (DOT SYMBOL)*
+
+var: VAR
+entity: ENTITY_VAR
+      | SYMBOL
+
+%import common.WS
+%ignore WS
+
