@@ -99,6 +99,7 @@ class BeNeParField(Field):
                  ):
         super().__init__()
         import spacy
+        import benepar
         self.source_key = source_key
         self.ns = namespace or source_key
         self.token_key = token_key
