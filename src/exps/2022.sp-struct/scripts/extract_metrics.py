@@ -1,5 +1,6 @@
 # a utility to analyze the logs output from the
 from typing import List
+import re
 import json
 import numpy as np
 import sys
@@ -8,7 +9,7 @@ sys.path.insert(0, find_root('.SRC'))
 
 
 def process_tranx_log(filename: str):
-    if 'log.cuda' in filename or 'log.' not in filename:
+    if not valid_filename(filename):
         return
 
     from utils.text_tool import scan, grep, split
@@ -39,27 +40,42 @@ def process_tranx_log(filename: str):
     test_min_where = np.argmin(test_err).item()
     test_min_rel = test_err[dev_min_where]
 
+    # when printing the epoch positions, use 1-based index.
     print(filename, ds_name, split_tag, model_name, seed, num_epoch,
-          train_min_err, train_min_where, dev_min_err, dev_min_where,
-          test_min_err, test_min_where, test_min_rel,
+          1 - train_min_err, train_min_where + 1, 1 - dev_min_err, dev_min_where + 1,
+          1 - test_min_err, test_min_where + 1, 1 - test_min_rel,
           sep='\t')
 
 
 def parse_filename(filename: str):
-    import re
-    m = re.search(r'log\.(atis|scholar|geo|advising)_(iid|cg)_handcrafted\.([a-z_\d]+)\.s(\d+)', filename)
+    pat_reg = re.compile(r'log\.([^_]+)(_([^_]+))?(_([^_]+))?\.([a-z_\d]+)\.s(\d+)')
+    m = pat_reg.search(filename)
     ds = m.group(1)
-    split = m.group(2)
-    model = m.group(3)
-    seed = m.group(4)
+    split = m.group(3)
+    grammar = m.group(5)    # currently may not required
+    model = m.group(6)
+    seed = m.group(7)
     return ds, split, model, seed
 
 
+def valid_filename(filename: str) -> bool:
+    return 'log.' in filename
+
+
 def main():
-    process_tranx_log(sys.argv[1])
-    # test_file = '/Users/zxarukas/code/complex-qa/analysis/logs/batch-logs/server141/logs.plan0621/log.atis_cg_handcrafted.small_rcpcfg2seq.s2021'
-    # test_file = '/Users/zxarukas/code/complex-qa/analysis/logs/batch-logs/server93/logs.plan0618/log.atis_iid_handcrafted.onlstm2onlstm.s2021'
-    # process_tranx_log(test_file)
+    if '--header' in sys.argv:
+        print("filename", "ds_name", "split_tag", "model_name", "seed", "num_epoch",
+              "train_min", "train_min_where", "dev_min", "dev_min_where",
+              "test_min", "test_min_where", "test_min_rel", sep='\t')
+
+    filepath = sys.argv[1]
+    import os
+    import os.path as osp
+    if osp.isdir(filepath):
+        for subfile in os.listdir(filepath):
+            process_tranx_log(osp.join(filepath, subfile))
+    else:
+        process_tranx_log(filepath)
 
 
 if __name__ == '__main__':
