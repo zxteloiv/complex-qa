@@ -19,7 +19,9 @@ def setup(**default_args):
     argv = sys.argv[1:].copy()
     defaults = []
     for argname, argval in default_args.items():
-        defaults += [f'--{argname}', str(argval)]
+        defaults += [f'--{argname}']
+        if argval is not None:
+            defaults += [str(argval)]
 
     parser = augment_parser(TrialBot.get_default_parser())
     args = parser.parse_args(defaults + argv)
@@ -31,7 +33,8 @@ def setup_null_argv(**kwargs):
     argv = []
     for k, v in kwargs.items():
         argv.append(f'--{k}')
-        argv.append(f'{v}')
+        if v is not None:
+            argv.append(f'{v}')
 
     parser = augment_parser(TrialBot.get_default_parser())
     args = parser.parse_args(argv)
