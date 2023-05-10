@@ -51,7 +51,7 @@ if __name__ == '__main__':
         }
         """
     tree = sparql_parser.parse(sparql)
-    id_tree = build_from_lark_tree(tree, add_eps_nodes=True).assign_node_id(PreorderTraverse())
+    id_tree = build_from_lark_tree(tree, add_eps_nodes=False).assign_node_id(PreorderTraverse())
     print(id_tree)
 
     # for n in PreorderTraverse()(id_tree):

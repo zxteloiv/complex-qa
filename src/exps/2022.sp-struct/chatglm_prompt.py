@@ -36,10 +36,10 @@ def glm_dump():
     return p
 
 
-@Registry.hparamset('icl_syn')
+@Registry.hparamset('syn_prompt')
 def glm_syn_prompt():
     p = chatglm()
-    p.prompt_mode = 'syntactic'
+    p.prompt_mode = 'syn_prompt'
     return p
 
 
@@ -62,14 +62,13 @@ class WrapperModel(torch.nn.Module):
             if self.prompt_mode == 'history':
                 y_hat, _ = self.model.chat(self.tok, x, history=c)
                 spec['pred'] = y_hat
-            elif self.prompt_mode == 'prompt':
+            elif self.prompt_mode == 'syn_prompt':
                 y_hat, _ = self.model.chat(self.tok, self.build_prompt(x, c), history=[])
                 spec['pred'] = y_hat
-            elif self.prompt_mode == 'syntactic':
-                pass
             elif self.prompt_mode == 'context_dump':
                 y_hat = y
                 spec['ctx'] = c
+                spec['prompt'] = self.build_prompt(x, c)
             else:
                 raise ValueError('specified invalid prompt.')
 
@@ -77,9 +76,13 @@ class WrapperModel(torch.nn.Module):
             self.acc += 1 if self.comp_fn(y_hat, y) else 0
             self.logger.debug(json.dumps(spec))
 
-    def build_prompt(self, x, ctx):
-        template = "Input: {0}\nOutput: {1}"
-        prompt = '\n'.join(template.format(*pair) for pair in ctx)
+    def build_prompt(self, x, ctx, syntactic=True):
+        if syntactic:
+            template = "Input: {0}\nGeneration: {1}\nOutput: {2}"
+            prompt = '\n'.join(template.format(*pair) for pair in ctx)
+        else:
+            template = "Input: {0}\nOutput: {1}"
+            prompt = '\n'.join(template.format(pair[0], pair[2]) for pair in ctx)
         prompt += f'\nInput: {x}\nOutput: '
         return prompt
 
@@ -106,8 +109,14 @@ class ICLPromptTranslator(Translator):
 
     def to_tensor(self, example) -> Mapping[str, NullableTensor]:
         src, tgt = map(example.get, (self.src_field, self.tgt_field))
-        data = self.search_index(src)
-        return {'src': src, 'tgt': tgt, 'context': data}
+        exemplars: List[dict] = self.search_index(src)
+        user_queries = [x.get(self.src_field) for x in exemplars]
+        targets = [x.get(self.tgt_field) for x in exemplars]
+        asts = [self.ast2rules(x.get(self.tgt_field + '_tree')) for x in exemplars]
+
+        ctx = list(zip(user_queries, asts, targets))
+
+        return {'src': src, 'tgt': tgt, 'context': ctx}
 
     def __init__(self):
         super().__init__()
@@ -132,15 +141,15 @@ class ICLPromptTranslator(Translator):
 
         conn = sqlite3.connect(':memory:')
         logging.debug('building index...')
-        conn.execute('create virtual table kvmem using fts5(key, val);')
+        conn.execute('create virtual table kvmem using fts5(key, exid);')
         conn.commit()
-        data = [(x.get(self.src_field), x.get(self.tgt_field)) for x in self.indexing_dataset]
+        data = [(x.get(self.src_field), i) for i, x in enumerate(self.indexing_dataset)]
         logging.debug('inserting %d items into index...' % len(data))
         conn.executemany('insert into kvmem values (?, ?);', data)
         conn.commit()
         self.idx_conn = conn
 
-    def search_index(self, key) -> List[Tuple]:
+    def search_index(self, key) -> List[dict]:
         self.load_index()
 
         keywords = []
@@ -150,11 +159,27 @@ class ICLPromptTranslator(Translator):
 
         fts_str = ' OR '.join(keywords)
         cur = self.idx_conn.execute(
-            'select `key`, val from kvmem where `key` match (?) order by bm25(kvmem) limit 10',
+            'select `key`, exid from kvmem where `key` match (?) order by bm25(kvmem) limit 10',
             (fts_str,)
         )
         data = cur.fetchall()
-        return data
+        return [self.indexing_dataset[i] for _, i in reversed(data)]
+
+    def ast2rules(self, ast):
+        """transform an AST tree to texts"""
+        from utils.lark.id_tree import build_from_lark_tree, PreorderTraverse
+        tree = build_from_lark_tree(ast)
+        rules = []
+        for subtree in tree.iter_subtrees_topdown():
+            rules.append("{0} generates {1} ;".format(subtree.label,
+                                                      ' '.join(c.label for c in subtree.children)))
+        prod_str = '\n'.join(rules)
+        # prod_str = '\n'.join([
+        #     "{0} generates {1} ;".format(parent.label, node.label)
+        #     for node, parent in PreorderTraverse(output_parent=True)(tree)
+        #     if parent is not None
+        # ])
+        return prod_str
 
 
 def main():
