@@ -99,13 +99,13 @@ def evaluation_on_dev_every_epoch(bot: TrialBot, interval: int = 1,
         get_metrics(bot, prefix="Testing Metrics: " if on_test_data else "Evaluation Metrics: ")
 
 
-def get_metrics(bot: TrialBot, prefix: str = ""):
+def get_metrics(bot: TrialBot, prefix: str = "", reset=True):
     import json
     for i, model in enumerate(bot.models):
         if getattr(model, 'get_metric', None):
-            bot.logger.info(prefix + json.dumps(model.get_metric(reset=True)))
+            bot.logger.info(prefix + json.dumps(model.get_metric(reset=reset)))
         elif getattr(model, 'get_metrics', None):
-            bot.logger.info(prefix + json.dumps(model.get_metrics(reset=True)))
+            bot.logger.info(prefix + json.dumps(model.get_metrics(reset=reset)))
         else:
             bot.logger.warning(f'neither get_metric nor get_metrics method is found')
 
