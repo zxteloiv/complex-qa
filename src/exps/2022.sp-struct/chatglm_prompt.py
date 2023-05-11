@@ -19,6 +19,9 @@ def chatglm():
     p.chatglm_path = osp.expanduser('~/.glm/chatglm-6b')
     p.TRANSLATOR = 'icl'
     p.prompt_mode = 'history'  # default, other choices are prompt
+
+    # not useful, closed by default instead of removing relevant codes
+    p.use_syntactic_prompt = False
     return p
 
 
@@ -43,8 +46,15 @@ def glm_syn_prompt():
     return p
 
 
+@Registry.hparamset('zero_shot')
+def glm_zeroshot():
+    p = chatglm()
+    p.prompt_mode = 'zero_shot'
+    return p
+
+
 class WrapperModel(torch.nn.Module):
-    def __init__(self, path, comp_fn=None, prompt_mode: str = 'history'):
+    def __init__(self, path, comp_fn=None, prompt_mode: str = 'history', use_syn: bool = False):
         super().__init__()
         self.tok = AutoTokenizer.from_pretrained(path, trust_remote_code=True, revision='v0.1.0')
         self.model = AutoModel.from_pretrained(path, trust_remote_code=True, revision='v0.1.0').half()
@@ -54,6 +64,7 @@ class WrapperModel(torch.nn.Module):
         self.comp_fn = comp_fn or (lambda x, y: x == y)
         self.logger = logging.getLogger(self.__class__.__name__)
         self.prompt_mode = prompt_mode.lower()
+        self.use_syntactic_prompt = use_syn
 
     def forward(self, src, tgt, context):
         for x, y, c in zip(src, tgt, context):
@@ -69,6 +80,9 @@ class WrapperModel(torch.nn.Module):
                 y_hat = y
                 spec['ctx'] = c
                 spec['prompt'] = self.build_prompt(x, c)
+            elif self.prompt_mode == 'zero_shot':
+                y_hat, _ = self.model.chat(self.tok, x, history=[])
+                spec['pred'] = y_hat
             else:
                 raise ValueError('specified invalid prompt.')
 
@@ -76,8 +90,8 @@ class WrapperModel(torch.nn.Module):
             self.acc += 1 if self.comp_fn(y_hat, y) else 0
             self.logger.debug(json.dumps(spec))
 
-    def build_prompt(self, x, ctx, syntactic=True):
-        if syntactic:
+    def build_prompt(self, x, ctx):
+        if self.use_syntactic_prompt:
             template = "Input: {0}\nGeneration: {1}\nOutput: {2}"
             prompt = '\n'.join(template.format(*pair) for pair in ctx)
         else:
@@ -94,7 +108,7 @@ class WrapperModel(torch.nn.Module):
 
     @staticmethod
     def get_model(p, vocab):
-        return WrapperModel(p.chatglm_path, prompt_mode=p.prompt_mode)
+        return WrapperModel(p.chatglm_path, prompt_mode=p.prompt_mode, use_syn=p.use_syntactic_prompt)
 
 
 @Registry.translator('icl')
@@ -109,12 +123,18 @@ class ICLPromptTranslator(Translator):
 
     def to_tensor(self, example) -> Mapping[str, NullableTensor]:
         src, tgt = map(example.get, (self.src_field, self.tgt_field))
-        exemplars: List[dict] = self.search_index(src)
-        user_queries = [x.get(self.src_field) for x in exemplars]
-        targets = [x.get(self.tgt_field) for x in exemplars]
-        asts = [self.ast2brackets(x.get(self.tgt_field + '_tree')) for x in exemplars]
+        if self.indexing_dataset is not None:
+            exemplars: List[dict] = self.search_index(src)
+            user_queries = [x.get(self.src_field) for x in exemplars]
+            targets = [x.get(self.tgt_field) for x in exemplars]
+            if self.use_syn:
+                asts = [self.ast2brackets(x.get(self.tgt_field + '_tree')) for x in exemplars]
+            else:
+                asts = ["" for _ in exemplars]
 
-        ctx = list(zip(user_queries, asts, targets))
+            ctx = list(zip(user_queries, asts, targets))
+        else:
+            ctx = []
 
         return {'src': src, 'tgt': tgt, 'context': ctx}
 
@@ -132,8 +152,10 @@ class ICLPromptTranslator(Translator):
         self.src_field, self.tgt_field = get_field_names(args.dataset)
         self.tok = AutoTokenizer.from_pretrained(p.chatglm_path,
                                                  trust_remote_code=True, revision='v0.1.0')
-        self.indexing_dataset = bot.train_set
-        self.load_index()
+        self.use_syn: bool = p.use_syntactic_prompt
+        if p.prompt_mode != 'zero_shot':
+            self.indexing_dataset = bot.train_set
+            self.load_index()
 
     def load_index(self):
         if self.idx_conn is not None:
@@ -202,12 +224,13 @@ class ICLPromptTranslator(Translator):
 
 
 def main():
-    from shujuji import cogs, compact_cfq as ccfq, smcalflow_cs as smc, cg_bundle as agsa
+    from shujuji import cogs, compact_cfq as ccfq, smcalflow_cs as smc, cg_bundle as agsa, cofe
     smc.install()
     ccfq.install_dataset()
     cogs.install_dataset()
     agsa.install_parsed_qa_datasets()
     agsa.install_cross_domain_parsed_qa_datasets()
+    cofe.install_datasets()
 
     from utils.trialbot.setup_cli import setup as setup_cli
     from utils.trialbot.setup_bot import setup_bot
@@ -235,6 +258,7 @@ def get_field_names(ds_name: str):
         'adv': ('sent', 'sql'),
         'smc': ('utterance', 'plan'),
         'ccfq': ('source', 'target'),
+        'cofe': ('context', 'ground_truth'),
     }
     for k, v in pref_confs.items():
         if ds_name.startswith(k):
