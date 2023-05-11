@@ -38,8 +38,10 @@ def build_from_lark_tree(subtree_or_tok: Union[lark.Tree, lark.Token],
 
 if __name__ == '__main__':
     import os.path as osp, sys
-    sys.path.insert(0, '../..')
-    sparql_lark = osp.join('..', '..', 'statics', 'grammar', 'sparql_pattern.bnf.lark')
+    from trialbot.utils.root_finder import find_root
+    SRC = find_root('.SRC')
+    sys.path.insert(0, SRC)
+    sparql_lark = osp.join(SRC, 'statics', 'grammar', 'sparql_pattern.bnf.lark')
     sparql_parser = lark.Lark(open(sparql_lark), start="queryunit", keep_all_tokens=True,)
     sparql = r"""
         SELECT DISTINCT ?x0 WHERE {
@@ -61,3 +63,15 @@ if __name__ == '__main__':
     for n in id_tree.iter_subtrees_topdown():
         n: Tree
         print(n.node_id, ":", n.label, '-->', ' '.join(c.immediate_str() for c in n.children))
+
+    from utils.tree import InorderTraverse
+    print('----' * 30)
+
+    print(' '.join(
+        node if isinstance(node, str) else node.label
+        for node in InorderTraverse()(id_tree, hooks={
+            'pre_left_children': lambda a, b, c, d: "[",
+            'post_right_children': lambda a, b, c, d: "]",
+        })
+    ))
+

@@ -112,7 +112,7 @@ class ICLPromptTranslator(Translator):
         exemplars: List[dict] = self.search_index(src)
         user_queries = [x.get(self.src_field) for x in exemplars]
         targets = [x.get(self.tgt_field) for x in exemplars]
-        asts = [self.ast2rules(x.get(self.tgt_field + '_tree')) for x in exemplars]
+        asts = [self.ast2brackets(x.get(self.tgt_field + '_tree')) for x in exemplars]
 
         ctx = list(zip(user_queries, asts, targets))
 
@@ -179,6 +179,25 @@ class ICLPromptTranslator(Translator):
         #     for node, parent in PreorderTraverse(output_parent=True)(tree)
         #     if parent is not None
         # ])
+        return prod_str
+
+    def ast2brackets(self, ast):
+        from utils.lark.id_tree import build_from_lark_tree, PreorderTraverse
+        from utils.tree import InorderTraverse
+        tree = build_from_lark_tree(ast)
+
+        prod_str = ' '.join(
+            node if isinstance(node, str) else node.label
+            for node in InorderTraverse()(tree, hooks={
+                'pre_left_children': lambda n, parent, path, algo: "[" if (
+                        not n.is_terminal and len(algo.children_fn(n)) > 1
+                ) else "",
+                'post_right_children': lambda n, parent, path, algo: "]" if (
+                        not n.is_terminal and len(algo.children_fn(n)) > 1
+                ) else "",
+            })
+            if isinstance(node, str) or node.is_terminal
+        )
         return prod_str
 
 
