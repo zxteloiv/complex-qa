@@ -1,35 +1,58 @@
-from typing import Iterable, Dict
+from typing import Iterable, Dict, Union, List, Any, Tuple
 import logging
 import re
 
-class RetrievalIndex:
-    def __init__(self, schema=None, idx_name=None, use_ram_storage=True):
-        from whoosh.fields import Schema, NGRAM, STORED
-        from whoosh.filedb.filestore import RamStorage, FileStorage
-        from whoosh.qparser import QueryParser, OrGroup
 
-        idx_name = idx_name or __name__
-        storage = RamStorage() if use_ram_storage else FileStorage(idx_name)
-        self.is_default_schema = schema is None
-        schema = schema or Schema(key=NGRAM(maxsize=5), value=STORED())
-        idx = storage.create_index(schema, idx_name)
-        self.idx = idx
-        self.parser = QueryParser("key", schema, group=OrGroup)
+class VolatileBM25Index:
+    def __init__(self, default_search_limit: int = 10):
+        import sqlite3
+        self.logger.debug('building index...')
+        self.conn = sqlite3.connect(':memory:')
+        self.logger = logging.getLogger(self.__class__.__name__)
+        self.conn.execute('create virtual table kvmem using fts5(key, payload);')
+        self.conn.commit()
+        self.limit: int = default_search_limit
 
-    def indexing(self, dataset: Iterable[Dict[str, str]]):
-        writer = self.idx.writer()
-        for e in dataset:
-            writer.add_document(**e)
-        writer.commit()
+    def indexing(self, key: Union[str, List[str]], payload: Union[None, Any, List[Any]]):
+        if payload is None:
+            self.logger.warning('No payload given, default to the integer 0')
+            payload = 0 if isinstance(key, str) else [0 for _ in range(len(key))]
 
-    def search(self, key, **kwargs):
-        with self.idx.searcher() as searcher:
-            query = self.parser.parse(key)
-            res = searcher.search(query, **kwargs)
-            if self.is_default_schema:
-                return [r['value'] for r in res]
-            else:
-                return res
+        if isinstance(key, str):
+            self.logger.debug(f'inserting item {key} into index...')
+            self.conn.execute('insert into kvmem values (?, ?);', (key, payload))
+
+        elif isinstance(key, list):
+            data = list(zip(key, payload))
+            self.logger.debug('inserting %d items into index...' % len(key))
+            self.conn.executemany('insert into kvmem values (?, ?);', data)
+
+        else:
+            raise TypeError('indexing key must be str of list of str')
+
+        self.conn.commit()
+
+    def search_index(self, key: str, limit: int = None) -> List[Tuple[str, Any]]:
+        limit = limit or self.limit
+
+        keywords = []
+        for k in set(key.split()):
+            k = k.replace('"', '')
+            keywords.append(f'"{k}"')
+
+        fts_str = ' OR '.join(keywords)
+        cur = self.conn.execute(
+            f'select `key`, exid from kvmem where `key` match (?)'
+            f'order by bm25(kvmem) limit {limit}',
+            (fts_str,)
+        )
+        return cur.fetchall()   # list of tuples of (key str, payload)
+
+    @staticmethod
+    def from_data_list(keys: List[str], payloads: List[Any], default_search_limit: int = 10):
+        idx = VolatileBM25Index(default_search_limit)
+        idx.indexing(keys, payloads)
+        return idx
 
 
 class SolrClient:
