@@ -6,9 +6,10 @@ import re
 class VolatileBM25Index:
     def __init__(self, default_search_limit: int = 10):
         import sqlite3
+        self.logger = logging.getLogger(self.__class__.__name__)
+
         self.logger.debug('building index...')
         self.conn = sqlite3.connect(':memory:')
-        self.logger = logging.getLogger(self.__class__.__name__)
         self.conn.execute('create virtual table kvmem using fts5(key, payload);')
         self.conn.commit()
         self.limit: int = default_search_limit
@@ -42,7 +43,7 @@ class VolatileBM25Index:
 
         fts_str = ' OR '.join(keywords)
         cur = self.conn.execute(
-            f'select `key`, exid from kvmem where `key` match (?)'
+            f'select `key`, payload from kvmem where `key` match (?)'
             f'order by bm25(kvmem) limit {limit}',
             (fts_str,)
         )

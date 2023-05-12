@@ -1,5 +1,4 @@
 import json
-import sqlite3
 import logging
 from typing import Mapping, Generator, Tuple, List, Optional
 
@@ -34,6 +33,7 @@ def glm_pmpt():
 
 @Registry.hparamset('ctx_dump')
 def glm_dump():
+    """do not call the model or downstream API, only dumps the prompt and context"""
     p = chatglm()
     p.prompt_mode = 'context_dump'
     return p
@@ -41,8 +41,8 @@ def glm_dump():
 
 @Registry.hparamset('syn_prompt')
 def glm_syn_prompt():
-    p = chatglm()
-    p.prompt_mode = 'syn_prompt'
+    p = glm_pmpt()
+    p.use_syntactic_prompt = True
     return p
 
 
@@ -54,35 +54,44 @@ def glm_zeroshot():
 
 
 class WrapperModel(torch.nn.Module):
-    def __init__(self, path, comp_fn=None, prompt_mode: str = 'history', use_syn: bool = False):
+    def __init__(self, path, comp_fn=None, prompt_mode: str = 'history'):
         super().__init__()
         self.tok = AutoTokenizer.from_pretrained(path, trust_remote_code=True, revision='v0.1.0')
         self.model = AutoModel.from_pretrained(path, trust_remote_code=True, revision='v0.1.0').half()
         self.model.eval()
+
         self.acc = 0
         self.count = 0
         self.comp_fn = comp_fn or (lambda x, y: x == y)
         self.logger = logging.getLogger(self.__class__.__name__)
         self.prompt_mode = prompt_mode.lower()
-        self.use_syntactic_prompt = use_syn
 
     def forward(self, src, tgt, context):
+        from utils.llm.prompt import build_prompt
         for x, y, c in zip(src, tgt, context):
             spec = {'src': x, 'tgt': y}
 
             if self.prompt_mode == 'history':
-                y_hat, _ = self.model.chat(self.tok, x, history=c)
+                assert len(c) == 0 or len(c[0]) == 2, "Context must be request-response pairs"
+                y_hat = self.call_model(x, c)
+                spec['ctx'] = c
                 spec['pred'] = y_hat
-            elif self.prompt_mode == 'syn_prompt':
-                y_hat, _ = self.model.chat(self.tok, self.build_prompt(x, c), history=[])
+
+            elif self.prompt_mode == 'prompt':
+                prompt = build_prompt(x, c)
+                y_hat = self.call_model(prompt, [])
+                spec['prompt'] = prompt
                 spec['pred'] = y_hat
+
             elif self.prompt_mode == 'context_dump':
                 y_hat = y
                 spec['ctx'] = c
-                spec['prompt'] = self.build_prompt(x, c)
+                spec['prompt'] = build_prompt(x, c)
+
             elif self.prompt_mode == 'zero_shot':
-                y_hat, _ = self.model.chat(self.tok, x, history=[])
+                y_hat = self.call_model(x, [])
                 spec['pred'] = y_hat
+
             else:
                 raise ValueError('specified invalid prompt.')
 
@@ -90,15 +99,9 @@ class WrapperModel(torch.nn.Module):
             self.acc += 1 if self.comp_fn(y_hat, y) else 0
             self.logger.debug(json.dumps(spec))
 
-    def build_prompt(self, x, ctx):
-        if self.use_syntactic_prompt:
-            template = "Input: {0}\nGeneration: {1}\nOutput: {2}"
-            prompt = '\n'.join(template.format(*pair) for pair in ctx)
-        else:
-            template = "Input: {0}\nOutput: {1}"
-            prompt = '\n'.join(template.format(pair[0], pair[2]) for pair in ctx)
-        prompt += f'\nInput: {x}\nOutput: '
-        return prompt
+    def call_model(self, user_input, history):
+        res, _ = self.model.chat(self.tok, user_input, history=history)
+        return res
 
     def get_metrics(self, reset: bool = False):
         m = {"ACC": round((self.acc / self.count) if self.count > 0 else 0, 4)}
@@ -108,7 +111,7 @@ class WrapperModel(torch.nn.Module):
 
     @staticmethod
     def get_model(p, vocab):
-        return WrapperModel(p.chatglm_path, prompt_mode=p.prompt_mode, use_syn=p.use_syntactic_prompt)
+        return WrapperModel(p.chatglm_path, prompt_mode=p.prompt_mode)
 
 
 @Registry.translator('icl')
@@ -123,19 +126,16 @@ class ICLPromptTranslator(Translator):
 
     def to_tensor(self, example) -> Mapping[str, NullableTensor]:
         src, tgt = map(example.get, (self.src_field, self.tgt_field))
-        if self.indexing_dataset is not None:
-            exemplars: List[dict] = self.search_index(src)
-            user_queries = [x.get(self.src_field) for x in exemplars]
-            targets = [x.get(self.tgt_field) for x in exemplars]
-            if self.use_syn:
-                asts = [self.ast2brackets(x.get(self.tgt_field + '_tree')) for x in exemplars]
-            else:
-                asts = ["" for _ in exemplars]
+        if self.indexing_dataset is None:
+            return {'src': src, 'tgt': tgt, 'context': []}
 
-            ctx = list(zip(user_queries, asts, targets))
-        else:
-            ctx = []
-
+        exemplars: List[dict] = self.search_index(src)
+        from utils.llm.prompt import build_ctx_with_exemplars
+        ctx = build_ctx_with_exemplars(
+            exemplars, self.src_field, self.tgt_field,
+            use_ast='as_brackets' if self.use_syn else 'none',   # noqa
+            ast_field=self.tgt_field + '_tree'
+        )
         return {'src': src, 'tgt': tgt, 'context': ctx}
 
     def __init__(self):
@@ -145,6 +145,8 @@ class ICLPromptTranslator(Translator):
         self.tgt_field = None
         self.tok = None
         self.indexing_dataset = None
+        self.use_syn = False
+        self.prompt_mode = None
 
     def lazy_init(self, bot: TrialBot):
         p = bot.hparams
@@ -152,7 +154,8 @@ class ICLPromptTranslator(Translator):
         self.src_field, self.tgt_field = get_field_names(args.dataset)
         self.tok = AutoTokenizer.from_pretrained(p.chatglm_path,
                                                  trust_remote_code=True, revision='v0.1.0')
-        self.use_syn: bool = p.use_syntactic_prompt
+        self.use_syn: bool = getattr(p, 'use_syntactic_prompt', False)
+        self.prompt_mode = p.prompt_mode
         if p.prompt_mode != 'zero_shot':
             self.indexing_dataset = bot.train_set
             self.load_index()
@@ -161,66 +164,15 @@ class ICLPromptTranslator(Translator):
         if self.idx_conn is not None:
             return
 
-        conn = sqlite3.connect(':memory:')
-        logging.debug('building index...')
-        conn.execute('create virtual table kvmem using fts5(key, exid);')
-        conn.commit()
-        data = [(x.get(self.src_field), i) for i, x in enumerate(self.indexing_dataset)]
-        logging.debug('inserting %d items into index...' % len(data))
-        conn.executemany('insert into kvmem values (?, ?);', data)
-        conn.commit()
-        self.idx_conn = conn
+        from utils.ir_client import VolatileBM25Index
+        self.idx_conn = VolatileBM25Index.from_data_list(
+            keys=[x.get(self.src_field) for x in self.indexing_dataset],
+            payloads=list(range(len(self.indexing_dataset)))
+        )
 
-    def search_index(self, key) -> List[dict]:
+    def search_index(self, key: str) -> List[dict]:
         self.load_index()
-
-        keywords = []
-        for k in set(key.split()):
-            k = k.replace('"', '')
-            keywords.append(f'"{k}"')
-
-        fts_str = ' OR '.join(keywords)
-        cur = self.idx_conn.execute(
-            'select `key`, exid from kvmem where `key` match (?) order by bm25(kvmem) limit 10',
-            (fts_str,)
-        )
-        data = cur.fetchall()
-        return [self.indexing_dataset[i] for _, i in reversed(data)]
-
-    def ast2rules(self, ast):
-        """transform an AST tree to texts"""
-        from utils.lark.id_tree import build_from_lark_tree, PreorderTraverse
-        tree = build_from_lark_tree(ast)
-        rules = []
-        for subtree in tree.iter_subtrees_topdown():
-            rules.append("{0} generates {1} ;".format(subtree.label,
-                                                      ' '.join(c.label for c in subtree.children)))
-        prod_str = '\n'.join(rules)
-        # prod_str = '\n'.join([
-        #     "{0} generates {1} ;".format(parent.label, node.label)
-        #     for node, parent in PreorderTraverse(output_parent=True)(tree)
-        #     if parent is not None
-        # ])
-        return prod_str
-
-    def ast2brackets(self, ast):
-        from utils.lark.id_tree import build_from_lark_tree, PreorderTraverse
-        from utils.tree import InorderTraverse
-        tree = build_from_lark_tree(ast)
-
-        prod_str = ' '.join(
-            node if isinstance(node, str) else node.label
-            for node in InorderTraverse()(tree, hooks={
-                'pre_left_children': lambda n, parent, path, algo: "[" if (
-                        not n.is_terminal and len(algo.children_fn(n)) > 1
-                ) else "",
-                'post_right_children': lambda n, parent, path, algo: "]" if (
-                        not n.is_terminal and len(algo.children_fn(n)) > 1
-                ) else "",
-            })
-            if isinstance(node, str) or node.is_terminal
-        )
-        return prod_str
+        return [self.indexing_dataset[i] for _, i in self.idx_conn.search_index(key)]
 
 
 def main():
