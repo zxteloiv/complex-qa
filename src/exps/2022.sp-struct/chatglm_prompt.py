@@ -1,48 +1,59 @@
 import json
 import logging
-from typing import Mapping, Generator, Tuple, List, Optional
 
 import torch
-from trialbot.data.translator import Translator, NullableTensor, FieldAwareTranslator
 from trialbot.training import TrialBot, Registry
 from trialbot.utils.root_finder import find_root
 import os.path as osp
 from transformers import AutoTokenizer, AutoModel
 
 
-@Registry.hparamset('icl')
+PREF_CONFS = {
+    'cogs': ('nl', 'lf'),
+    'geo': ('sent', 'sql'),
+    'ati': ('sent', 'sql'),
+    'sch': ('sent', 'sql'),
+    'adv': ('sent', 'sql'),
+    'smc': ('utterance', 'plan'),
+    'ccfq': ('source', 'target'),
+    'cofe': ('context', 'ground_truth'),
+}
+
+
+@Registry.hparamset('icl_history')
 def chatglm():
     from trialbot.training.hparamset import HyperParamSet
     from trialbot.utils.root_finder import find_root
     p = HyperParamSet.common_settings(find_root())
     p.chatglm_path = osp.expanduser('~/.glm/chatglm-6b')
-    p.TRANSLATOR = 'icl'
-    p.prompt_mode = 'history'  # default, other choices are prompt
-
-    # not useful, closed by default instead of removing relevant codes
-    p.use_syntactic_prompt = False
+    p.TRANSLATOR = 'prompt'
+    p.TRANSLATOR_KWARGS = dict(src_field=None, tgt_field=None, prompt_mode=None)
+    p.prompt_mode = 'history'
+    p.batch_sz = 16
+    p.dry_run = False
     return p
 
 
-@Registry.hparamset('icl_prompt')
+@Registry.hparamset('prompt')
 def glm_pmpt():
     p = chatglm()
     p.prompt_mode = 'prompt'
     return p
 
 
-@Registry.hparamset('ctx_dump')
+@Registry.hparamset('dry_run')
 def glm_dump():
     """do not call the model or downstream API, only dumps the prompt and context"""
     p = chatglm()
-    p.prompt_mode = 'context_dump'
+    p.prompt_mode = 'prompt'
+    p.dry_run = True
     return p
 
 
 @Registry.hparamset('syn_prompt')
 def glm_syn_prompt():
     p = glm_pmpt()
-    p.use_syntactic_prompt = True
+    p.prompt_mode = 'syn_prompt'
     return p
 
 
@@ -54,7 +65,7 @@ def glm_zeroshot():
 
 
 class WrapperModel(torch.nn.Module):
-    def __init__(self, path, comp_fn=None, prompt_mode: str = 'history'):
+    def __init__(self, path, comp_fn=None, use_history: bool = True, dry_run: bool = False):
         super().__init__()
         self.tok = AutoTokenizer.from_pretrained(path, trust_remote_code=True, revision='v0.1.0')
         self.model = AutoModel.from_pretrained(path, trust_remote_code=True, revision='v0.1.0').half()
@@ -64,44 +75,23 @@ class WrapperModel(torch.nn.Module):
         self.count = 0
         self.comp_fn = comp_fn or (lambda x, y: x == y)
         self.logger = logging.getLogger(self.__class__.__name__)
-        self.prompt_mode = prompt_mode.lower()
+        self.use_history = use_history  # use history or in-line prompt
+        self.dry_run = dry_run
 
-    def forward(self, src, tgt, context):
-        from utils.llm.prompt import build_prompt
-        for x, y, c in zip(src, tgt, context):
-            spec = {'src': x, 'tgt': y}
-
-            if self.prompt_mode == 'history':
-                assert len(c) == 0 or len(c[0]) == 2, "Context must be request-response pairs"
-                y_hat = self.call_model(x, c)
-                spec['ctx'] = c
-                spec['pred'] = y_hat
-
-            elif self.prompt_mode == 'prompt':
-                prompt = build_prompt(x, c)
-                y_hat = self.call_model(prompt, [])
-                spec['prompt'] = prompt
-                spec['pred'] = y_hat
-
-            elif self.prompt_mode == 'context_dump':
+    def forward(self, src, tgt, context, prompt):
+        for x, y, c, p in zip(src, tgt, context, prompt):
+            spec = {'src': x, 'tgt': y, 'ctx': c, 'prompt': p}
+            if self.dry_run:
                 y_hat = y
-                spec['ctx'] = c
-                spec['prompt'] = build_prompt(x, c)
-
-            elif self.prompt_mode == 'zero_shot':
-                y_hat = self.call_model(x, [])
-                spec['pred'] = y_hat
-
+            elif self.use_history:
+                y_hat, _ = self.model.chat(self.tok, x, history=c)
             else:
-                raise ValueError('specified invalid prompt.')
+                y_hat, _ = self.model.chat(self.tok, p, history=[])
 
+            spec['pred'] = y_hat
             self.count += 1
             self.acc += 1 if self.comp_fn(y_hat, y) else 0
             self.logger.debug(json.dumps(spec))
-
-    def call_model(self, user_input, history):
-        res, _ = self.model.chat(self.tok, user_input, history=history)
-        return res
 
     def get_metrics(self, reset: bool = False):
         m = {"ACC": round((self.acc / self.count) if self.count > 0 else 0, 4)}
@@ -111,65 +101,8 @@ class WrapperModel(torch.nn.Module):
 
     @staticmethod
     def get_model(p, vocab):
-        return WrapperModel(p.chatglm_path, prompt_mode=p.prompt_mode)
-
-
-@Registry.translator('icl')
-class ICLPromptTranslator(Translator):
-    def batch_tensor(self, tensors: List[Mapping[str, NullableTensor]]):
-        tensors = list(filter(lambda x: all(v is not None for v in x.values()), tensors))
-        batch_dict = FieldAwareTranslator.list_of_dict_to_dict_of_list(tensors)
-        return batch_dict
-
-    def generate_namespace_tokens(self, example) -> Generator[Tuple[str, str], None, None]:
-        yield from []
-
-    def to_tensor(self, example) -> Mapping[str, NullableTensor]:
-        src, tgt = map(example.get, (self.src_field, self.tgt_field))
-        if self.indexing_dataset is None:
-            return {'src': src, 'tgt': tgt, 'context': []}
-
-        exemplars: List[dict] = self.search_index(src)
-        from utils.llm.prompt import build_ctx_with_exemplars
-        ctx = build_ctx_with_exemplars(
-            exemplars, self.src_field, self.tgt_field,
-            use_ast='as_brackets' if self.use_syn else 'none',   # noqa
-            ast_field=self.tgt_field + '_tree'
-        )
-        return {'src': src, 'tgt': tgt, 'context': ctx}
-
-    def __init__(self):
-        super().__init__()
-        self.idx_conn = None
-        self.src_field = None
-        self.tgt_field = None
-        self.indexing_dataset = None
-        self.use_syn = False
-        self.prompt_mode = None
-
-    def lazy_init(self, bot: TrialBot):
-        p = bot.hparams
-        args = bot.args
-        self.src_field, self.tgt_field = get_field_names(args.dataset)
-        self.use_syn: bool = getattr(p, 'use_syntactic_prompt', False)
-        self.prompt_mode = p.prompt_mode
-        if p.prompt_mode != 'zero_shot':
-            self.indexing_dataset = bot.train_set
-            self.load_index()
-
-    def load_index(self):
-        if self.idx_conn is not None:
-            return
-
-        from utils.ir_client import VolatileBM25Index
-        self.idx_conn = VolatileBM25Index.from_data_list(
-            keys=[x.get(self.src_field) for x in self.indexing_dataset],
-            payloads=list(range(len(self.indexing_dataset)))
-        )
-
-    def search_index(self, key: str) -> List[dict]:
-        self.load_index()
-        return [self.indexing_dataset[i] for _, i in self.idx_conn.search_index(key)]
+        return WrapperModel(p.chatglm_path,
+                            use_history=p.prompt_mode == 'history', dry_run=p.dry_run)
 
 
 def main():
@@ -181,11 +114,14 @@ def main():
     agsa.install_cross_domain_parsed_qa_datasets()
     cofe.install_datasets()
 
+    from utils.llm.prompt_translator import install_translator
+    install_translator()
+
     from utils.trialbot.setup_cli import setup as setup_cli
     from utils.trialbot.setup_bot import setup_bot
-    args = setup_cli(seed=2021, device=0, hparamset='icl', test=None)    # always test mode
+    args = setup_cli(seed=2021, device=0, test=None)    # always in test mode
     bot = TrialBot(args=args, trial_name='glm-6b', get_model_func=WrapperModel.get_model)
-    bot.translator.lazy_init(bot)
+    lazy_init_translator(bot)
     bot = setup_bot(bot, epoch_model_saving=False, epoch_test_eval=False, epoch_dev_eval=False,
                     metric_printing=True, vdrop_reset=False, use_gc=False)
 
@@ -198,18 +134,17 @@ def main():
     bot.run()
 
 
+def lazy_init_translator(bot):
+    args, p = bot.args, bot.hparams
+    trans = bot.translator
+    trans.src_field, trans.tgt_field = get_field_names(args.dataset)
+    trans.prompt_mode = p.prompt_mode
+    if p.prompt_mode != 'zero_shot':
+        trans.load_index(bot.train_set)
+
+
 def get_field_names(ds_name: str):
-    pref_confs = {
-        'cogs': ('nl', 'lf'),
-        'geo': ('sent', 'sql'),
-        'ati': ('sent', 'sql'),
-        'sch': ('sent', 'sql'),
-        'adv': ('sent', 'sql'),
-        'smc': ('utterance', 'plan'),
-        'ccfq': ('source', 'target'),
-        'cofe': ('context', 'ground_truth'),
-    }
-    for k, v in pref_confs.items():
+    for k, v in PREF_CONFS.items():
         if ds_name.startswith(k):
             return v
     return None
