@@ -143,7 +143,6 @@ class ICLPromptTranslator(Translator):
         self.idx_conn = None
         self.src_field = None
         self.tgt_field = None
-        self.tok = None
         self.indexing_dataset = None
         self.use_syn = False
         self.prompt_mode = None
@@ -152,8 +151,6 @@ class ICLPromptTranslator(Translator):
         p = bot.hparams
         args = bot.args
         self.src_field, self.tgt_field = get_field_names(args.dataset)
-        self.tok = AutoTokenizer.from_pretrained(p.chatglm_path,
-                                                 trust_remote_code=True, revision='v0.1.0')
         self.use_syn: bool = getattr(p, 'use_syntactic_prompt', False)
         self.prompt_mode = p.prompt_mode
         if p.prompt_mode != 'zero_shot':
