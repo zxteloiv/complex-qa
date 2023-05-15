@@ -8,18 +8,6 @@ import os.path as osp
 from transformers import AutoTokenizer, AutoModel
 
 
-PREF_CONFS = {
-    'cogs': ('nl', 'lf'),
-    'geo': ('sent', 'sql'),
-    'ati': ('sent', 'sql'),
-    'sch': ('sent', 'sql'),
-    'adv': ('sent', 'sql'),
-    'smc': ('utterance', 'plan'),
-    'ccfq': ('source', 'target'),
-    'cofe': ('context', 'ground_truth'),
-}
-
-
 @Registry.hparamset('icl_history')
 def chatglm():
     from trialbot.training.hparamset import HyperParamSet
@@ -137,17 +125,11 @@ def main():
 def lazy_init_translator(bot):
     args, p = bot.args, bot.hparams
     trans = bot.translator
-    trans.src_field, trans.tgt_field = get_field_names(args.dataset)
+    from shujuji import get_field_names_by_prefix
+    trans.src_field, trans.tgt_field = get_field_names_by_prefix(args.dataset)
     trans.prompt_mode = p.prompt_mode
     if p.prompt_mode != 'zero_shot':
         trans.load_index(bot.train_set)
-
-
-def get_field_names(ds_name: str):
-    for k, v in PREF_CONFS.items():
-        if ds_name.startswith(k):
-            return v
-    return None
 
 
 if __name__ == '__main__':
