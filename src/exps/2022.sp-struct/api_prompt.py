@@ -54,10 +54,14 @@ class WrapperModel(torch.nn.Module):
     def forward(self, src, tgt, context, prompt):
         for x, y, c, p in zip(src, tgt, context, prompt):
             spec = {'src': x, 'tgt': y, 'ctx': c, 'prompt': p}
-            try:
-                res = chat_completion(p) if self.use_chat else completion(p)
-                success = True
-            except Exception as e:
+            if not self.dry_run:
+                try:
+                    res = chat_completion(p) if self.use_chat else completion(p)
+                    success = True
+                except Exception as e:
+                    res = ''
+                    success = False
+            else:
                 res = ''
                 success = False
 
@@ -93,6 +97,8 @@ def main():
     trans: 'PromptTranslator' = bot.translator
     trans.src_field, trans.tgt_field = get_field_names_by_prefix(args.dataset)
     trans.load_index(bot.train_set)
+    if args.dry_run:
+        bot.model.dry_run = True
     bot.run()
 
 
