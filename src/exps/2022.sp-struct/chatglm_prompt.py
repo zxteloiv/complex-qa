@@ -94,19 +94,13 @@ class WrapperModel(torch.nn.Module):
 
 
 def main():
-    from shujuji import cogs, compact_cfq as ccfq, smcalflow_cs as smc, cg_bundle as agsa, cofe
-    smc.install()
-    ccfq.install_dataset()
-    cogs.install_dataset()
-    agsa.install_parsed_qa_datasets()
-    agsa.install_cross_domain_parsed_qa_datasets()
-    cofe.install_datasets()
-
+    from shujuji import install_semantic_parsing_datasets
     from utils.llm.prompt_translator import install_translator
-    install_translator()
-
     from utils.trialbot.setup_cli import setup as setup_cli
     from utils.trialbot.setup_bot import setup_bot
+
+    install_semantic_parsing_datasets()
+    install_translator()
     args = setup_cli(seed=2021, device=0, test=None)    # always in test mode
     bot = TrialBot(args=args, trial_name='glm-6b', get_model_func=WrapperModel.get_model)
     lazy_init_translator(bot)

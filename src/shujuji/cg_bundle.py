@@ -150,7 +150,7 @@ def _get_raw_ds(ds_full_dir, *, sql_only: bool):
 def install_raw_sql_datasets(reg: dict = None):
     reg = CG_DATA_REG if reg is None else reg
     for ds_tag, split_tag in product(DATA_PATH.keys(), SPLIT_PATH.keys()):
-        key = f"raw_sql.{ds_tag}_{split_tag}"
+        key = f"sql_{ds_tag}_{split_tag}"
         reg[key] = partial(_get_raw_ds, _get_ds_full_dir(ds_tag, split_tag), sql_only=True)
         logging.debug(f"registered {key} lazily")
 
@@ -158,7 +158,7 @@ def install_raw_sql_datasets(reg: dict = None):
 def install_raw_qa_datasets(reg: dict = None):
     reg = CG_DATA_REG if reg is None else reg
     for ds_tag, split_tag in product(DATA_PATH.keys(), SPLIT_PATH.keys()):
-        key = f"raw_qa.{ds_tag}_{split_tag}"
+        key = f"{ds_tag}_{split_tag}"
         reg[key] = partial(_get_raw_ds, _get_ds_full_dir(ds_tag, split_tag), sql_only=False)
         logging.debug(f"registered {key} lazily")
 
@@ -222,7 +222,7 @@ def install_parsed_sql_datasets(reg: dict = None):
     for ds_tag, split_tag in product(DATA_PATH.keys(), SPLIT_PATH.keys()):
         for g in GRAMMAR_FILES:
             g_tag = _get_grammar_tag_by_filename(g)
-            key = f"sql.{ds_tag}_{split_tag}.{g_tag}"
+            key = f"sql_{ds_tag}_{split_tag}_{g_tag}"
             reg[key] = partial(_get_parsed_ds, ds_tag, split_tag, g, sql_only=True)
             logging.debug(f"registered {key} lazily")
 
@@ -258,7 +258,7 @@ def install_parsed_qa_datasets(reg: dict = None):
 
         for g in GRAMMAR_FILES:
             g_tag = _get_grammar_tag_by_filename(g)
-            key = f"qa.{ds_tag}_{split_tag}.{g_tag}"
+            key = f"{ds_tag}_{split_tag}_{g_tag}"
             reg[key] = partial(_get_parsed_ds, ds_tag, split_tag, g, sql_only=False, conn=None)
             logging.debug(f"registered {key} lazily")
 
@@ -279,7 +279,7 @@ def install_cross_domain_parsed_qa_datasets(reg: dict = None, ds_tags: list = No
         for g in GRAMMAR_FILES:
             g_tag = _get_grammar_tag_by_filename(g)
             chain_keys = [f"qa.{ds_tag}_{split_tag}.{g_tag}" for ds_tag in ds_tags]
-            key = f"qa.all_{split_tag}.{g_tag}"
+            key = f"agsa_{split_tag}_{g_tag}"
             reg[key] = partial(_get_all_ds, keys=chain_keys, reg=reg)
             logging.debug(f"registered {key} lazily")
 
@@ -290,7 +290,7 @@ def install_cross_domain_raw_qa_datasets(reg: dict = None, ds_tags: list = None)
 
     for split_tag in SPLIT_PATH.keys():
         chain_keys = [f"raw_qa.{ds_tag}_{split_tag}" for ds_tag in ds_tags]
-        key = f"raw_qa.all_{split_tag}"
+        key = f"agsa_{split_tag}"
         reg[key] = partial(_get_all_ds, keys=chain_keys, reg=reg)
         logging.debug(f"registered {key} lazily")
 

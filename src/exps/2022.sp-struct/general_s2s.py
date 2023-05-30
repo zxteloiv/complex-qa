@@ -20,14 +20,8 @@ def main():
     from utils.trialbot.setup_cli import setup as setup_cli
     from utils.s2s_arch.setup_bot import setup_common_bot
     from utils.s2s_arch.base_hparams import base_hparams
-    from shujuji import cogs
-    import shujuji.cg_bundle as cg_bundle
-    import shujuji.smcalflow_cs as smcalflow_cs
-
-    cg_bundle.install_parsed_qa_datasets(Registry._datasets)
-    cogs.install_dataset()
-    smcalflow_cs.install()
-
+    from shujuji import install_semantic_parsing_datasets
+    install_semantic_parsing_datasets()
     install_general_translators()
     install_hparamsets(base_hparams)
 

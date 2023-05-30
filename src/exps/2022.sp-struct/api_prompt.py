@@ -12,14 +12,7 @@ sys.path.insert(0, find_root('.SRC'))
 from utils.trialbot.setup_cli import setup as setup_cli
 from utils.llm.openai_prompt import load_api_key_from_envion, completion, chat_completion
 from utils.llm.prompt_translator import install_translator
-from shujuji import (
-    cogs,
-    compact_cfq as ccfq,
-    smcalflow_cs as smc,
-    cg_bundle as agsa,
-    cofe,
-    get_field_names_by_prefix,
-)
+from shujuji import install_semantic_parsing_datasets, get_field_names_by_prefix
 
 
 @Registry.hparamset('chat')
@@ -83,12 +76,7 @@ class WrapperModel(torch.nn.Module):
 
 
 def main():
-    smc.install()
-    ccfq.install_dataset()
-    cogs.install_dataset()
-    agsa.install_parsed_qa_datasets()
-    agsa.install_cross_domain_parsed_qa_datasets()
-    cofe.install_datasets()
+    install_semantic_parsing_datasets()
     install_translator()
     load_api_key_from_envion()
 
