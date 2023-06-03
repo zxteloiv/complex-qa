@@ -11,6 +11,7 @@ PREF_CONFS = {
     'smc': ('utterance', 'plan'),
     'ccfq': ('source', 'target'),
     'cofe': ('context', 'ground_truth'),
+    'agsa': ('sent', 'sql'),
 }
 
 

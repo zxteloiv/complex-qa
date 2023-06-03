@@ -1,5 +1,5 @@
 from functools import wraps
-from typing import Callable, TypeVar, Dict, List, Any
+from typing import Callable, TypeVar, Dict, List, Any, Union, Collection
 
 T = TypeVar('T')
 MODIFIER = Callable[[T], T]
@@ -149,12 +149,21 @@ def install_hparamsets(base_func):
         Registry._hparamsets[hp_name] = decorate_with(emod, dmod)(base_func)
 
 
-def install_runtime_modifiers(args, get_mods: Callable[[Any], List[MODIFIER]]):
+def install_runtime_modifiers(hp_name: str, mod_or_mods: Union[Collection[MODIFIER], MODIFIER]):
     from trialbot.training import Registry
-    hpname = args.hparamset
-    mods = get_mods(args)
-    if mods and len(mods) > 0:
-        hp_func = Registry._hparamsets[hpname]
-        Registry._hparamsets[hpname] = decorate_with(*mods)(hp_func)
+    from collections.abc import Collection
+    if not mod_or_mods:
+        return
+
+    mods = mod_or_mods if isinstance(mod_or_mods, Collection) else [mod_or_mods]
+    if len(mods) == 0:
+        return
+
+    hp_func = Registry._hparamsets[hp_name]
+    Registry._hparamsets[hp_name] = decorate_with(*mods)(hp_func)
 
 
+def param_overwriting_modifier(p, **kwargs):
+    for k, v in kwargs.items():
+        setattr(p, k, v)
+    return p

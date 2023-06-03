@@ -29,7 +29,7 @@ def main():
     if not hasattr(args, 'translator') or not args.translator:
         args.translator = guess_translator(*args.hparamset.split('2'))
 
-    install_runtime_modifiers(args, get_runtime_modifiers)
+    install_runtime_modifiers(args.hparamset, get_runtime_modifiers(args))
 
     bot = setup_common_bot(args=args)
     bot.run()
