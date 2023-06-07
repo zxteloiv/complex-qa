@@ -34,12 +34,12 @@ def ast2rules(ast):
 
 def ast2brackets(ast):
     from utils.lark.id_tree import build_from_lark_tree
-    from utils.tree import InorderTraverse
+    from utils.tree import InOrderTraverse
     tree = build_from_lark_tree(ast)
 
     prod_str = ' '.join(
         node if isinstance(node, str) else node.label
-        for node in InorderTraverse()(tree, hooks={
+        for node in InOrderTraverse()(tree, hooks={
             'pre_left_children': lambda n, parent, path, algo: "[" if (
                     not n.is_terminal and len(algo.children_fn(n)) > 1
             ) else "",

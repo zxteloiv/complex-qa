@@ -23,7 +23,7 @@ class Traversal:
         raise NotImplementedError
 
 
-class InorderTraverse(Traversal):
+class InOrderTraverse(Traversal):
     def __init__(self,
                  children_fn: T_CHILDREN_FN = None,
                  left_priority: bool = True,    # split children based on middle but left side first
@@ -93,7 +93,7 @@ class InorderTraverse(Traversal):
             return tuple(out)
 
 
-class PreorderTraverse(Traversal):
+class PreOrderTraverse(Traversal):
     def __init__(self,
                  children_fn: T_CHILDREN_FN = None,
                  output_parent: bool = False,
@@ -140,6 +140,20 @@ class PreorderTraverse(Traversal):
             return tuple(output)
 
 
+class PostOrderTraverse(PreOrderTraverse):
+    def _recursive_call(self, subtree: T, parent: T = None, path: List[int] = None):
+        if 'pre_children' in self.hooks:
+            yield from self.hooks['post_children'](subtree, parent, path, self)
+        for i, c in enumerate(self.children_fn(subtree)):
+            yield from self._recursive_call(c, subtree, path + [i])
+
+        if 'pre_visit' in self.hooks:
+            yield from self.hooks['pre_visit'](subtree, parent, path, self)
+        yield self.visit_node(subtree, parent, path)
+        if 'post_visit' in self.hooks:
+            yield from self.hooks['post_visit'](subtree, parent, path, self)
+
+
 class Tree:
     EPS_TOK: str = "%%EPS%%"
 
@@ -170,9 +184,10 @@ class Tree:
         self.parent: Optional['Tree'] = None
 
     def __str__(self):
-        if len(self.children) == 0:
-            return self.label
-        return f"{self.label} ({' '.join(str(c) for c in self.children)})"
+        return self.label
+        # if len(self.children) == 0:
+        #     return self.label
+        # return f"{self.label} ({' '.join(str(c) for c in self.children)})"
 
     def immediate_str(self):
         if len(self.children) == 0:
@@ -185,7 +200,7 @@ class Tree:
 
     def iter_subtrees_topdown(self) -> Generator['Tree', None, None]:
         """mimic the behavior of a lark.Tree"""
-        yield from PreorderTraverse(Tree.get_nt_children_fn())(self)
+        yield from PreOrderTraverse(Tree.get_nt_children_fn())(self)
 
     @classmethod
     def get_nt_children_fn(cls):
@@ -219,7 +234,7 @@ if __name__ == '__main__':
     s = "aaabb"
     tree = parser.parse(s)
 
-    # for node in PreorderTraverse()(tree):
+    # for node in PreOrderTraverse()(tree):
     #     if isinstance(node, lark.Tree):
     #         print(node.data)
     #     elif isinstance(node, lark.Token):
@@ -227,7 +242,7 @@ if __name__ == '__main__':
     #     else:
     #         raise NotImplementedError
     #
-    # for node, node_parent in PreorderTraverse(output_parent=True)(tree):
+    # for node, node_parent in PreOrderTraverse(output_parent=True)(tree):
     #     pref = node_parent.data + ' --->' if node_parent is not None else '<gen> --->'
     #     node: lark.Tree
     #
@@ -246,7 +261,7 @@ if __name__ == '__main__':
     #
     #     return [] if node.is_terminal else RACT
     #
-    # for node in PreorderTraverse(hooks=dict(post_children=_post_children))(tree):
+    # for node in PreOrderTraverse(hooks=dict(post_children=_post_children))(tree):
     #     if isinstance(node, str) and node == 'REDUCE':
     #         print(node)
     #     else:
@@ -257,8 +272,8 @@ if __name__ == '__main__':
     #             print("NT:", node.label)
 
     print(' '.join(
-        node if isinstance(node, str) else node.label   # no-qa
-        for node in InorderTraverse()(tree, hooks={
+        node if isinstance(node, str) else node.label  # no-qa
+        for node in InOrderTraverse()(tree, hooks={
             'pre_left_children': lambda n, parent, path, algo: "[",
             'post_right_children': lambda n, parent, path, algo: "]",
         })
@@ -266,7 +281,7 @@ if __name__ == '__main__':
 
     print(' '.join(
         node if isinstance(node, str) else node.label
-        for node in InorderTraverse()(tree, hooks={
+        for node in InOrderTraverse()(tree, hooks={
             'pre_left_children': lambda n, parent, path, algo: "[" if (
                     not n.is_terminal and len(algo.children_fn(n)) > 1
             ) else "",

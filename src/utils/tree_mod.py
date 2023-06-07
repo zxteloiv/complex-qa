@@ -1,7 +1,7 @@
 from typing import Callable, Optional, List, Union, Tuple
 from enum import IntEnum, auto
 import logging
-from utils.tree import Tree, PreorderTraverse
+from utils.tree import Tree, PreOrderTraverse
 
 
 def build_parent_link(t: Tree, parent=None) -> Tree:
@@ -32,10 +32,10 @@ def modify_tree(t: Tree, node_idx: int, action_id: int) -> bool:
 
 
 def find_node_by_idx(tree: Tree, idx: int) -> Tuple[Tree, List[int]]:
-    id_tree = tree.assign_node_id(PreorderTraverse())
+    id_tree = tree.assign_node_id(PreOrderTraverse())
     id_tree = build_parent_link(id_tree)
 
-    for node, route in PreorderTraverse(output_path=True)(id_tree):
+    for node, route in PreOrderTraverse(output_path=True)(id_tree):
         if node.node_id == idx:
             return node, route
 
@@ -175,12 +175,12 @@ if __name__ == '__main__':
     btok: /[bB]/
     """, keep_all_tokens=True)
     s = "aaaabb"
-    tree = build_from_lark_tree(parser.parse(s), add_eps_nodes=True).assign_node_id(PreorderTraverse())
+    tree = build_from_lark_tree(parser.parse(s), add_eps_nodes=True).assign_node_id(PreOrderTraverse())
     print(tree)
-    for n in PreorderTraverse()(tree):
+    for n in PreOrderTraverse()(tree):
         print(n.node_id, ":", n.label, '-->', ' '.join(c.immediate_str() for c in n.children))
 
-    for n, path in PreorderTraverse(output_path=True)(tree):
+    for n, path in PreOrderTraverse(output_path=True)(tree):
         print('    ' * len(path), (n.node_id, n.label))
 
     # del_self(node, route)
@@ -195,7 +195,7 @@ if __name__ == '__main__':
     build_parent_link(tree)
     print(tree)
 
-    for n, path in PreorderTraverse(output_path=True)(tree):
+    for n, path in PreOrderTraverse(output_path=True)(tree):
         print('    ' * len(path), (n.node_id, n.label))
 
     node, route = find_node_by_idx(tree, 13)

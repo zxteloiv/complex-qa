@@ -5,7 +5,7 @@ from trialbot.data.field import Field, NullableTensor
 from trialbot.data import START_SYMBOL, END_SYMBOL
 import nltk
 import re
-from utils.tree import Tree, PreorderTraverse
+from utils.tree import Tree, PreOrderTraverse
 from utils.preprocessing import nested_list_numbers_to_tensors
 from models.rnng import rnng_utils
 
@@ -169,7 +169,7 @@ class RNNGField(Field):
             # manually emit reduce action for RNNG, thus we can get rid of the hooks
             yield self.ns_rnng, rnng_utils.get_token_str(rnng_utils.get_reduce_token())
             yield self.ns_term, START_SYMBOL    # start token to initialize the output buffer
-            for node in PreorderTraverse()(tree):
+            for node in PreOrderTraverse()(tree):
                 node: Tree
                 # since nodes are either terminals or nonterminals,
                 # they commit to the ns_nt or ns_term namespace.
@@ -185,7 +185,7 @@ class RNNGField(Field):
         def _add_reduce_action(n: Tree, *args):
             return [rnng_utils.get_reduce_token()] if not n.is_terminal else []
 
-        traverse = PreorderTraverse(hooks={'post_children': _add_reduce_action})
+        traverse = PreOrderTraverse(hooks={'post_children': _add_reduce_action})
         actions, target = [], [self.token_to_rnng_id(START_SYMBOL)]
         for node in traverse(tree):
             actions.append(self.token_to_rnng_id(node))

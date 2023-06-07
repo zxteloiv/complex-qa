@@ -1,53 +1,61 @@
-import os
-from itertools import chain
-
-from tqdm import tqdm
-
-
 from lark import Lark
 
 
 def main():
-    # from shujuji.cogs import install_dataset, cogs_iid, cogs_gen, cogs_iid_parsed, cogs_gen_parsed
-    # train, dev, test = cogs_gen_parsed()
-    # print(list(map(len, (train, dev, test))))
-    # for x in tqdm(chain(train, dev, test)):
-    #     print(x.keys(), file=open('a.out', 'w'))
-    # from shujuji.smcalflow_cs import smc_by_num, GRAMMAR_FILE
-    # train, dev, test = smc_by_num(128)
-    # parser = Lark(open(GRAMMAR_FILE), keep_all_tokens=True)
-    # print(list(map(len, (train, dev, test))))
-    # for x in tqdm(train):
-    #     s = x['plan']
-    #     tree = parser.parse(s)
-    #
-    # for x in tqdm(dev):
-    #     s = x['plan']
-    #     tree = parser.parse(s)
-    #
-    # for x in tqdm(test):
-    #     s = x['plan']
-    #     tree = parser.parse(s)
-    # from shujuji.compact_cfq import get_ccfq, GRAMMAR_FILE
-    # ds = get_ccfq(2)
-    # print(list(map(len, ds)))
-    # train, dev, test = ds
-    # parser = Lark(open(GRAMMAR_FILE), keep_all_tokens=True)
-    # for x in tqdm(train):
-    #     parser.parse(x['target'])
-    # for x in tqdm(dev):
-    #     parser.parse(x['target'])
-    # for x in tqdm(test):
-    #     parser.parse(x['target'])
-    import sqlite3
-    con = sqlite3.connect('test.db')
-    con.execute('create virtual table ftskvmem using fts5(src, tgt);')
-    from shujuji.cogs import cogs_iid
-    train, dev, test = cogs_iid()
-    data = list((x['nl'], x['lf']) for x in train)
-    con.executemany('insert into ftskvmem(src, tgt) values (?, ?)', data)
-    con.commit()
-    con.close()
+    from utils.lark.id_tree import build_from_lark_tree
+    from utils.tree import InOrderTraverse, PostOrderTraverse, PreOrderTraverse, Tree
+    pass
+    from shujuji.smcalflow_cs import smc_by_num, GRAMMAR_FILE
+    train, dev, test = smc_by_num(128)
+    parser = Lark(open(GRAMMAR_FILE), keep_all_tokens=True)
+    xs = train[128:138]
+    tree = build_from_lark_tree(parser.parse(xs[0]['plan']))
+
+    tree2 = Tree(label='s', children=[
+        Tree(label='A', is_terminal=True),
+        Tree(label='bcd', children=[
+            Tree(label='B', is_terminal=True),
+            Tree(label='cd', children=[
+                Tree(label='C', is_terminal=True),
+                Tree(label='D', is_terminal=True),
+            ]),
+        ]),
+        Tree(label='E', is_terminal=True),
+        Tree(label='fg', children=[
+            Tree(label='F', is_terminal=True),
+            Tree(label='g', children=[
+                Tree(label='G', is_terminal=True),
+            ]),
+        ]),
+    ])
+    foo(tree2)
+
+
+def foo(tree):
+    from utils.tree import InOrderTraverse, PostOrderTraverse, PreOrderTraverse, Tree
+    # set payload for node offset
+    running_prefix = 0
+    for node in PostOrderTraverse()(tree):
+        if node.is_terminal:
+            node.payload = (running_prefix, running_prefix + len(node.label))
+            running_prefix += 1 + len(node.label)  # the space sep
+        else:
+            # use the left-most to right-most
+            node.payload = (node.children[0].payload[0], node.children[-1].payload[-1])
+
+    text = ' '.join(node.label for node in PostOrderTraverse()(tree) if node.is_terminal)
+    print('length:', len(text))
+    print(text)
+    print('====' * 30)
+    for node, path in PreOrderTraverse(output_path=True)(tree):
+        start, end = node.payload
+        if node.is_terminal:
+            indent = '__' * len(path)
+            print(indent + node.label, f'({start},{end})')
+            continue
+        else:
+            indent = '__' * len(path)
+            print(indent + node.label, f'({start},{end})', '--->', text[slice(*node.payload)])
 
 
 if __name__ == '__main__':

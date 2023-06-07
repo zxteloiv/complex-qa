@@ -1,7 +1,7 @@
 """An ID Tree contains ID to each node, but discards the information of Lark"""
 from typing import Union
 import lark
-from utils.tree import Tree, PreorderTraverse
+from utils.tree import Tree, PreOrderTraverse
 
 
 def build_from_lark_tree(subtree_or_tok: Union[lark.Tree, lark.Token],
@@ -53,7 +53,7 @@ if __name__ == '__main__':
         }
         """
     tree = sparql_parser.parse(sparql)
-    id_tree = build_from_lark_tree(tree, add_eps_nodes=False).assign_node_id(PreorderTraverse())
+    id_tree = build_from_lark_tree(tree, add_eps_nodes=False).assign_node_id(PreOrderTraverse())
     print(id_tree)
 
     # for n in PreorderTraverse()(id_tree):
@@ -64,12 +64,12 @@ if __name__ == '__main__':
         n: Tree
         print(n.node_id, ":", n.label, '-->', ' '.join(c.immediate_str() for c in n.children))
 
-    from utils.tree import InorderTraverse
+    from utils.tree import InOrderTraverse
     print('----' * 30)
 
     print(' '.join(
         node if isinstance(node, str) else node.label
-        for node in InorderTraverse()(id_tree, hooks={
+        for node in InOrderTraverse()(id_tree, hooks={
             'pre_left_children': lambda a, b, c, d: "[",
             'post_right_children': lambda a, b, c, d: "]",
         })

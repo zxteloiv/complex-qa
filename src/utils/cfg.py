@@ -3,7 +3,7 @@ from collections import defaultdict
 __all__ = ['Symbol', 'NonTerminal', 'Terminal', 'T_CFG']
 from utils.itertools import powerset
 from utils.graph import dfs_walk, Graph
-from utils.tree import Tree, PreorderTraverse
+from utils.tree import Tree, PreOrderTraverse
 
 
 class Symbol:

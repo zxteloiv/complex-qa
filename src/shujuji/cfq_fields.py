@@ -7,7 +7,7 @@ from trialbot.data.fields.seq_field import SeqField
 import lark
 from trialbot.data import START_SYMBOL, END_SYMBOL
 from utils.preprocessing import nested_list_numbers_to_tensors
-from utils.tree import Tree, PreorderTraverse
+from utils.tree import Tree, PreOrderTraverse
 
 
 class GrammarPatternSeqField(SeqField):
@@ -106,7 +106,7 @@ class TreeTraversalField(Field):
     def generate_namespace_tokens(self, example) -> Generator[Tuple[str, str], None, None]:
         tree: Tree = example.get(self.tree_key)
         if tree is not None:
-            for node in PreorderTraverse()(tree):
+            for node in PreOrderTraverse()(tree):
                 yield from product([self.ns], [node.label, END_SYMBOL])
 
     def to_tensor(self, example) -> Mapping[str, Optional[list]]:
@@ -116,7 +116,7 @@ class TreeTraversalField(Field):
 
         # pre-assign an ID, otherwise the system won't work
         # IDs are allocated in the left-most derivation order
-        id_tree: Tree = tree.assign_node_id(PreorderTraverse())
+        id_tree: Tree = tree.assign_node_id(PreOrderTraverse())
 
         # to get the symbol_id and the exact_token id from a token string
         s_id = lambda t: self.vocab.get_token_index(t, self.ns)
@@ -126,7 +126,7 @@ class TreeTraversalField(Field):
         # traverse again the tree in the order of left-most derivation
         tree_node_id_set = set()
 
-        for node, parent, path in PreorderTraverse(output_parent=True, output_path=True)(id_tree):
+        for node, parent, path in PreOrderTraverse(output_parent=True, output_path=True)(id_tree):
             parent_id = parent.node_id if parent is not None else 0
             tree_nodes.append(s_id(node.label))
             node_parent.append(parent_id)
@@ -176,9 +176,9 @@ class PolicyValidity(Field):
             return {self.out_key: None}
 
         validity_matrix = []    # list(list(int * 7))
-        id_tree = tree.assign_node_id(PreorderTraverse())
+        id_tree = tree.assign_node_id(PreOrderTraverse())
 
-        for node, parent, path in PreorderTraverse(output_parent=True, output_path=True)(id_tree):
+        for node, parent, path in PreOrderTraverse(output_parent=True, output_path=True)(id_tree):
             node: Tree
             parent: Tree
             path: List[int]
@@ -253,7 +253,7 @@ class TutorBuilderField(Field):
 
     def _traverse_tree_for_derivations(self, tree: Tree):
         s_id = lambda t: self.vocab.get_token_index(t, self.ns)
-        for node in PreorderTraverse()(tree):
+        for node in PreOrderTraverse()(tree):
             children: List[Tree] = node.children
             lhs = s_id(node.label)
             rhs = [s_id(c.label) for c in children] + [s_id(END_SYMBOL)]

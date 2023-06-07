@@ -5,7 +5,7 @@ from trialbot.data.fields import SeqField
 from trialbot.data.translator import FieldAwareTranslator
 
 from utils.preprocessing import nested_list_numbers_to_tensors
-from utils.tree import PreorderTraverse, Tree
+from utils.tree import PreOrderTraverse, Tree
 from .plm2s import PREPROCESS_HOOKS
 
 
@@ -23,7 +23,7 @@ class BeNeParField(Field):
         sent = self.process_sent(sent)
         if sent is not None:
             tree = self.sent_to_tree(sent)
-            for node in PreorderTraverse()(tree):
+            for node in PreOrderTraverse()(tree):
                 node: Tree
                 yield self.ns, node.label
 
@@ -34,11 +34,11 @@ class BeNeParField(Field):
             return {self.token_key: None, self.graph_key: None}
 
         tree = self.sent_to_tree(sent)
-        tokens = [self.vocab.get_token_index(node.label, self.ns) for node in PreorderTraverse()(tree)]
+        tokens = [self.vocab.get_token_index(node.label, self.ns) for node in PreOrderTraverse()(tree)]
         node_num = len(tokens)
 
         edges = []
-        for node in PreorderTraverse()(tree):
+        for node in PreOrderTraverse()(tree):
             node: Tree
             children_ids = set(c.node_id for c in node.children)
             edge = [1 if i in children_ids else 0 for i in range(node_num)]
@@ -55,7 +55,7 @@ class BeNeParField(Field):
         tree = self.span_to_tree(root)
         for sent in sents[1:]:
             tree.children.append(self.span_to_tree(sent))
-        tree.assign_node_id(PreorderTraverse())
+        tree.assign_node_id(PreOrderTraverse())
         tree.build_parent_link()
         return tree
 
