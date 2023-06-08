@@ -25,7 +25,7 @@ def main():
 
     install_dummy_translator()
 
-    args = setup_cli(seed=2021, hparamset='moving-metric', **{"dry-run": None})
+    args = setup_cli(seed=2021, hparamset='tree-nt-moving', **{"dry-run": None})
 
     install_runtime_modifiers(args.hparamset, partial(param_overwriting_modifier, **dict(
       zip(('src_key', 'tgt_key'), get_field_names_by_prefix(args.dataset))
@@ -52,11 +52,12 @@ def main():
 class MetricModel(torch.nn.Module):
     @classmethod
     def get_model(cls, p, vocab):
-        return cls(p.chatglm_path, p.src_key, p.tgt_key, p.use_tgt_trees, p.max_tok_num)
+        return cls(p.chatglm_path, p.src_key, p.tgt_key, p.use_tgt_trees, p.max_tok_num, p.only_compare_nt)
 
     def __init__(self, llm_path: str, src_key: str, tgt_key: str,
                  use_tgt_trees: bool = True,
                  max_toks_num: int = 10000,
+                 only_compare_nt_nodes: bool = True,
                  ):
         super().__init__()
         self.tok = AutoTokenizer.from_pretrained(llm_path, trust_remote_code=True, revision='v0.1.0')
@@ -68,6 +69,7 @@ class MetricModel(torch.nn.Module):
         self.avg_metric = Average()
         self.use_tgt_trees = use_tgt_trees
         self.max_toks_num = max_toks_num
+        self.only_compare_nt_nodes = only_compare_nt_nodes
 
     @torch.inference_mode()
     def forward(self, **kwargs):
@@ -82,7 +84,8 @@ class MetricModel(torch.nn.Module):
                 return
 
             tgt = self.restore_text_from_trees(tgt_trees)
-            offset_of_trees: list = [[node.payload for node in PreOrderTraverse()(t)]
+            child_fn = Tree.get_nt_children_fn() if self.only_compare_nt_nodes else None
+            offset_of_trees: list = [[node.payload for node in PreOrderTraverse(child_fn)(t)]
                                      for t in tgt_trees]
         else:
             tgt = kwargs[self.tgt_key]
@@ -148,7 +151,10 @@ class MetricModel(torch.nn.Module):
         hid_sz = emb.size(-1)
         selected_embs = torch.masked_select(emb, mask).reshape(-1, hid_sz)[:self.max_toks_num]
         sent_emb = selected_embs.mean(0).unsqueeze(0)   # (1, dim)
-        src_emb = torch.cat([selected_embs, sent_emb], dim=0)   # (sel_toks + 1, dim)
+        if self.only_compare_nt_nodes:
+            src_emb = sent_emb
+        else:
+            src_emb = torch.cat([selected_embs, sent_emb], dim=0)   # (sel_toks + 1, dim)
         del selected_embs, sent_emb, mask
         return src_emb
 
@@ -213,7 +219,7 @@ class MetricModel(torch.nn.Module):
         return {"DIST": self.avg_metric.get_metric(reset=reset)}
 
 
-@Registry.hparamset('moving-metric')
+@Registry.hparamset('tree-nt-moving')
 def base():
     from trialbot.training.hparamset import HyperParamSet
     from trialbot.utils.root_finder import find_root
@@ -225,10 +231,11 @@ def base():
     p.batch_sz = 4  # must be small, otherwise the GPU memory will goes run out.
     p.use_tgt_trees = True
     p.max_tok_num = 1100    # >num of 99% examples on ATIS
+    p.only_compare_nt = True
     return p
 
 
-@Registry.hparamset('moving-metric-flat')
+@Registry.hparamset('seq-nt-moving')
 def plain_seq():
     p = base()
     p.use_tgt_trees = False
