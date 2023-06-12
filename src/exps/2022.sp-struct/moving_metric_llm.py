@@ -64,16 +64,20 @@ class DumpBot(TrialBot):
                 self.translator.to_tensor(ds[i])
                 for i in indices
             ])
-            model: MetricModel = self.model
-            output: dict = model.dump(**xs)
-            keys, vals = output.keys(), output.values()
+            if len(xs) > 0:
+                model: MetricModel = self.model
+                output: dict = model.dump(**xs)
+                keys, vals = output.keys(), output.values()
 
-            for tp in zip(*vals):
-                line_obj = dict(zip(keys, tp))
-                fout.write(json.dumps(line_obj))
-                fout.write('\n')
+                for tp in zip(*vals):
+                    line_obj = dict(zip(keys, tp))
+                    fout.write(json.dumps(line_obj))
+                    fout.write('\n')
 
-            item_len = len(next(iter(xs.values())))
+                item_len = len(next(iter(xs.values())))
+            else:
+                item_len = 0
+
             total_xs += item_len
             total_iter += len(indices)
             self.logger.info(f'Dumped the batch {bi} len={item_len}/{len(indices)}')
