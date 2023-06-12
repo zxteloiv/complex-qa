@@ -1,25 +1,23 @@
-import gzip
 import json
 import os
 from functools import partial
 import sys
+import gc
 
 from trialbot.data import NSVocabulary, RandomIterator
 from trialbot.utils.root_finder import find_root
-import logging
 
 sys.path.insert(0, find_root('.SRC'))
 
 import torch
 from transformers import AutoModel, AutoTokenizer
-from trialbot.training import Registry, TrialBot, Events, Updater
+from trialbot.training import Registry, TrialBot
 import os.path as osp
 import ot
 
 from shujuji import install_semantic_parsing_datasets, get_field_names_by_prefix
 from utils.trialbot.dummy_translator import install_dummy_translator
 from utils.trialbot.setup_cli import setup as setup_cli
-from utils.trialbot.setup_bot import setup_bot
 from utils.s2s_arch.hparam_modifiers import param_overwriting_modifier, install_runtime_modifiers
 from utils.lark.id_tree import build_from_lark_tree
 from utils.tree import Tree, PreOrderTraverse, PostOrderTraverse
@@ -81,6 +79,11 @@ class DumpBot(TrialBot):
             self.logger.info(f'Dumped the batch {bi} len={item_len}/{len(indices)}')
             if bi % 10 == 0:
                 fout.flush()
+
+            gc.collect()
+            if self.args.device >= 0:
+                import torch.cuda
+                torch.cuda.empty_cache()
 
         fout.close()
         self.logger.info(f'total-dumped: {total_xs} / {total_iter}')
