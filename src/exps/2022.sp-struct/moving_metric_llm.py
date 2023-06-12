@@ -1,5 +1,10 @@
+import gzip
+import json
+import os
 from functools import partial
 import sys
+
+from trialbot.data import NSVocabulary, RandomIterator
 from trialbot.utils.root_finder import find_root
 import logging
 
@@ -7,7 +12,7 @@ sys.path.insert(0, find_root('.SRC'))
 
 import torch
 from transformers import AutoModel, AutoTokenizer
-from trialbot.training import Registry, TrialBot, Events
+from trialbot.training import Registry, TrialBot, Events, Updater
 import os.path as osp
 import ot
 
@@ -25,28 +30,60 @@ def main():
 
     install_dummy_translator()
 
-    args = setup_cli(seed=2021, hparamset='tree-nt-moving', **{"dry-run": None})
+    args = setup_cli(seed=2021, hparamset='dump')
 
     install_runtime_modifiers(args.hparamset, partial(param_overwriting_modifier, **dict(
       zip(('src_key', 'tgt_key'), get_field_names_by_prefix(args.dataset))
     )))
     train, _, _ = Registry.get_dataset(args.dataset)
 
-    bot = TrialBot(args, get_model_func=MetricModel.get_model)
-    if not args.test:
-        bot = setup_bot(bot, vdrop_reset=False, epoch_model_saving=False)
-    else:
-        bot = setup_bot(bot, False, False, False, True, False, False)
-
-        @bot.attach_extension(Events.ITERATION_COMPLETED)
-        def manual_gc(bot):
-            import gc
-            gc.collect()
-            if bot.args.device >= 0:
-                import torch.cuda
-                torch.cuda.empty_cache()
-
+    bot = DumpBot(args, get_model_func=MetricModel.get_model, trial_name='dump-emb', clean_engine=True)
     bot.run()
+
+
+class DumpBot(TrialBot):
+    def _init_vocab(self, dataset, translator):
+        return NSVocabulary()
+
+    def run(self, training_epoch: int = 0):
+        self.model.eval()
+        self.logger.info(f'writing dump file train-dump.jsonl at {self.savepath}')
+        self.dump_ds(self.train_set, 'train-dump.jsonl')
+        self.logger.info(f'writing dump file dev-dump.jsonl at {self.savepath}')
+        self.dump_ds(self.dev_set, 'dev-dump.jsonl')
+        self.logger.info(f'writing dump file test-dump.jsonl at {self.savepath}')
+        self.dump_ds(self.test_set, 'test-dump.jsonl')
+
+    def dump_ds(self, ds, dump_filename: str):
+        iterator = RandomIterator(len(ds), self.hparams.batch_sz, False, False)
+        if not osp.exists(self.savepath):
+            os.makedirs(self.savepath, mode=0o755)
+
+        fout = open(osp.join(self.savepath, dump_filename), 'wt')
+        total_iter = total_xs = 0
+        for bi, indices in enumerate(iterator):
+            xs = self.translator.batch_tensor([
+                self.translator.to_tensor(ds[i])
+                for i in indices
+            ])
+            model: MetricModel = self.model
+            output: dict = model.dump(**xs)
+            keys, vals = output.keys(), output.values()
+
+            for tp in zip(*vals):
+                line_obj = dict(zip(keys, tp))
+                fout.write(json.dumps(line_obj))
+                fout.write('\n')
+
+            item_len = len(next(iter(xs.values())))
+            total_xs += item_len
+            total_iter += len(indices)
+            self.logger.info(f'Dumped the batch {bi} len={item_len}/{len(indices)}')
+            if bi % 10 == 0:
+                fout.flush()
+
+        fout.close()
+        self.logger.info(f'total-dumped: {total_xs} / {total_iter}')
 
 
 class MetricModel(torch.nn.Module):
@@ -64,12 +101,24 @@ class MetricModel(torch.nn.Module):
         self.model = AutoModel.from_pretrained(llm_path, trust_remote_code=True, revision='v0.1.0').half().eval()
         self.src_key = src_key
         self.tgt_key = tgt_key
-        self.logger = logging.getLogger(self.__class__.__name__)
-        from allennlp.training.metrics import Average
-        self.avg_metric = Average()
         self.use_tgt_trees = use_tgt_trees
         self.max_toks_num = max_toks_num
         self.only_compare_nt_nodes = only_compare_nt_nodes
+
+    @torch.inference_mode()
+    def dump(self, **kwargs):
+        src = kwargs[self.src_key]
+        tgt_trees = [self.compute_offsets(build_from_lark_tree(t))
+                     for t in kwargs[self.tgt_key + '_tree'] if t is not None]
+        if len(tgt_trees) == 0:
+            return
+        tgt = self.restore_text_from_trees(tgt_trees)
+        src_emb, src_ids = self.embed(src)
+        tgt_emb, tgt_ids = self.embed(tgt)
+        output = dict(src_emb=src_emb.tolist(), src_ids=src_ids.tolist(),
+                      tgt_emb=tgt_emb.tolist(), tgt_ids=tgt_ids.tolist(),
+                      src=src, tgt=tgt,)
+        return output
 
     @torch.inference_mode()
     def forward(self, **kwargs):
@@ -226,7 +275,7 @@ def base():
     p = HyperParamSet.common_settings(find_root())
     p.chatglm_path = osp.expanduser('~/.glm/chatglm-6b')
     p.TRANSLATOR = 'dummy'
-    p.TRANSLATOR_KWARGS = dict(filter_none=False)
+    p.TRANSLATOR_KWARGS = dict(filter_none=True)
     p.TRAINING_LIMIT = 1
     p.batch_sz = 4  # must be small, otherwise the GPU memory will goes run out.
     p.use_tgt_trees = True
@@ -235,10 +284,9 @@ def base():
     return p
 
 
-@Registry.hparamset('seq-nt-moving')
-def plain_seq():
+@Registry.hparamset('dump')
+def dump():
     p = base()
-    p.use_tgt_trees = False
     return p
 
 
