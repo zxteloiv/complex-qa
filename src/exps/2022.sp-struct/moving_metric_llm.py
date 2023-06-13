@@ -1,3 +1,4 @@
+import itertools
 import json
 import logging
 import os
@@ -220,6 +221,8 @@ class MovingMetrics:
         self.metric = ot_metric_string
         self.embed = embed
 
+        self._row_first: bool = False   # set to False because the Y's are usually longer
+
     def clear_cache(self):
         if self.embed.device.type != 'cpu':
             torch.cuda.empty_cache()
@@ -228,11 +231,45 @@ class MovingMetrics:
         n, m = len(xs), len(xt)
         logger.info(f'distribution costs estimating: {n}/{m}. {timestr()}')
         costs = torch.zeros(n, m, device=self.embed.device, dtype=torch.double)
-        for i in range(n):
-            for j in range(m):
-                cost_ij = self.direct_metric(xs[i], xt[j])
-                costs[i, j] = cost_ij
-                del cost_ij
+
+        if self._row_first:
+            prod = itertools.product(range(n), range(m))
+        else:
+            prod = itertools.product(range(m), range(n))
+
+        # row first will keep rows the same in consecutive calls, the opposite otherwise.
+        for i, j in prod:
+            if not self._row_first:
+                i, j = j, i
+
+            cost_ij = self.direct_metric(xs[i], xt[j])
+            costs[i, j] = cost_ij
+            del cost_ij
+        return costs
+
+    def _retrieve_and_save(self, ts):
+        if not hasattr(self, '_last_ts'):
+            self._last_ts = None
+            self._last_emb = None
+
+        if self._last_ts == ts:
+            emb = self._last_emb
+        else:
+            emb = self.embed(ts)
+            del self._last_emb, self._last_ts
+            self._last_ts = ts
+            self._last_emb = emb
+        return emb
+
+    def cost_on_tensors(self, xs, xt):
+        if self._row_first:
+            xs_emb: torch.Tensor = self._retrieve_and_save(xs)
+            xt_emb: torch.Tensor = self.embed(xt)
+        else:
+            xs_emb: torch.Tensor = self.embed(xs)
+            xt_emb: torch.Tensor = self._retrieve_and_save(xt)
+
+        costs = ot.dist(xs_emb, xt_emb, metric=self.metric)  # perhaps a tensor on cuda
         return costs
 
     def direct_metric(self, xs, xt, parallel: bool = False) -> torch.Tensor:
@@ -256,9 +293,7 @@ class MovingMetrics:
         if isinstance(xs, list):
             costs = self.cost_on_distributions(xs, xt)
         else:
-            xs_emb: torch.Tensor = self.embed(xs)
-            xt_emb: torch.Tensor = self.embed(xt)
-            costs = ot.dist(xs_emb, xt_emb, metric=self.metric)    # perhaps a tensor on cuda
+            costs = self.cost_on_tensors(xs, xt)
 
         self.clear_cache()
         return ot.emd2(torch.tensor([]), torch.tensor([]), costs)   # a torch scalar
@@ -313,8 +348,8 @@ def base():
     p.max_tok_num = 1100    # >num of 99% examples on ATIS
 
     # moving-metric params
-    p.num_retries = 5
-    p.max_dist_size = 200
+    p.num_retries = 10
+    p.max_dist_size = 50
     p.ot_metric_string = 'euclidean'
 
     p.use_tgt_trees = False
