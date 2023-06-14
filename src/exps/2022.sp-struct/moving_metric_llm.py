@@ -60,15 +60,21 @@ def main():
         logger.info(f'compute xy {timestr("%H:%M:%S")}')
         xy = mm.compute(train_x, train_y, parallel=True)
         logger.info(f'mm-output xy={xy}')
+
         logger.info(f'compute x_y_ {timestr("%H:%M:%S")}')
         x_y_ = mm.compute(test_x, test_y, parallel=True)
         logger.info(f'mm-output x_y_={x_y_}')
+
         logger.info(f'compute xx_ {timestr("%H:%M:%S")}')
+        mm.set_max_elem_num(p.max_dist_size // 2)
         xx_ = mm.compute(train_x, test_x)
         logger.info(f'mm-output xx_={xx_}')
+
         logger.info(f'compute yy_ {timestr("%H:%M:%S")}')
+        mm.set_max_elem_num(p.max_dist_size // 2)
         yy_ = mm.compute(train_y, test_y)
         logger.info(f'mm-output yy_={yy_}')
+
         logger.info(f'completed {timestr("%H:%M:%S")}')
 
 
@@ -311,6 +317,12 @@ class MovingMetrics:
             indices = random.sample(range(len(args[0])), k=self.max_elem_num)
             if len(args) == 1: return [args[0][i] for i in indices]
             else: return tuple([a[i] for i in indices] for a in args)
+
+    def set_num_retries(self, val: int):
+        self.num_retries = val
+
+    def set_max_elem_num(self, val: int):
+        self.max_elem_num = val
 
     def compute(self, xs: list, xt: list, parallel: bool = False) -> float:
         if len(xs) <= 0 or len(xt) <= 0:
