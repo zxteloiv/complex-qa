@@ -348,6 +348,7 @@ class MovingMetrics:
                 xtt = self.sample(xt)
 
             metrics.append(self.direct_metric(xss, xtt, parallel=parallel).item())
+            logger.info(f'turn {turn+1}/{self.num_retries} metric: {metrics[-1]}')
 
         return statistics.fmean(metrics)
 
