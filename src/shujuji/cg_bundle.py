@@ -260,7 +260,7 @@ def install_parsed_qa_datasets(reg: dict = None):
         for g in GRAMMAR_FILES:
             g_tag = _get_grammar_tag_by_filename(g)
             key = f"{ds_tag}_{split_tag}_{g_tag}"
-            reg[key] = partial(_get_parsed_ds, ds_tag, split_tag, g, sql_only=False, conn=None)
+            reg[key] = partial(_get_parsed_ds, ds_tag, split_tag, g, sql_only=False)
             logging.debug(f"registered {key} lazily")
 
 
