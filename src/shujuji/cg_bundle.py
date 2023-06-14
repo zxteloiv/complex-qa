@@ -28,6 +28,7 @@ ROOT = find_root()
 SRC_PATH = find_root('.SRC')
 CG_DATA_PATH = join(ROOT, 'data', 'CompGen', 'sql data')
 CG_DATA_REG = dict()
+REDIS_CONN: tuple = ('localhost', 36379, 2)
 
 
 class FlattenSeqDS(CompositionalDataset):
@@ -174,7 +175,7 @@ def _get_parsed_ds(ds_tag: str,
                    split_tag: str,
                    grammar_file: str,
                    sql_only: bool,
-                   conn: tuple = ('localhost', 6379, 2),
+                   conn: tuple = REDIS_CONN,
                    ):
     def _add_runtime(x):
         if x.get('sql_tree') is None:
