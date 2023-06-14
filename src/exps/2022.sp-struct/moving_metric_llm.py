@@ -6,7 +6,7 @@ import random
 import statistics
 from functools import partial
 import sys
-from typing import List, Tuple, Callable
+from typing import List, Tuple, Callable, Union
 
 import lark
 import numpy as np
@@ -114,36 +114,37 @@ class Embedder:
         return torch.device(device)
 
     @torch.inference_mode()
-    def embed(self, xs: List[str]) -> Tuple[torch.DoubleTensor, torch.IntTensor]:
-        xs_inputs = self.tok(xs,
-                             padding=True,
-                             return_tensors='pt').to(self.device)
-        xs_out = self.model(**xs_inputs, output_hidden_states=True)
-        xs_emb = xs_out.hidden_states[-1].transpose(0, 1).double()
-        xs_ids = xs_inputs['input_ids']
-        return xs_emb, xs_ids   # (batch, len, dim), (batch, len)
+    def embed(self, x_or_xs: Union[str, list]) -> Tuple[torch.DoubleTensor, torch.IntTensor]:
+        x_inputs = self.tok(x_or_xs,
+                            padding=True,
+                            return_tensors='pt').to(self.device)
+        x_out = self.model(**x_inputs, output_hidden_states=True)
+        x_emb = x_out.hidden_states[-1].transpose(0, 1).double()
+        x_ids = x_inputs['input_ids']
+
+        if isinstance(x_or_xs, list):
+            return x_emb, x_ids
+        else: # It'd accepted only a single string, and embedding without a batch form is expected
+            return x_emb[0], x_ids[0]   # (len, dim), (len,) <- (batch, len, dim), (batch, len)
 
     @torch.inference_mode()
-    def __call__(self, strings_or_trees: list) -> torch.Tensor:
-        if len(strings_or_trees) == 0:
-            raise ValueError('Empty list can not be embedded.')
+    def __call__(self, string_or_tree: Union[str, lark.Tree]) -> torch.Tensor:
+        if isinstance(string_or_tree, str):
+            if len(string_or_tree) == 0:
+                raise ValueError('Empty string cannot be fed and embedded.')
+            x_emb, x_id = self.embed(string_or_tree)
+            return self.compute_flat_seq_emb(x_emb, x_id)
 
-        elem = strings_or_trees[0]
-        if isinstance(elem, str):
-            strings = list(filter(None, strings_or_trees))
-            xs_emb, xs_id = self.embed(strings)
-            return self.compute_flat_seq_emb(xs_emb, xs_id)
+        elif isinstance(string_or_tree, lark.Tree):
+            tree = self.compute_offsets(build_from_lark_tree(string_or_tree))
+            terms: str = self.restore_text_from_trees(tree)
 
-        elif isinstance(elem, lark.Tree):
-            trees = filter(None, strings_or_trees)
-            trees = [self.compute_offsets(build_from_lark_tree(t)) for t in trees]
-            trees_offset = [[node.payload for node in PreOrderTraverse()(t)] for t in trees]
-            terms: List[str] = self.restore_text_from_trees(trees)
             terms_emb, terms_id = self.embed(terms)
-            return self.compute_tree_style_emb(terms_id, terms_emb, trees_offset)
+            tree_offset = [node.payload for node in PreOrderTraverse()(tree)]
+            return self.compute_tree_style_emb(terms_id, terms_emb, tree_offset)
 
         else:
-            raise TypeError('Invalid list. Only lists of strings or trees in Lark are supported.')
+            raise TypeError('Invalid list. Only a single string or a Lark tree is supported.')
 
     @staticmethod
     def compute_offsets(tree):
