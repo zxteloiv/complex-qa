@@ -65,15 +65,15 @@ def main():
         x_y_ = mm.compute(test_x, test_y, parallel=True)
         logger.info(f'mm-output x_y_={x_y_}')
 
-        logger.info(f'compute xx_ {timestr("%H:%M:%S")}')
-        mm.set_max_elem_num(p.max_dist_size // 2)
-        xx_ = mm.compute(train_x, test_x)
-        logger.info(f'mm-output xx_={xx_}')
-
-        logger.info(f'compute yy_ {timestr("%H:%M:%S")}')
-        mm.set_max_elem_num(p.max_dist_size // 2)
-        yy_ = mm.compute(train_y, test_y)
-        logger.info(f'mm-output yy_={yy_}')
+        # logger.info(f'compute xx_ {timestr("%H:%M:%S")}')
+        # mm.set_max_elem_num(p.max_dist_size // 2)
+        # xx_ = mm.compute(train_x, test_x)
+        # logger.info(f'mm-output xx_={xx_}')
+        #
+        # logger.info(f'compute yy_ {timestr("%H:%M:%S")}')
+        # mm.set_max_elem_num(p.max_dist_size // 2)
+        # yy_ = mm.compute(train_y, test_y)
+        # logger.info(f'mm-output yy_={yy_}')
 
         logger.info(f'completed {timestr("%H:%M:%S")}')
 
