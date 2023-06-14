@@ -59,14 +59,17 @@ def main():
     with torch.inference_mode():
         logger.info(f'compute xy {timestr("%H:%M:%S")}')
         xy = mm.compute(train_x, train_y, parallel=True)
-        logger.info(f'compute xx_ {timestr("%H:%M:%S")}')
-        xx_ = mm.compute(train_x, test_x)
-        logger.info(f'compute yy_ {timestr("%H:%M:%S")}')
-        yy_ = mm.compute(train_y, test_y)
+        logger.info(f'mm-output xy={xy}')
         logger.info(f'compute x_y_ {timestr("%H:%M:%S")}')
         x_y_ = mm.compute(test_x, test_y, parallel=True)
+        logger.info(f'mm-output x_y_={x_y_}')
+        logger.info(f'compute xx_ {timestr("%H:%M:%S")}')
+        xx_ = mm.compute(train_x, test_x)
+        logger.info(f'mm-output xx_={xx_}')
+        logger.info(f'compute yy_ {timestr("%H:%M:%S")}')
+        yy_ = mm.compute(train_y, test_y)
+        logger.info(f'mm-output yy_={yy_}')
         logger.info(f'completed {timestr("%H:%M:%S")}')
-        print(xy, xx_, yy_, x_y_)
 
 
 def get_distributions(ds: Dataset, key_x: str, key_y: str):
@@ -269,6 +272,8 @@ class MovingMetrics:
             xs_emb: torch.Tensor = self.embed(xs)
             xt_emb: torch.Tensor = self._retrieve_and_save(xt)
 
+        n, m = xs_emb.size(0), xt_emb.size(0)
+        logger.info(f'tensor costs estimating: {n}/{m}. {timestr()}')
         costs = ot.dist(xs_emb, xt_emb, metric=self.metric)  # perhaps a tensor on cuda
         return costs
 
@@ -283,8 +288,8 @@ class MovingMetrics:
                         This will save a lot computations.
         :return:
         """
-        logger.info(f'direct metric: sizes={len(xs)}/{len(xt)}, parallel={parallel}: {timestr()}')
         if isinstance(xs, list) and parallel:
+            logger.info(f'parallel metric: sizes={len(xs)}/{len(xt)}, parallel={parallel}: {timestr()}')
             pairwise_metrics = []
             for a, b in zip(xs, xt):
                 pairwise_metrics.append(self.direct_metric(a, b, parallel=False))
