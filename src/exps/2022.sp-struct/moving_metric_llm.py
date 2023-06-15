@@ -65,15 +65,15 @@ def main():
         x_y_ = mm.compute(test_x, test_y, parallel=True)
         logger.info(f'mm-output x_y_={x_y_}')
 
-        # logger.info(f'compute xx_ {timestr("%H:%M:%S")}')
-        # mm.set_max_elem_num(p.max_dist_size // 2)
-        # xx_ = mm.compute(train_x, test_x)
-        # logger.info(f'mm-output xx_={xx_}')
-        #
-        # logger.info(f'compute yy_ {timestr("%H:%M:%S")}')
-        # mm.set_max_elem_num(p.max_dist_size // 2)
-        # yy_ = mm.compute(train_y, test_y)
-        # logger.info(f'mm-output yy_={yy_}')
+        logger.info(f'compute xx_ {timestr("%H:%M:%S")}')
+        mm.set_max_elem_num(p.max_dist_size // 2)
+        xx_ = mm.compute(train_x, test_x)
+        logger.info(f'mm-output xx_={xx_}')
+
+        logger.info(f'compute yy_ {timestr("%H:%M:%S")}')
+        mm.set_max_elem_num(p.max_dist_size // 2)
+        yy_ = mm.compute(train_y, test_y)
+        logger.info(f'mm-output yy_={yy_}')
 
         logger.info(f'completed {timestr("%H:%M:%S")}')
 
@@ -140,8 +140,7 @@ class Embedder:
             terms: str = self.restore_text_from_trees(tree)
 
             terms_emb, terms_id = self.embed(terms)
-            tree_offset = [node.payload for node in PreOrderTraverse()(tree)]
-            return self.compute_tree_style_emb(terms_id, terms_emb, tree_offset)
+            return self.compute_tree_style_emb(terms_id, terms_emb, tree)
 
         else:
             raise TypeError('Invalid list. Only a single string or a Lark tree is supported.')
@@ -173,36 +172,49 @@ class Embedder:
         return src_emb
 
     @torch.inference_mode()
-    def compute_tree_style_emb(self, term_ids, term_embs, tree_offsets):
+    def compute_tree_style_emb(self, term_ids, term_embs, tree):
         """
         Assuming a tree NT node is represented as the mean of the span.
         :param term_ids: (tok_num,)
         :param term_embs: (tok_num, dim)
-        :param tree_offsets: list of spans with the range [start, end), including terminals
+        :param tree: a Tree instance
         :return: (num_nodes, dim)
         """
+        # tree_offsets: list of spans with the range [start, end), including terminals
+        tree_offsets = [node.payload for node in PreOrderTraverse()(tree)]
+        node_embs = []
+
         len_contrib: list = [len(self.tok.decode(term_ids[:i+1]))
                              for i in range(len(term_ids))
                              if i < self.max_tok_num]
 
-        def _find_tok_id(n, start=0) -> int:
+        def _find_tok_id(n) -> int:
             if n >= len_contrib[-1]:
                 return -1
 
+            i_offset = 0
             for i, contrib in enumerate(len_contrib):
-                if start <= n < contrib:
+                if i_offset <= n < contrib:
                     return i
-                start = contrib
+                i_offset = contrib
 
             # raise ValueError(f'invalid n={n} exceeds the input length {len_contrib[-1]}')
             return -1
 
-        node_embs = []
-        for start, end in tree_offsets:
-            start_id = _find_tok_id(start)
-            end_id = _find_tok_id(end - 1)  # end is included
-            if start_id >= 0 and end_id >= 0:   # filter out the too long seq
-                node_embs.append(term_embs[start_id:end_id + 1].mean(dim=0))    # (dim,)
+        for node in PostOrderTraverse()(tree):
+            node: Tree
+            if node.is_terminal:
+                start_offset, end_offset = node.payload     # [start, end)
+                start_id = _find_tok_id(start_offset)       # start_id,
+                end_id = _find_tok_id(end_offset - 1)       # and end_id are included
+                emb = term_embs[start_id:end_id + 1].mean(dim=0)    # (dim,)
+
+            else:
+                num_children = len(node.children)
+                emb = sum(node_embs[-num_children:]) / num_children     # (dim,)
+
+            node_embs.append(emb)
+            del emb
 
         tgt_emb = torch.stack(node_embs, dim=0)
         del node_embs
