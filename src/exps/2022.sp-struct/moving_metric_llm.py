@@ -180,8 +180,6 @@ class Embedder:
         :param tree: a Tree instance
         :return: (num_nodes, dim)
         """
-        # tree_offsets: list of spans with the range [start, end), including terminals
-        tree_offsets = [node.payload for node in PreOrderTraverse()(tree)]
         node_embs = []
 
         len_contrib: list = [len(self.tok.decode(term_ids[:i+1]))
