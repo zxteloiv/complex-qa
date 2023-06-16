@@ -65,16 +65,6 @@ def main():
         x_y_ = mm.compute(test_x, test_y, parallel=True)
         logger.info(f'mm-output x_y_={x_y_}')
 
-        logger.info(f'compute xx_ {timestr("%H:%M:%S")}')
-        mm.set_max_elem_num(p.max_dist_size // 2)
-        xx_ = mm.compute(train_x, test_x)
-        logger.info(f'mm-output xx_={xx_}')
-
-        logger.info(f'compute yy_ {timestr("%H:%M:%S")}')
-        mm.set_max_elem_num(p.max_dist_size // 2)
-        yy_ = mm.compute(train_y, test_y)
-        logger.info(f'mm-output yy_={yy_}')
-
         logger.info(f'completed {timestr("%H:%M:%S")}')
 
 
@@ -128,12 +118,15 @@ class Embedder:
             return x_emb[0], x_ids[0]   # (len, dim), (len,) <- (batch, len, dim), (batch, len)
 
     @torch.inference_mode()
-    def __call__(self, string_or_tree: Union[str, lark.Tree]) -> torch.Tensor:
+    def __call__(self, string_or_tree: Union[str, lark.Tree], on_tgt_side: bool = False) -> torch.Tensor:
         if isinstance(string_or_tree, str):
             if len(string_or_tree) == 0:
                 raise ValueError('Empty string cannot be fed and embedded.')
             x_emb, x_id = self.embed(string_or_tree)
-            return self.compute_flat_seq_emb(x_emb, x_id)
+            if on_tgt_side:
+                return self.compute_right_branching_emb(x_emb, x_id)
+            else:
+                return self.compute_flat_seq_emb(x_emb, x_id)
 
         elif isinstance(string_or_tree, lark.Tree):
             tree = self.compute_offsets(build_from_lark_tree(string_or_tree))
@@ -172,9 +165,32 @@ class Embedder:
         return src_emb
 
     @torch.inference_mode()
+    def compute_right_branching_emb(self, emb, x_ids):
+        """
+        Assuming a tree NT node is represented as the mean of the children, with the right-branching tree.
+
+        :param emb: (padded_tok_num, dim)
+        :param x_ids: (padded_tok_num,)
+        :return: (tok_num + (tok_num - 1), dim), the order doesn't matter.
+        """
+        mask = (x_ids > 20004).unsqueeze(-1)   # printable tokens starts from 20005
+        hid_sz = emb.size(-1)
+        selected_emb = torch.masked_select(emb, mask).reshape(-1, hid_sz)[:self.max_tok_num]   # (tok_num, dim)
+
+        nt_embs = []
+        last_emb = selected_emb[-1]
+        for emb in reversed(selected_emb[:-1]):
+            node_emb = (emb + last_emb) / 2
+            nt_embs.append(node_emb)
+            last_emb = node_emb
+            del node_emb
+
+        return torch.cat([torch.stack(nt_embs, dim=0), selected_emb], dim=0)
+
+    @torch.inference_mode()
     def compute_tree_style_emb(self, term_ids, term_embs, tree):
         """
-        Assuming a tree NT node is represented as the mean of the span.
+        Assuming a tree NT node is represented as the mean of the children.
         :param term_ids: (tok_num,)
         :param term_embs: (tok_num, dim)
         :param tree: a Tree instance
@@ -213,6 +229,44 @@ class Embedder:
 
             node_embs.append(emb)
             del emb
+
+        tgt_emb = torch.stack(node_embs, dim=0)
+        del node_embs
+        return tgt_emb  # (num_nodes, dim)
+
+    @torch.inference_mode()
+    def compute_tree_style_emb_v1(self, term_ids, term_embs, tree):
+        """
+        Assuming a tree NT node is represented as the mean of the span.
+        :param term_ids: (tok_num,)
+        :param term_embs: (tok_num, dim)
+        :param tree: a Tree instance
+        :return: (num_nodes, dim)
+        """
+        # tree_offsets: list of spans with the range [start, end), including terminals
+        tree_offsets = [node.payload for node in PreOrderTraverse()(tree)]
+        len_contrib: list = [len(self.tok.decode(term_ids[:i+1]))
+                             for i in range(len(term_ids))
+                             if i < self.max_tok_num]
+
+        def _find_tok_id(n, start=0) -> int:
+            if n >= len_contrib[-1]:
+                return -1
+
+            for i, contrib in enumerate(len_contrib):
+                if start <= n < contrib:
+                    return i
+                start = contrib
+
+            # raise ValueError(f'invalid n={n} exceeds the input length {len_contrib[-1]}')
+            return -1
+
+        node_embs = []
+        for start, end in tree_offsets:
+            start_id = _find_tok_id(start)
+            end_id = _find_tok_id(end - 1)  # end is included
+            if start_id >= 0 and end_id >= 0:   # filter out the too long seq
+                node_embs.append(term_embs[start_id:end_id + 1].mean(dim=0))    # (dim,)
 
         tgt_emb = torch.stack(node_embs, dim=0)
         del node_embs
@@ -267,7 +321,7 @@ class MovingMetrics:
             del cost_ij
         return costs
 
-    def _retrieve_and_save(self, ts):
+    def _retrieve_and_save(self, ts, for_tgt: bool = False):
         if not hasattr(self, '_last_ts'):
             self._last_ts = None
             self._last_emb = None
@@ -275,7 +329,7 @@ class MovingMetrics:
         if self._last_ts == ts:
             emb = self._last_emb
         else:
-            emb = self.embed(ts)
+            emb = self.embed(ts, for_tgt)
             del self._last_emb, self._last_ts
             self._last_ts = ts
             self._last_emb = emb
@@ -284,10 +338,10 @@ class MovingMetrics:
     def cost_on_tensors(self, xs, xt):
         if self._row_first:
             xs_emb: torch.Tensor = self._retrieve_and_save(xs)
-            xt_emb: torch.Tensor = self.embed(xt)
+            xt_emb: torch.Tensor = self.embed(xt, on_tgt_side=True)
         else:
             xs_emb: torch.Tensor = self.embed(xs)
-            xt_emb: torch.Tensor = self._retrieve_and_save(xt)
+            xt_emb: torch.Tensor = self._retrieve_and_save(xt, for_tgt=True)
 
         n, m = xs_emb.size(0), xt_emb.size(0)
         logger.info(f'tensor costs estimating: {n}/{m}. {timestr()}')
@@ -335,7 +389,7 @@ class MovingMetrics:
     def set_max_elem_num(self, val: int):
         self.max_elem_num = val
 
-    def compute(self, xs: list, xt: list, parallel: bool = False) -> float:
+    def compute(self, xs: list, xt: list, parallel: bool = False) -> Tuple[float, float]:
         if len(xs) <= 0 or len(xt) <= 0:
             raise ValueError('Input samples must not be empty.')
 
@@ -343,11 +397,11 @@ class MovingMetrics:
             raise ValueError('Input samples are of different size and thus not parallel.')
 
         if self.max_elem_num <= 0:  # the option is valid only when it's positive
-            return self.direct_metric(xs, xt, parallel=parallel).item()
+            return self.direct_metric(xs, xt, parallel=parallel).item(), 1.
 
         # when both distributions are small, return the exact direct metric.
         if len(xs) <= self.max_elem_num and len(xt) <= self.max_elem_num:
-            return self.direct_metric(xs, xt, parallel=parallel).item()
+            return self.direct_metric(xs, xt, parallel=parallel).item(), 1.
 
         metrics = []
         for turn in range(self.num_retries):
@@ -361,7 +415,7 @@ class MovingMetrics:
             metrics.append(self.direct_metric(xss, xtt, parallel=parallel).item())
             logger.info(f'turn {turn+1}/{self.num_retries} metric: {metrics[-1]}')
 
-        return statistics.fmean(metrics)
+        return statistics.fmean(metrics), statistics.stdev(metrics)
 
 
 def timestr(fmt='%H:%M:%S'):
