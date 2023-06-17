@@ -1,3 +1,4 @@
+import gc
 import itertools
 import json
 import logging
@@ -18,13 +19,13 @@ from datetime import datetime as dt
 sys.path.insert(0, find_root('.SRC'))
 
 import torch
-from transformers import AutoModel, AutoTokenizer
+from transformers import AutoModel, AutoTokenizer, AutoModelForCausalLM
 from trialbot.training import Registry, TrialBot
 import os.path as osp
 import ot
 
 from shujuji import install_semantic_parsing_datasets, get_field_names_by_prefix
-from utils.trialbot.setup_cli import setup as setup_cli
+from utils.trialbot.setup_cli import setup as setup_cli, setup_null_argv
 from utils.s2s_arch.hparam_modifiers import param_overwriting_modifier, install_runtime_modifiers
 from utils.lark.id_tree import build_from_lark_tree
 from utils.tree import Tree, PreOrderTraverse, PostOrderTraverse
@@ -33,18 +34,48 @@ from utils.tree import Tree, PreOrderTraverse, PostOrderTraverse
 logger = logging.getLogger()
 
 
-def main():
+def batch_run():
     install_semantic_parsing_datasets()
 
-    args = setup_cli(seed=2021, hparamset='mm-seq')
+    def _run_job(job):
+        llm = mm = None
+        for ds_key, p_key in itertools.product(job['datasets'], job['hparamsets']):
+            args_dict = {
+                "seed": 2021,
+                "hparamset": p_key,
+                "dataset": ds_key,
+                "device": 0,
+                "log-to-file": None,
+            }
+            args = setup_null_argv(**args_dict)
+            llm, mm = main(args, llm, mm)
+
+        del llm, mm
+
+    job = {'datasets': ['smc128_parsed', 'smc64_parsed', 'smc128iid_parsed',
+                        'cogs_gen_parsed', 'cogs_iid_parsed',
+                        'ati_cg_handcrafted', 'ati_iid_handcrafted',
+                        'adv_cg_handcrafted', 'adv_iid_handcrafted',
+                        'geo_cg_handcrafted', 'geo_iid_handcrafted',
+                        'sch_cg_handcrafted', 'sch_iid_handcrafted',
+                        ],
+           'hparamsets': ['baichuan-seq', 'baichuan-tree']}
+
+    _run_job(job)
+
+
+def main(args=None, llm=None, mm=None) -> Tuple['Embedder', 'MovingMetrics']:
+    install_semantic_parsing_datasets()
+
+    args = setup_cli(seed=2021, hparamset='mm-seq', device=0) if args is None else args
 
     install_runtime_modifiers(args.hparamset, partial(param_overwriting_modifier, **dict(
       zip(('src_key', 'tgt_key'), get_field_names_by_prefix(args.dataset))
     )))
     train, dev, test = Registry.get_dataset(args.dataset)
     p = Registry.get_hparamset(args.hparamset)
-    llm = Embedder(p.chatglm_path, args.device, p.max_tok_num)
-    mm = MovingMetrics(llm, p.num_retries, p.max_dist_size, p.ot_metric_string)
+    llm = Embedder(p.llm_path, args.device, p.max_tok_num, p.use_causal_lm_cls) if llm is None else llm
+    mm = MovingMetrics(llm, p.num_retries, p.max_dist_size, p.ot_metric_string) if mm is None else mm
 
     key_x = p.src_key
     key_y = p.tgt_key + '_tree' if p.use_tgt_trees else p.tgt_key
@@ -67,6 +98,8 @@ def main():
 
         logger.info(f'completed {timestr("%H:%M:%S")}')
 
+    return llm, mm
+
 
 def get_distributions(ds: Dataset, key_x: str, key_y: str):
     xs = []
@@ -85,10 +118,15 @@ class Embedder:
                  llm_path: str = '~/.glm/chatglm-6b',
                  device: int = -1,
                  max_tok_num: int = 1100,
+                 use_causal_lm_cls: bool = False,
                  ):
         llm_path = osp.expanduser(llm_path)
-        self.tok = AutoTokenizer.from_pretrained(llm_path, trust_remote_code=True, revision='v0.1.0')
-        self.model = AutoModel.from_pretrained(llm_path, trust_remote_code=True, revision='v0.1.0').half()
+        self.tok = AutoTokenizer.from_pretrained(llm_path, trust_remote_code=True)
+        # ChatGLM uses AutoModel, while Falcon and BaiChuan use AMForCausalLM
+        auto_model_cls = AutoModelForCausalLM if use_causal_lm_cls else AutoModel
+        self.model = auto_model_cls.from_pretrained(llm_path, trust_remote_code=True, torch_dtype=torch.float16,
+                                                    device_map="auto")
+        self.use_pad = self.tok.pad_token is not None
         self.model.eval()
         self.device = self.int_to_device(device)
         if device >= 0:
@@ -106,10 +144,13 @@ class Embedder:
     @torch.inference_mode()
     def embed(self, x_or_xs: Union[str, list]) -> Tuple[torch.DoubleTensor, torch.IntTensor]:
         x_inputs = self.tok(x_or_xs,
-                            padding=True,
+                            padding=self.use_pad,
+                            return_token_type_ids=False,
                             return_tensors='pt').to(self.device)
         x_out = self.model(**x_inputs, output_hidden_states=True)
-        x_emb = x_out.hidden_states[-1].transpose(0, 1).double()
+        x_emb = x_out.hidden_states[-1].double()
+        if 'chatglm' in self.model.__class__.__name__:
+            x_emb = x_emb.transpose(0, 1)   # only the ChatGLM is not batch_first
         x_ids = x_inputs['input_ids']
 
         if isinstance(x_or_xs, list):
@@ -157,9 +198,10 @@ class Embedder:
         :param x_ids: (padded_tok_num,)
         :return: (tok_num + 1, dim)
         """
-        mask = (x_ids > 20004).unsqueeze(-1)   # printable tokens starts from 20005
-        hid_sz = emb.size(-1)
-        selected_embs = torch.masked_select(emb, mask).reshape(-1, hid_sz)[:self.max_tok_num]
+        # mask = (x_ids > 20004).unsqueeze(-1)   # printable tokens starts from 20005
+        # hid_sz = emb.size(-1)
+        # selected_embs = torch.masked_select(emb, mask).reshape(-1, hid_sz)[:self.max_tok_num]
+        selected_embs = emb     # suppose no pad is included
         sent_emb = selected_embs.mean(0).unsqueeze(0)   # (1, dim)
         src_emb = torch.cat([selected_embs, sent_emb], dim=0)   # (sel_toks + 1, dim)
         return src_emb
@@ -173,9 +215,10 @@ class Embedder:
         :param x_ids: (padded_tok_num,)
         :return: (tok_num + (tok_num - 1), dim), the order doesn't matter.
         """
-        mask = (x_ids > 20004).unsqueeze(-1)   # printable tokens starts from 20005
-        hid_sz = emb.size(-1)
-        selected_emb = torch.masked_select(emb, mask).reshape(-1, hid_sz)[:self.max_tok_num]   # (tok_num, dim)
+        # mask = (x_ids > 20004).unsqueeze(-1)   # printable tokens starts from 20005
+        # hid_sz = emb.size(-1)
+        # selected_emb = torch.masked_select(emb, mask).reshape(-1, hid_sz)[:self.max_tok_num]   # (tok_num, dim)
+        selected_emb = emb     # suppose no pad is included
 
         nt_embs = []
         last_emb = selected_emb[-1]
@@ -234,44 +277,6 @@ class Embedder:
         del node_embs
         return tgt_emb  # (num_nodes, dim)
 
-    @torch.inference_mode()
-    def compute_tree_style_emb_v1(self, term_ids, term_embs, tree):
-        """
-        Assuming a tree NT node is represented as the mean of the span.
-        :param term_ids: (tok_num,)
-        :param term_embs: (tok_num, dim)
-        :param tree: a Tree instance
-        :return: (num_nodes, dim)
-        """
-        # tree_offsets: list of spans with the range [start, end), including terminals
-        tree_offsets = [node.payload for node in PreOrderTraverse()(tree)]
-        len_contrib: list = [len(self.tok.decode(term_ids[:i+1]))
-                             for i in range(len(term_ids))
-                             if i < self.max_tok_num]
-
-        def _find_tok_id(n, start=0) -> int:
-            if n >= len_contrib[-1]:
-                return -1
-
-            for i, contrib in enumerate(len_contrib):
-                if start <= n < contrib:
-                    return i
-                start = contrib
-
-            # raise ValueError(f'invalid n={n} exceeds the input length {len_contrib[-1]}')
-            return -1
-
-        node_embs = []
-        for start, end in tree_offsets:
-            start_id = _find_tok_id(start)
-            end_id = _find_tok_id(end - 1)  # end is included
-            if start_id >= 0 and end_id >= 0:   # filter out the too long seq
-                node_embs.append(term_embs[start_id:end_id + 1].mean(dim=0))    # (dim,)
-
-        tgt_emb = torch.stack(node_embs, dim=0)
-        del node_embs
-        return tgt_emb  # (num_nodes, dim)
-
     @staticmethod
     def restore_text_from_trees(t_or_ts):
         def _restore(t):
@@ -296,8 +301,12 @@ class MovingMetrics:
         self.embed = embed
 
         self._row_first: bool = False   # set to False because the Y's are usually longer
+        self._last_ts = None
+        self._last_emb = None
 
     def clear_cache(self):
+        self._last_ts = None
+        self._last_emb = None
         if self.embed.device.type != 'cpu':
             torch.cuda.empty_cache()
 
@@ -427,7 +436,7 @@ def base():
     p = HyperParamSet()
 
     # embedder params
-    p.chatglm_path = osp.expanduser('~/.glm/chatglm-6b')
+    p.llm_path = osp.expanduser('~/.glm/chatglm-6b')
     p.max_tok_num = 1100    # >num of 99% examples on ATIS
 
     # moving-metric params
@@ -436,15 +445,50 @@ def base():
     p.ot_metric_string = 'euclidean'
 
     p.use_tgt_trees = False
+
+    p.use_causal_lm_cls = False
     return p
 
 
-@Registry.hparamset('mm-prod')
+@Registry.hparamset('mm-tree')
 def dump():
     p = base()
     p.use_tgt_trees = True
     return p
 
 
+@Registry.hparamset('falcon-seq')
+def falcon7b():
+    p = base()
+    # p.llm_path = 'tiiuae/falcon-7b'
+    p.llm_path = osp.expanduser('~/.cache/manual_llm_cache/falcon-7b')
+    p.use_causal_lm_cls = True
+    return p
+
+
+@Registry.hparamset('falcon-tree')
+def falcon7b_tree():
+    p = falcon7b()
+    p.use_tgt_trees = True
+    return p
+
+
+@Registry.hparamset('baichuan-seq')
+def baichuan7b():
+    p = base()
+    # p.llm_path = 'baichuan-inc/baichuan-7B'
+    p.llm_path = osp.expanduser('~/.cache/manual_llm_cache/baichuan-7b')
+    p.use_causal_lm_cls = True
+    return p
+
+
+@Registry.hparamset('baichuan-tree')
+def baichuan7b_tree():
+    p = baichuan7b()
+    p.use_tgt_trees = True
+    return p
+
+
 if __name__ == '__main__':
-    main()
+    batch_run()
+    # main()
