@@ -11,6 +11,7 @@ from typing import List, Tuple, Callable, Union
 
 import lark
 import numpy as np
+import transformers
 from trialbot.data import Dataset
 from trialbot.utils.root_finder import find_root
 from trialbot.training.hparamset import HyperParamSet
@@ -52,14 +53,14 @@ def batch_run():
 
         del llm, mm
 
-    job = {'datasets': ['smc128_parsed', 'smc64_parsed', 'smc128iid_parsed',
-                        'cogs_gen_parsed', 'cogs_iid_parsed',
+    job = {'datasets': ['cogs_gen_parsed', 'cogs_iid_parsed',
+                        'smc128_parsed', 'smc64_parsed', 'smc128iid_parsed',
                         'ati_cg_handcrafted', 'ati_iid_handcrafted',
                         'adv_cg_handcrafted', 'adv_iid_handcrafted',
                         'geo_cg_handcrafted', 'geo_iid_handcrafted',
                         'sch_cg_handcrafted', 'sch_iid_handcrafted',
                         ],
-           'hparamsets': ['baichuan-seq', 'baichuan-tree']}
+           'hparamsets': ['falcon-tree', 'falcon-seq']}
 
     _run_job(job)
 
@@ -170,7 +171,7 @@ class Embedder:
                 return self.compute_flat_seq_emb(x_emb, x_id)
 
         elif isinstance(string_or_tree, lark.Tree):
-            tree = self.compute_offsets(build_from_lark_tree(string_or_tree))
+            tree = build_from_lark_tree(string_or_tree)
             terms: str = self.restore_text_from_trees(tree)
 
             terms_emb, terms_id = self.embed(terms)
@@ -178,18 +179,6 @@ class Embedder:
 
         else:
             raise TypeError('Invalid list. Only a single string or a Lark tree is supported.')
-
-    @staticmethod
-    def compute_offsets(tree):
-        running_prefix = 0
-        for node in PostOrderTraverse()(tree):
-            if node.is_terminal:
-                node.payload = (running_prefix, running_prefix + len(node.label))
-                running_prefix += 1 + len(node.label)  # the space sep
-            else:
-                # use the left-most to right-most
-                node.payload = (node.children[0].payload[0], node.children[-1].payload[-1])
-        return tree
 
     @torch.inference_mode()
     def compute_flat_seq_emb(self, emb, x_ids):
@@ -230,6 +219,18 @@ class Embedder:
 
         return torch.cat([torch.stack(nt_embs, dim=0), selected_emb], dim=0)
 
+    @staticmethod
+    def compute_offsets(tree):
+        running_prefix = 0
+        for node in PostOrderTraverse()(tree):
+            if node.is_terminal:
+                node.payload = (running_prefix, running_prefix + len(node.label))
+                running_prefix += 1 + len(node.label)  # the space sep
+            else:
+                # use the left-most to right-most
+                node.payload = (node.children[0].payload[0], node.children[-1].payload[-1])
+        return tree
+
     @torch.inference_mode()
     def compute_tree_style_emb(self, term_ids, term_embs, tree):
         """
@@ -241,9 +242,14 @@ class Embedder:
         """
         node_embs = []
 
-        len_contrib: list = [len(self.tok.decode(term_ids[:i+1]))
-                             for i in range(len(term_ids))
-                             if i < self.max_tok_num]
+        tree = self.compute_offsets(tree)   # update the payload, indicating offsets to the original text for nodes
+
+        if isinstance(self.tok, transformers.PreTrainedTokenizerFast):
+            len_contrib = self.tok(self.restore_text_from_trees(tree), return_offsets_mapping=True)['offset_mapping']
+            len_contrib = [end for _, end in len_contrib]
+        else:
+            len_contrib: list = [len(self.tok.decode(term_ids[:i + 1])) for i in range(len(term_ids))
+                                 if i < self.max_tok_num]
 
         def _find_tok_id(n) -> int:
             if n >= len_contrib[-1]:
