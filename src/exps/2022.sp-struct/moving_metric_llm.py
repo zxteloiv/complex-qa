@@ -32,7 +32,7 @@ from utils.lark.id_tree import build_from_lark_tree
 from utils.tree import Tree, PreOrderTraverse, PostOrderTraverse
 
 
-logger = logging.getLogger()
+logger = logging.getLogger(__name__)
 
 
 def batch_run():
@@ -120,13 +120,24 @@ class Embedder:
                  device: int = -1,
                  max_tok_num: int = 1100,
                  use_causal_lm_cls: bool = False,
+                 *,
+                 llm=None,
+                 tok=None,
                  ):
-        llm_path = osp.expanduser(llm_path)
-        self.tok = AutoTokenizer.from_pretrained(llm_path, trust_remote_code=True)
-        # ChatGLM uses AutoModel, while Falcon and BaiChuan use AMForCausalLM
-        auto_model_cls = AutoModelForCausalLM if use_causal_lm_cls else AutoModel
-        self.model = auto_model_cls.from_pretrained(llm_path, trust_remote_code=True, torch_dtype=torch.float16,
-                                                    device_map="auto")
+
+        if llm is not None and tok is not None:
+            self.tok = tok
+            self.model = llm
+        else:
+            llm_path = osp.expanduser(llm_path)
+            self.tok = AutoTokenizer.from_pretrained(llm_path, trust_remote_code=True)
+            # ChatGLM uses AutoModel, while Falcon and BaiChuan use AMForCausalLM
+            auto_model_cls = AutoModelForCausalLM if use_causal_lm_cls else AutoModel
+            self.model = auto_model_cls.from_pretrained(llm_path,
+                                                        trust_remote_code=True,
+                                                        torch_dtype=torch.float16,
+                                                        device_map="auto")
+
         self.use_pad = self.tok.pad_token is not None
         self.model.eval()
         self.device = self.int_to_device(device)
@@ -150,7 +161,7 @@ class Embedder:
                             return_tensors='pt').to(self.device)
         x_out = self.model(**x_inputs, output_hidden_states=True)
         x_emb = x_out.hidden_states[-1].double()
-        if 'chatglm' in self.model.__class__.__name__:
+        if 'chatglm' in self.model.__class__.__name__.lower():
             x_emb = x_emb.transpose(0, 1)   # only the ChatGLM is not batch_first
         x_ids = x_inputs['input_ids']
 
