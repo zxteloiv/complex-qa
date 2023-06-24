@@ -95,13 +95,13 @@ class MyUpdater(Updater):
             train_samples = self.get_samples(datasets[0], self._iterators[0])
             train_turns.append(self.embed_data(*train_samples))
 
+            if self._iterators[0].is_end_of_epoch:
+                self.stop_epoch()
+
             test_samples = self.get_samples(datasets[-1], self._iterators[-1])
             test_turns.append(self.embed_data(*test_samples))
 
         self.logger.info('finished embedding the samples of every turn.')
-
-        if self._iterators[0].is_end_of_epoch:
-            self.stop_epoch()
 
         optim = self._optims[0]
         optim.zero_grad()
@@ -300,7 +300,7 @@ def base():
     p.hid_sz = 1024
     p.use_causal_lm_cls = False # ChatGLM uses AutoModel instead of AutoModelForCausalLM
 
-    p.batch_sz = 10
+    p.batch_sz = 15
     p.num_turns = 5
     p.num_tree_sampling = 3
     p.ADAM_LR = 1e-3
