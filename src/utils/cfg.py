@@ -1,6 +1,6 @@
 from typing import List, Dict, Tuple, Set, Callable, TypeVar, Generator, DefaultDict
 from collections import defaultdict
-__all__ = ['Symbol', 'NonTerminal', 'Terminal', 'T_CFG']
+__all__ = ['Symbol', 'NonTerminal', 'Terminal', 'T_CFG', 'restore_grammar_from_trees', 'simplify_grammar']
 from utils.itertools import powerset
 from utils.graph import dfs_walk, Graph
 from utils.tree import Tree, PreOrderTraverse

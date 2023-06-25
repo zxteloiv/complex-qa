@@ -314,7 +314,7 @@ def bernoulli_samples(span_prob) -> torch.Tensor:
     return be_terms
 
 
-def bounded_terms(span_prob: torch.Tensor, num_max_terms: int = 7) -> torch.Tensor:
+def bounded_terms(span_prob: torch.Tensor, num_max_terms: int = 3) -> torch.Tensor:
     """
     :param span_prob: (span_length,), values are [0, 1)
     :param num_max_terms:
@@ -328,7 +328,7 @@ def bounded_terms(span_prob: torch.Tensor, num_max_terms: int = 7) -> torch.Tens
 
 
 class TreeSampler:
-    def __init__(self, fn_get_terms: Callable = None, nt_label: str = 'NT'):
+    def __init__(self, fn_get_terms: Callable = None, nt_label: str = 'nt'):
         """
         :param fn_get_terms: a callable function that reads span probabilities,
                     and produce an 1D binary vector of the span length,
@@ -361,6 +361,7 @@ class TreeSampler:
 
         span_p = probs[span_begin:span_end]
         be_terms = self.get_terms(span_p)
+        be_terms[0] = 1     # force no left-recursion
 
         level_logp = (be_terms * (span_p + 1).log() + (1 - be_terms) * (2 - span_p).log()).sum()
         terminal_locs = torch.argwhere(be_terms).squeeze(-1) + span_begin  # (num_immediate_children,)
@@ -404,7 +405,7 @@ def base():
     p.llm_path = osp.expanduser('~/.glm/chatglm-6b')
     p.max_tok_num = 1100
     p.hid_sz = 1024
-    p.use_causal_lm_cls = False # ChatGLM uses AutoModel instead of AutoModelForCausalLM
+    p.use_causal_lm_cls = False     # ChatGLM uses AutoModel instead of AutoModelForCausalLM
 
     p.batch_sz = 15
     p.num_turns = 5
