@@ -86,7 +86,7 @@ def eval_inducer(args, bot):
     bot.updater.set_inducing_ds('test')
     bot.run()
 
-    pickle.dump(outputs, open('output.pkl', 'wb'))
+    pickle.dump(outputs, open(f'induced_{args.dataset}.pkl', 'wb'))
 
 
 def get_model(p, vocab):
