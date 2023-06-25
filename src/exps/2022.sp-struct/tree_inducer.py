@@ -44,7 +44,7 @@ def main():
     ds_field_names = get_field_names_by_prefix(args.dataset)
     bot.translator.gather_keys = ds_field_names
     bot.embedder = get_moving_metric(bot)
-    bot.updater = MyUpdater.from_bot(bot)
+    bot.updater = InducerTrainingUpdater.from_bot(bot)
     bot = setup_bot(bot, True, False, False, False, False, True)
 
     @bot.attach_extension(Events.STARTED)
@@ -72,7 +72,7 @@ def get_moving_metric(bot):
     return embedder
 
 
-class MyUpdater(Updater):
+class InducerTrainingUpdater(Updater):
     @classmethod
     def from_bot(cls, bot: TrialBot) -> 'Updater':
         args, p = bot.args, bot.hparams
