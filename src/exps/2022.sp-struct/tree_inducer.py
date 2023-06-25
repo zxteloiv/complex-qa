@@ -67,23 +67,26 @@ def train_inducer(args, bot: TrialBot):
 def eval_inducer(args, bot):
     bot.updater = InducerEvalUpdater.from_bot(bot)
     bot = setup_bot(bot, False, False, False, False, False, True)
-    trees = defaultdict(list)
-    ys = defaultdict(list)
+    outputs = {0: defaultdict(list), 1: defaultdict(list), 2: defaultdict(list)}
 
     @bot.attach_extension(Events.ITERATION_COMPLETED)
     def collect_trees(bot: TrialBot):
         output = bot.state.output
         ds_id = bot.updater.ds_id
-        trees[ds_id] += output['y_tree']
-        ys[ds_id] += output['y']
+        keys = ('x', 'y', 'x_id', 'y_id', 'y_tree')
+        for k in keys:
+            outputs[ds_id][k] += output[k]
 
     bot.updater.set_inducing_ds('train')
+    bot.run()
+
+    bot.updater.set_inducing_ds('dev')
     bot.run()
 
     bot.updater.set_inducing_ds('test')
     bot.run()
 
-    pickle.dump({"ys": ys, "trees": trees}, open('output.pkl', 'wb'))
+    pickle.dump(outputs, open('output.pkl', 'wb'))
 
 
 def get_model(p, vocab):
@@ -273,6 +276,7 @@ class InducerEvalUpdater(InducerTrainingUpdater):
                 prob_net = self._models[0]
                 y_term_prob = prob_net(y_emb)  # (num_toks, 1)
                 _, tree = TreeSampler(bounded_terms).sample(y_id_str, y_term_prob.squeeze(-1))
+                tree.label = 'start'
                 mem(x=sample['x'], y=sample['y'],
                     x_id=sample['x_id'], y_id=sample['y_id'],
                     y_tree=tree)
