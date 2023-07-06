@@ -22,11 +22,20 @@ class ONLSTMCell(UnifiedRNN):
     def get_output_dim(self):
         return self.hidden_size
 
-    def __init__(self, input_size, hidden_size, chunk_size, dropout: VariationalDropout = None):
+    def __init__(self, input_size: int, hidden_size: int, chunk_size: int, dropout: VariationalDropout = None):
+        """
+        :param input_size:
+        :param hidden_size:
+        :param chunk_size: Ordered neuron, casted to ``ordered chunk'', such that not so many parameters to tune,
+                the supported number of levels is equal to the number of chunks (hidden_size // chunk_size)
+        :param dropout:
+        """
         super(ONLSTMCell, self).__init__()
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.chunk_size = chunk_size
+        if hidden_size % chunk_size != 0:
+            raise ValueError(f'Hidden size {hidden_size} must be divisible by Chunk size {chunk_size}')
         self.n_chunk = int(hidden_size / chunk_size)
 
         full_size = 4 * hidden_size + self.n_chunk * 2
@@ -78,3 +87,21 @@ class ONLSTMCell(UnifiedRNN):
 
     def get_distances(self, hidden):
         return None if hidden is None else hidden[-2:]
+
+
+if __name__ == '__main__':
+    batch, seq_len, emb_sz = 17, 7, 256    # no padding presumed
+    x = torch.randn(seq_len, batch, emb_sz)
+
+    chunk_sz = 16   # must divide emb_sz
+
+    cell = ONLSTMCell(emb_sz, emb_sz, chunk_sz)
+    hx = None
+    for timestep in range(seq_len):
+        xt = x[timestep]  # (batch, emb_sz)
+        print(f"---- process at step {timestep} -----")
+        print(f'    xt size: {xt.size()}')
+        print(f'    hx size: None' if hx is None else f'    hx size: {list(map(lambda t: t.size(), hx))}')
+        hx, ot = cell(xt, hx)
+        print(f'    ot size: {ot.size()}')
+        print(f'new hx size: None' if hx is None else f'new hx size: {list(map(lambda t: t.size(), hx))}')
