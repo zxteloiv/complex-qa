@@ -93,7 +93,7 @@ if __name__ == '__main__':
     batch, seq_len, emb_sz = 17, 7, 256    # no padding presumed
     x = torch.randn(seq_len, batch, emb_sz)
 
-    chunk_sz = 16   # must divide emb_sz
+    chunk_sz = 32   # must divide emb_sz
 
     cell = ONLSTMCell(emb_sz, emb_sz, chunk_sz)
     hx = None
