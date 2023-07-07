@@ -22,5 +22,8 @@ class SeqPLMEmbedEncoder(EmbedAndEncode):
     def forward(self, model_input) -> Tuple[List[torch.Tensor], torch.Tensor]:
         # model input is actually a UserDict recognizable by the transformers
         out = self.pretrained_model(**model_input)
-        mask = (model_input['input_ids'] != 0).long()
+        mask = self.get_mask(model_input)
         return [out.last_hidden_state], mask
+
+    def get_mask(self, model_input):
+        return (model_input['input_ids'] != 0).long()

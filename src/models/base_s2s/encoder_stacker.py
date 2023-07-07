@@ -1,4 +1,3 @@
-from typing import Optional, List
 import torch.nn
 from models.modules.variational_dropout import VariationalDropout
 from ..interfaces.encoder import Encoder, StackEncoder
@@ -19,10 +18,10 @@ class EncoderStacker(StackEncoder):
     The allennlp.modules.seq2seq_encoders.PytorchSeq2SeqWrapper is also useful.
     """
 
-    def __init__(self, encs,
-                 input_size: Optional = None,
-                 output_size: Optional = None,
-                 input_dropout=0.,
+    def __init__(self, encs: list[Encoder],
+                 input_size: int | None = None,
+                 output_size: int | None = None,
+                 input_dropout: float = 0.,
                  ):
         super(EncoderStacker, self).__init__()
 
@@ -32,7 +31,7 @@ class EncoderStacker(StackEncoder):
         self.input_dropout = VariationalDropout(input_dropout, on_the_fly=True)
         self._layered_output = None
 
-    def forward(self, inputs: torch.Tensor, mask: Optional[torch.LongTensor]):
+    def forward(self, inputs: torch.Tensor, mask: None | torch.LongTensor):
         self._layered_output = None
 
         last_output = inputs
@@ -48,7 +47,7 @@ class EncoderStacker(StackEncoder):
         enc_output = layered_output[-1]
         return enc_output
 
-    def get_layered_output(self) -> List[torch.Tensor]:
+    def get_layered_output(self) -> list[torch.Tensor]:
         return self._layered_output
 
     def get_layer_num(self):

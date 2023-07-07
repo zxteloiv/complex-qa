@@ -1,4 +1,3 @@
-from typing import Union, Optional, Tuple, Dict, Any, Literal, List
 import logging
 import numpy as np
 import torch
@@ -61,7 +60,7 @@ class RNNListMixin:
     def get_stacked_rnns(cell_type: str, inp_sz: int, hid_sz: int, num_layers: int,
                          h_dropout: float, onlstm_chunk_sz: int = 10,
                          bidirectional: bool = False,
-                         ) -> List[UnifiedRNN]:
+                         ) -> list[UnifiedRNN]:
         from ..modules.torch_rnn_wrapper import TorchRNNWrapper as RNNWrapper
         from ..modules.variational_dropout import VariationalDropout
 
@@ -193,7 +192,7 @@ class EncoderStackMixin(RNNListMixin):
                                for rnn, brnn in zip(rnns, b_rnns)],
                               input_dropout=dropout)
 
-    def get_encoder_stack(self) -> Optional[StackEncoder]:
+    def get_encoder_stack(self) -> StackEncoder | None:
         p = self.p
         dropout = getattr(p, 'enc_dropout', getattr(p, 'dropout', 0.))
         hid_sz = getattr(p, 'enc_out_dim', p.hidden_sz)
@@ -220,7 +219,7 @@ class EncoderStackMixin(RNNListMixin):
 
 
 class EmbEncBundleMixin:
-    def get_embed_encoder_bundle(self, emb, enc: Optional[StackEncoder], padding_idx=0) -> EmbedAndEncode:
+    def get_embed_encoder_bundle(self, emb, enc: StackEncoder | None, padding_idx=0) -> EmbedAndEncode:
         p, vocab = self.p, self.vocab
         hid_sz = getattr(p, 'enc_out_dim', p.hidden_sz)
         dropout = getattr(p, 'enc_dropout', getattr(p, 'dropout', 0.))

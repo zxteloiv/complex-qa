@@ -20,7 +20,7 @@ class _RNNBase(torch.nn.Module, ABC):
 
 class UnifiedRNN(_RNNBase, ABC):
 
-    def forward(self, inputs, hidden: T_HIDDEN) -> Tuple[T_HIDDEN, torch.Tensor]:
+    def forward(self, inputs, hidden: T_HIDDEN | None) -> Tuple[T_HIDDEN, torch.Tensor]:
         # in a pure RNN cell, hidden is something about its internal
         # in a stacked rnn however, hidden is a list of hidden states of each layer
         # they are all unknown structures and thus typed by Any

@@ -15,12 +15,12 @@ PREF_CONFS = {
 }
 
 
-def get_field_names_by_prefix(ds_name: str):
+def get_field_names_by_prefix(ds_name: str) -> tuple[str, str]:
     from shujuji import PREF_CONFS
     for k, v in PREF_CONFS.items():
         if ds_name.startswith(k):
             return v
-    return None
+    raise ValueError(f'Unknown prefix of the dataset {ds_name}.')
 
 
 def install_semantic_parsing_datasets(reg: dict = None):
