@@ -16,7 +16,7 @@ from scipy.optimize import linear_sum_assignment
 # from models.interfaces.attention import Attention as IAttn
 from models.interfaces.encoder import Encoder
 from models.interfaces.unified_rnn import RNNStack
-from models.modules.attention_wrapper import AdaptiveGeneralAttention
+from models.modules.attention import AdaptiveGeneralAttention
 from models.nl2sql.p_tuning_v2 import PTuningV2Prompt
 from models.nl2sql.hungarian_loss import get_hungarian_reg_loss, get_hungarian_sup_loss
 from utils.nn import aggregate_layered_state, assign_stacked_states, compact_mask_select

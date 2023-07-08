@@ -7,7 +7,7 @@ from allennlp.training.metrics import Average
 from torch import nn
 
 from models.interfaces.encoder import Encoder, StackEncoder
-from models.modules.attention_wrapper import AdaptiveGeneralAttention as Attn, AdaptiveAllenLogits as AllenLogits
+from models.modules.attention import AdaptiveGeneralAttention as Attn, AdaptiveAllenLogits as AllenLogits
 from models.base_s2s.model_factory import EncoderStackMixin
 from allennlp.modules.matrix_attention import BilinearMatrixAttention
 

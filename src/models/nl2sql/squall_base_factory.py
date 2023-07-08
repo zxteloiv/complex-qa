@@ -4,7 +4,7 @@ from torch import nn
 from models.base_s2s.model_factory import EncoderStackMixin
 from models.base_s2s.stacked_rnn_cell import StackedRNNCell
 from models.modules.variational_dropout import VariationalDropout as VDrop, VariationalDropout
-from models.modules.attention_wrapper import AdaptiveGeneralAttention, AdaptiveAllenLogits
+from models.modules.attention import AdaptiveGeneralAttention, AdaptiveAllenLogits
 from allennlp.modules.matrix_attention import MatrixAttention
 
 

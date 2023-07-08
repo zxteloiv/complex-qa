@@ -49,10 +49,6 @@ class AdaptiveAttention(torch.nn.Module, _AttnWeightMixin, ABC):
         raise NotImplementedError
 
 
-# declare the basic Attention for backward-compatibility
-Attention = AdaptiveAttention
-
-
 class AdaptiveAttnLogits(torch.nn.Module):
     """
     Returns the unormalized scores for attention.

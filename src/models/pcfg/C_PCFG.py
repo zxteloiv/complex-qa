@@ -5,7 +5,7 @@ from torch import nn
 
 from .base_pcfg import PCFGModule
 from .fn import unit_norm, _un
-from models.modules.res import ResLayer
+from models.pcfg.res import ResLayer
 
 
 class CompoundPCFG(PCFGModule):

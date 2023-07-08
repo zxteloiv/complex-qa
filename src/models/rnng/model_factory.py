@@ -6,7 +6,7 @@ from .seq2rnng import Seq2RNNG
 from .rnng import RNNG
 from ..base_s2s.stacked_rnn_cell import StackedRNNCell
 from ..modules.attention_composer import get_attn_composer
-from ..modules.attention_wrapper import get_wrapped_attention
+from ..modules.attention import get_attention
 from .rnng_utils import get_target_num_embeddings, get_terminal_boundary, token_to_id
 
 
@@ -56,7 +56,7 @@ class RNNGBuilder(EmbeddingMxin,
         src_emb = self.get_source_embedding()
         tgt_emb = nn.Embedding(get_target_num_embeddings(vocab, p.rnng_namespaces), p.emb_sz)
         embed_and_encoder = self.get_embed_encoder_bundle(src_emb, self.get_encoder_stack(), padding_idx=0)
-        attn = get_wrapped_attention('bilinear', hid_sz * 3, hid_sz)
+        attn = get_attention('bilinear', hid_sz * 3, hid_sz)
         proj_attn_comp = get_attn_composer('cat_mapping', hid_sz, hid_sz * 3, hid_sz, 'tanh')
         dec_dropout = getattr(p, 'dec_dropout', getattr(p, 'dropout', 0.))
         assert vocab.get_vocab_size(p.root_ns) == 1, 'root token must be unique'

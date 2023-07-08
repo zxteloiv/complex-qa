@@ -1,5 +1,6 @@
 import torch
 
+
 class TwoVecComposer(torch.nn.Module):
     def forward(self, val1: torch.Tensor, val2: torch.Tensor) -> torch.Tensor:
         raise NotImplementedError

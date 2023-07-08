@@ -56,7 +56,7 @@ class DecomposedBilinear(nn.Module):
         """
         :param left: (*, left)
         :param right: (*, right)
-        :return:
+        :return: (*, out_size)
         """
         left_size = left.size()
         left = left.reshape(-1, left_size[-1])

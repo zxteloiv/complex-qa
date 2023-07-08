@@ -5,7 +5,7 @@ from torch import nn as nn
 
 from .fn import unit_norm, _un
 from .base_pcfg import PCFGModule
-from models.modules.res import ResLayer
+from models.pcfg.res import ResLayer
 
 
 class TNPCFG(PCFGModule):

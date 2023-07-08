@@ -1,13 +1,12 @@
 import logging
-from typing import Union, Optional, Tuple, Dict, Any, Literal, List
+from typing import Literal
 import numpy as np
 import torch
-from torch import nn
 from trialbot.data.ns_vocabulary import NSVocabulary
-from ..interfaces.attention import Attention as IAttn, VectorContextComposer as AttnComposer
+from ..interfaces.attention import AdaptiveAttention as IAttn, VectorContextComposer as AttnComposer
 from ..interfaces.loss_module import LossModule
 from ..modules.variational_dropout import VariationalDropout
-from ..interfaces.unified_rnn import RNNStack, UnifiedRNN
+from ..interfaces.unified_rnn import RNNStack, T_HIDDEN
 from ..interfaces.encoder import EmbedAndEncode
 from utils.nn import filter_cat, prepare_input_mask, seq_cross_ent
 from utils.nn import aggregate_layered_state, assign_stacked_states
@@ -24,10 +23,10 @@ class BaseSeq2Seq(torch.nn.Module):
                  decoder: RNNStack,
                  word_projection: torch.nn.Module,
                  target_embedding: torch.nn.Embedding,
-                 enc_attention: IAttn = None,
-                 dec_hist_attn: IAttn = None,
-                 dec_inp_attn_comp: AttnComposer = None,
-                 proj_inp_attn_comp: AttnComposer = None,
+                 enc_attention: IAttn | None = None,
+                 dec_hist_attn: IAttn | None = None,
+                 dec_inp_attn_comp: AttnComposer | None = None,
+                 proj_inp_attn_comp: AttnComposer | None = None,
                  enc_dec_transformer: torch.nn.Module = None,
 
                  # model configuration
@@ -73,7 +72,7 @@ class BaseSeq2Seq(torch.nn.Module):
 
         self._tgt_emb_dropout = VariationalDropout(dec_dropout, on_the_fly=False)
         self._proj_inp_dropout = VariationalDropout(dec_dropout, on_the_fly=False)
-        self.mem: Optional[SeqCollector] = None
+        self.mem: None | SeqCollector = None
 
         self._padding_index = padding_index
         self._strategy = decoder_init_strategy
@@ -123,10 +122,10 @@ class BaseSeq2Seq(torch.nn.Module):
         return output_dict
 
     def forward(self,
-                source_tokens: Union[torch.LongTensor, dict],
+                source_tokens: torch.LongTensor | dict,
                 target_tokens: torch.LongTensor = None,
                 **kwargs,
-                ) -> Dict[str, torch.Tensor]:
+                ) -> dict[str, torch.Tensor]:
         self._reset_variational_dropouts()
 
         layer_states, state_mask = self._embed_encoder(source_tokens)
@@ -156,7 +155,7 @@ class BaseSeq2Seq(torch.nn.Module):
             if isinstance(m, VariationalDropout):
                 m.reset()
 
-    def _prepare_dec(self, layer_states: List[torch.Tensor], state_mask):
+    def _prepare_dec(self, layer_states: list[torch.Tensor], state_mask):
         if self._enc_dec_trans_usage == 'consistent':
             layer_states = list(map(self._enc_dec_trans, layer_states))
         hx = self._init_decoder(layer_states, state_mask)
@@ -266,7 +265,7 @@ class BaseSeq2Seq(torch.nn.Module):
             num_decoding_steps = self._max_decoding_step
         return num_decoding_steps
 
-    def _choose_rnn_input(self, last_pred, last_gold: Optional):
+    def _choose_rnn_input(self, last_pred: torch.Tensor, last_gold: None | torch.Tensor) -> torch.Tensor:
         """get the input for each loop step"""
         if self.training and np.random.rand(1).item() < self._scheduled_sampling_ratio:
             # use self-predicted tokens for scheduled sampling in training with _scheduled_sampling_ratio
@@ -298,7 +297,7 @@ class BaseSeq2Seq(torch.nn.Module):
 
         return dec_hist_attn_fn
 
-    def _forward_dec_loop(self, step_input, enc_attn_fn, dec_hist_attn_fn, hx: Any):
+    def _forward_dec_loop(self, step_input, enc_attn_fn, dec_hist_attn_fn, hx: list[T_HIDDEN]):
         """define each step of the decoder loop"""
         inputs_embedding = self._get_step_embedding(step_input)
         cell_inp = self._get_cell_input(inputs_embedding, hx, enc_attn_fn, dec_hist_attn_fn)

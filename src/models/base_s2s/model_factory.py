@@ -9,7 +9,7 @@ from .base_seq2seq import BaseSeq2Seq
 from .syngraph2seq import SynGraph2Seq
 from .encoder_stacker import EncoderStacker, ExtLSTM
 from models.transformer.encoder import TransformerEncoder
-from ..modules.attention_wrapper import get_wrapped_attention
+from ..modules.attention import get_attention
 from ..modules.attention_composer import get_attn_composer
 from .stacked_rnn_cell import StackedRNNCell
 import os.path as osp
@@ -74,19 +74,10 @@ class RNNListMixin:
         def _get_h_vd(d): return VariationalDropout(d, on_the_fly=False) if d > 0 else None
 
         rnns = cls = None
-        if cell_type == 'typed_rnn':
-            from ..modules.sym_typed_rnn_cell import SymTypedRNNCell
-            rnns = [SymTypedRNNCell(_get_cell_in(floor), hid_sz, "tanh", _get_h_vd(h_dropout))
-                    for floor in range(num_layers)]
-
-        elif cell_type == 'onlstm':
+        if cell_type == 'onlstm':
             from ..onlstm.onlstm import ONLSTMCell
             rnns = [ONLSTMCell(_get_cell_in(floor), hid_sz, onlstm_chunk_sz, _get_h_vd(h_dropout))
                     for floor in range(num_layers)]
-
-        elif cell_type == 'ind_rnn':
-            from ..modules.independent_rnn import IndRNNCell
-            rnns = [IndRNNCell(_get_cell_in(floor), hid_sz) for floor in range(num_layers)]
 
         elif cell_type == "lstm":
             cls = torch.nn.LSTMCell
@@ -438,9 +429,9 @@ class Seq2SeqBuilder(EmbeddingMxin,
         # Initialize attentions. And compute the dimension requirements for all attention modules
         # the encoder attention size depends on the transformation usage
         enc_attn_sz = dec_out_dim if trans_usage_string in ('consistent', 'attn') else enc_out_dim
-        enc_attn = get_wrapped_attention(p.enc_attn, dec_out_dim, enc_attn_sz)
+        enc_attn = get_attention(p.enc_attn, dec_out_dim, enc_attn_sz)
         # dec output attend over previous dec outputs, thus attn_context dimension == dec_output_dim
-        dec_hist_attn = get_wrapped_attention(p.dec_hist_attn, dec_out_dim, dec_out_dim)
+        dec_hist_attn = get_attention(p.dec_hist_attn, dec_out_dim, dec_out_dim)
         attn_sz = 0 if dec_hist_attn is None else dec_out_dim
         attn_sz += 0 if enc_attn is None else enc_attn_sz
         dec_inp_composer = get_attn_composer(p.dec_inp_composer, attn_sz, emb_sz, dec_in_dim, p.dec_inp_comp_activation)

@@ -143,7 +143,7 @@ def get_model(p, vocab: NSVocabulary):
     from models.neural_pda.seq2pda import Seq2PDA
     from models.neural_pda.npda import NeuralPDA
     from models.base_s2s.encoder_stacker import EncoderStacker
-    from models.modules.attention_wrapper import get_wrapped_attention
+    from models.modules.attention import get_attention
     from models.base_s2s.stacked_rnn_cell import StackedRNNCell, StackedLSTMCell
     from models.modules.container import MultiInputsSequential, UnpackedInputsSequential, SelectArgsById
     from allennlp.nn.activations import Activation
@@ -192,12 +192,12 @@ def get_model(p, vocab: NSVocabulary):
         rule_scorer=get_rule_scorer(p, vocab),
         tree_encoder=get_tree_encoder(p, vocab),
         tree_self_attn=UnpackedInputsSequential(
-            get_wrapped_attention(p.tree_self_attn, p.hidden_sz, p.hidden_sz,
-                                  num_heads=p.num_heads,
-                                  use_linear=p.attn_use_linear,
-                                  use_bias=p.attn_use_bias,
-                                  use_tanh_activation=p.attn_use_tanh_activation,
-                                  ),
+            get_attention(p.tree_self_attn, p.hidden_sz, p.hidden_sz,
+                          num_heads=p.num_heads,
+                          use_linear=p.attn_use_linear,
+                          use_bias=p.attn_use_bias,
+                          use_tanh_activation=p.attn_use_tanh_activation,
+                          ),
             SelectArgsById(0),
         ),
         residual_norm_after_self_attn=nn.LayerNorm(p.hidden_sz) if p.use_attn_residual_norm else None,
@@ -207,12 +207,12 @@ def get_model(p, vocab: NSVocabulary):
     )
 
     enc_attn_net = UnpackedInputsSequential(
-        get_wrapped_attention(p.enc_attn, p.hidden_sz, encoder.get_output_dim(),
-                              num_heads=p.num_heads,
-                              use_linear=p.attn_use_linear,
-                              use_bias=p.attn_use_bias,
-                              use_tanh_activation=p.attn_use_tanh_activation,
-                              ),
+        get_attention(p.enc_attn, p.hidden_sz, encoder.get_output_dim(),
+                      num_heads=p.num_heads,
+                      use_linear=p.attn_use_linear,
+                      use_bias=p.attn_use_bias,
+                      use_tanh_activation=p.attn_use_tanh_activation,
+                      ),
         SelectArgsById(0),
     )
     enc_attn_mapping = (Activation.by_name('linear')() if p.hidden_sz == encoder.get_output_dim() else

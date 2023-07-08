@@ -4,7 +4,7 @@ from torch import nn
 from models.interfaces.encoder import EmbedAndEncode
 from models.interfaces.loss_module import LossModule
 from models.interfaces.metrics_module import MetricsModule
-from models.interfaces.attention import Attention as IAttn, VectorContextComposer as AttnComposer
+from models.interfaces.attention import AdaptiveAttention as IAttn, VectorContextComposer as AttnComposer
 from models.rnng.rnng import RNNG
 from utils.nn import aggregate_layered_state, assign_stacked_states
 

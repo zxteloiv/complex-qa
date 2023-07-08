@@ -296,10 +296,10 @@ class AdaptiveGeneralAttention(AdaptiveAttention):
                              f'is unknown.')
 
 
-def get_wrapped_attention(attn_type: str,
-                          vector_dim: int = 0,
-                          matrix_dim: int = 0,
-                          **kwargs):
+def get_attention(attn_type: str,
+                  vector_dim: int = 0,
+                  matrix_dim: int = 0,
+                  **kwargs):
     """
     Build an Attention module with specified parameters.
     :param attn_type: indicates the attention type, e.g. "bilinear", "dot_product" or "none"
