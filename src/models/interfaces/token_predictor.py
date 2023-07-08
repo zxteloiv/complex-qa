@@ -1,4 +1,3 @@
-from typing import Literal
 from functools import partialmethod
 
 import torch
@@ -13,9 +12,9 @@ class PredSemantics(StrEnum):
 
 
 class TokenPredictor(ABC, nn.Module):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, output_as: PredSemantics = PredSemantics.logits):
         super().__init__()
-        self._output_sem: str = PredSemantics.logits
+        self._output_sem: str = output_as
 
     def forward(self, hidden: torch.Tensor) -> torch.Tensor:
         """

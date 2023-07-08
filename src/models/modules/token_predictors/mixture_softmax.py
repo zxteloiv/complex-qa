@@ -9,8 +9,9 @@ class MoSPredictor(TokenPredictor):
                  output_dim: int,
                  mixture_num: int,
                  flatten_softmax: bool = False,
+                 output_as: PredSemantics = PredSemantics.logits,
                  eps: float = 1e-15):
-        super().__init__()
+        super().__init__(output_as=output_as)
         assert mixture_num >= 1
 
         self.mixture_num = mixture_num

@@ -30,6 +30,7 @@ class QuantTokenPredictor(TokenPredictor):
                  num_toks: int,
                  shared_embedding: nn.Parameter | None = None,
                  quant_criterion: QuantMethod = QuantMethod.distance,
+                 output_as: PredSemantics = PredSemantics.logits,
                  ):
         """
         :param emb_sz: int, the token embedding size,
@@ -37,7 +38,7 @@ class QuantTokenPredictor(TokenPredictor):
         :param shared_embedding: if given, must be of (num_tokens, embedding_size)
         :param quant_criterion: see the QuantMethod doc for explanation.
         """
-        super().__init__()
+        super().__init__(output_as=output_as)
 
         if shared_embedding is None:
             weight = torch.Tensor(num_toks, emb_sz)
