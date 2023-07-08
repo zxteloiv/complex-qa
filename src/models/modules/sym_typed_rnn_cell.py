@@ -43,8 +43,8 @@ class SymTypedRNNCell(UnifiedRNN):
     def get_output_state(self, hidden) -> torch.Tensor:
         return hidden
 
-    def init_hidden_states(self, forward_out) -> Tuple[Any, torch.Tensor]:
-        return forward_out, forward_out
+    def init_hidden_states(self, forward_out):
+        return forward_out
 
     def __init__(self, input_dim, output_dim, nonlinearity: str = "tanh", h_dropout: VariationalDropout = None):
         super().__init__()

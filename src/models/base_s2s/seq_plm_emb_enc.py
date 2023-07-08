@@ -15,9 +15,11 @@ class SeqPLMEmbedEncoder(EmbedAndEncode):
 
     def __init__(self,
                  model_name: str = 'bert-base-uncased',
+                 padding: str = 0,
                  ):
         super().__init__()
         self.pretrained_model = AutoModel.from_pretrained(model_name)
+        self.padding = padding
 
     def forward(self, model_input) -> Tuple[List[torch.Tensor], torch.Tensor]:
         # model input is actually a UserDict recognizable by the transformers
@@ -26,4 +28,4 @@ class SeqPLMEmbedEncoder(EmbedAndEncode):
         return [out.last_hidden_state], mask
 
     def get_mask(self, model_input):
-        return (model_input['input_ids'] != 0).long()
+        return (model_input['input_ids'] != self.padding).long()

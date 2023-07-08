@@ -110,7 +110,7 @@ class RNNG(nn.Module):
         :param attend_and_compose_fn: a function s.t. (h -> (h -> context) -> h')
         :return: None
         """
-        self._initial_hx, _ = self.buffer_encoder.init_hidden_states(init_state)
+        self._initial_hx = self.buffer_encoder.init_hidden_states(init_state)
         self._attend_and_compose = attend_and_compose_fn
 
     def get_loss(self):

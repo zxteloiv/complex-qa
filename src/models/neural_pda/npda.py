@@ -190,7 +190,7 @@ class NeuralPDA(nn.Module):
 
         # init_state: (batch * num_symbols, hid)
         init_state = self._lhs_symbol_mapper(self._embedder(tree_nodes)).reshape(batch_sz * num_symbols, -1)
-        hx, _ = self._expander.init_hidden_states(assign_stacked_states([init_state], self._expander.get_layer_num()))
+        hx = self._expander.init_hidden_states(assign_stacked_states([init_state], self._expander.get_layer_num()))
 
         mem = SeqCollector()
         for step in range(max_rhs_len):
@@ -264,7 +264,7 @@ class NeuralPDA(nn.Module):
 
         # init_state: (V * opt_num, hid)
         init_state = self._lhs_symbol_mapper(self._embedder(rs_exp_lhs))
-        hx, _ = self._expander.init_hidden_states(assign_stacked_states([init_state], self._expander.get_layer_num()))
+        hx = self._expander.init_hidden_states(assign_stacked_states([init_state], self._expander.get_layer_num()))
 
         mem = SeqCollector()
         for step in range(0, max_rhs_len):

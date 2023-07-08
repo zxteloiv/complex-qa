@@ -1,13 +1,12 @@
-from typing import List, Optional, Union, Any
 import torch
 import torch.nn
 from models.modules.torch_rnn_wrapper import TorchRNNWrapper as HSWrapper
-from models.interfaces.unified_rnn import UnifiedRNN, RNNStack
+from models.interfaces.unified_rnn import UnifiedRNN, RNNStack, T_HIDDEN
 from ..modules.variational_dropout import VariationalDropout
 
 
 class StackedRNNCell(RNNStack):
-    def __init__(self, rnns: List[UnifiedRNN], dropout: float = 0.):
+    def __init__(self, rnns: list[UnifiedRNN], dropout: float = 0.):
         super(StackedRNNCell, self).__init__()
         self._input_dropouts = torch.nn.ModuleList([VariationalDropout(dropout, on_the_fly=False)
                                                     for _ in range(len(rnns) - 1)])
@@ -46,7 +45,7 @@ class StackedRNNCell(RNNStack):
         last_hidden = hidden[-1]
         return self.layer_rnns[-1].get_output_state(last_hidden)
 
-    def get_layered_output_state(self, hidden: List[Any]) -> List[torch.Tensor]:
+    def get_layered_output_state(self, hidden: list[T_HIDDEN]) -> list[torch.Tensor]:
         assert len(hidden) == len(self.layer_rnns), "hidden must contains the same number of layers as the RNNStack"
         layered_output = []
         for layer_hx, rnn in zip(hidden, self.layer_rnns):
@@ -63,13 +62,10 @@ class StackedRNNCell(RNNStack):
                   for i, layer_hidden in enumerate(layered_list) ]
         return merged
 
-    def init_hidden_states(self, layer_hidden: List[torch.Tensor]):
+    def init_hidden_states(self, layer_hidden: list[torch.Tensor]):
         assert len(layer_hidden) == self.get_layer_num()
-        hiddens = []
-        for rnn, init_hidden in zip(self.layer_rnns, layer_hidden):
-            h, _ = rnn.init_hidden_states(init_hidden)
-            hiddens.append(h)
-        return hiddens, self.get_output_state(hiddens)
+        hiddens = [rnn.init_hidden_states(init_hidden) for rnn, init_hidden in zip(self.layer_rnns, layer_hidden)]
+        return hiddens
 
 
 class StackedLSTMCell(StackedRNNCell):
@@ -93,7 +89,8 @@ if __name__ == '__main__':
     cell = StackedLSTMCell(dim, L, L)
     f0 = torch.randn(batch, L).float()
     f1 = torch.randn(batch, L).float()
-    h, o = cell.init_hidden_states([f0, f1])
+    h = cell.init_hidden_states([f0, f1])
+    o = cell.get_output_state(h)
 
     assert o.size() == (batch, L)
     assert len(h) == L

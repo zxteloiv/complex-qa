@@ -63,5 +63,5 @@ class IndRNNCell(UnifiedRNN):
         return hidden
 
     def init_hidden_states(self, forward_out):
-        return forward_out, forward_out
+        return forward_out
 

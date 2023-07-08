@@ -241,7 +241,7 @@ class BaseSeq2Seq(torch.nn.Module):
         dec_states = assign_stacked_states(agg_src, self._decoder.get_layer_num(), self._strategy)
 
         # init the internal hiddens
-        hx, _ = self._decoder.init_hidden_states(dec_states)
+        hx = self._decoder.init_hidden_states(dec_states)
         return hx
 
     def _get_enc_attn_fn(self, source_state, source_mask):

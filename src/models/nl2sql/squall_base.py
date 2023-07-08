@@ -319,7 +319,7 @@ class SquallBaseParser(nn.Module):
         agg_src = aggregate_layered_state([states], state_mask, self._strategy)
         dec_states = assign_stacked_states(agg_src, self.decoder.get_layer_num(), self._strategy)
         # init the internal hiddens
-        hx, _ = self.decoder.init_hidden_states(dec_states)
+        hx = self.decoder.init_hidden_states(dec_states)
         return hx
 
     # ------------ decoder looping functions  --------------
