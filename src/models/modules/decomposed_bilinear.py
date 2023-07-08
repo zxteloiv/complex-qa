@@ -1,4 +1,3 @@
-from typing import Optional
 import torch
 from torch import nn
 
@@ -23,8 +22,8 @@ class DecomposedBilinear(nn.Module):
                  left_size: int,
                  right_size: int,
                  out_size: int,
-                 decomposed_rank: Optional[int] = None,
-                 pool_size: Optional[int] = None,
+                 decomposed_rank: int | None = None,
+                 pool_size: int | None = None,
                  ignore_mapping_for_equal_pool: bool = True,
                  use_linear: bool = False,
                  use_bias: bool = False
@@ -53,7 +52,7 @@ class DecomposedBilinear(nn.Module):
         if use_bias:
             self.b = nn.Parameter(torch.zeros(out_size))
 
-    def forward(self, left: torch.Tensor, right: Optional[torch.Tensor] = None) -> torch.Tensor:
+    def forward(self, left: torch.Tensor, right: torch.Tensor | None = None) -> torch.Tensor:
         """
         :param left: (*, left)
         :param right: (*, right)

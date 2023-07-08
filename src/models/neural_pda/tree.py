@@ -12,7 +12,7 @@ from models.modules.batched_stack import TensorBatchStack
 _TT = torch.Tensor
 _LT = torch.LongTensor
 _FT = torch.FloatTensor
-_Nullable = Optional
+
 
 class Tree:
     def __init__(self,
@@ -34,7 +34,7 @@ class Tree:
         self._parent_index.reset(batch, device)
         self.batch_sz = batch
 
-    def _apply_for_node(self, node_val: _TT, push_mask: _Nullable[_LT]) -> Tuple[_LT, _LT]:
+    def _apply_for_node(self, node_val: _TT, push_mask: _LT | None) -> Tuple[_LT, _LT]:
         """
         Push new values onto the registry, and return its index.
 
@@ -53,7 +53,7 @@ class Tree:
         pos = self._node_registry._top_cur                      # pos: (batch,)
         return pos, succ
 
-    def _add_next_node_adjacency(self, parent_idx: _LT, push_mask: _Nullable[_LT]):
+    def _add_next_node_adjacency(self, parent_idx: _LT, push_mask: _LT | None):
         """
         Add to adjacency. Modification not supported via the interface.
         Adjacency must be add for the next succeeding idx.
@@ -79,7 +79,7 @@ class Tree:
         dummy_parent_for_root = torch.zeros(self.batch_sz, device=root_val.device).long()
         self._add_next_node_adjacency(dummy_parent_for_root, push_mask=None)
 
-    def add_new_node_edge(self, node_val: _TT, parent_idx: _LT, push_mask: _Nullable[_LT]):
+    def add_new_node_edge(self, node_val: _TT, parent_idx: _LT, push_mask: _LT | None):
         """
         Add a node and connect it to its parent.
 

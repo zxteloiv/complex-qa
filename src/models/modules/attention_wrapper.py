@@ -1,13 +1,16 @@
 import logging
 import re
-from typing import Optional, Tuple, Union, List, Callable
+from typing import Callable, Literal
 
 from allennlp.modules.matrix_attention import MatrixAttention
 from allennlp.nn.util import masked_softmax
 
 from utils.nn import masked_sparsemax
-from ..interfaces.attention import Attention as IAttn, AdaptiveAttention, AdaptiveAttnLogits
+from ..interfaces.attention import AdaptiveAttention, AdaptiveAttnLogits
 import torch
+
+
+TENSOR_FUNC = Callable[[torch.Tensor], torch.Tensor]
 
 
 class AdaptiveAllenLogits(AdaptiveAttnLogits):
@@ -82,9 +85,9 @@ class AdaptiveGeneralAttention(AdaptiveAttention):
                  init_tau: float = 1,
                  min_tau: float = 1e-8,
                  num_heads: int = 1,
-                 pre_q_mapping: torch.nn.Module = None,
-                 pre_k_mapping: torch.nn.Module = None,
-                 pre_v_mapping: Union[torch.nn.Module, str] = None,
+                 pre_q_mapping: torch.nn.Module | None = None,
+                 pre_k_mapping: torch.nn.Module | None = None,
+                 pre_v_mapping: torch.nn.Module | Literal['shared'] | None = None,
                  post_ctx_mapping: torch.nn.Module = None,
                  training_ctx: str = 'weighted_sum',
                  eval_ctx: str = 'weighted_sum',
@@ -141,7 +144,7 @@ class AdaptiveGeneralAttention(AdaptiveAttention):
         # a list of hook functions that accept and process the attention weight and returns the modified weights.
         # with hooks we could introduce other dependencies on the weights and even change or rewrite it, for example,
         # using the supervision for the attention weights.
-        self._runtime_weight_hooks: List[Callable[[torch.Tensor], torch.Tensor]] = []
+        self._runtime_weight_hooks: list[TENSOR_FUNC] = []
         self._head_graph_mask = None
 
         self.is_sparse = is_sparse  # use sparsemax or softmax
@@ -173,7 +176,7 @@ class AdaptiveGeneralAttention(AdaptiveAttention):
     def clear_head_mask(self):
         self._head_graph_mask = None
 
-    def add_runtime_weight_hooks(self, hook: Callable[[torch.Tensor], torch.Tensor]) -> None:
+    def add_runtime_weight_hooks(self, hook: TENSOR_FUNC) -> None:
         self._runtime_weight_hooks.append(hook)
 
     def clear_runtime_weight_hooks(self):
@@ -182,8 +185,8 @@ class AdaptiveGeneralAttention(AdaptiveAttention):
     def forward(self,
                 inputs: torch.Tensor,
                 attend_over: torch.Tensor,
-                attend_mask: Optional[torch.LongTensor] = None,
-                graph_mask: Optional[torch.LongTensor] = None,
+                attend_mask: torch.LongTensor | None = None,
+                graph_mask: torch.LongTensor | None = None,
                 ) -> torch.Tensor:
         """
         :param inputs: (batch, M, input_dim) or simply (batch, input_dim)

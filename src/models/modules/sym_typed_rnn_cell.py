@@ -1,5 +1,3 @@
-from typing import Tuple, Any, Optional, List
-
 import torch
 from torch import nn
 import math
@@ -9,11 +7,11 @@ from .variational_dropout import VariationalDropout
 
 
 class SymTypedRNNCell(UnifiedRNN):
-    def forward(self, inputs, hidden: Optional[torch.Tensor]) -> Tuple[Any, torch.Tensor]:
+    def forward(self, inputs, hidden):
         """
         :param inputs: (batch, *, in_dim)
         :param hidden: (batch, out_dim)
-        :return:
+        :return: hx, out (batch, out_dim)
         """
         out = self._input_mapping(inputs)   # (batch, *, out_dim)
         if hidden is not None:

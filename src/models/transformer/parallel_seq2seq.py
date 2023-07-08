@@ -1,4 +1,3 @@
-from typing import Dict, List, Tuple, Optional
 # denote the type that can be None, but must be specified and does not come with a default value.
 from models.interfaces.encoder import EmbedAndGraphEncode, EmbedAndEncode
 import torch
@@ -8,8 +7,6 @@ from allennlp.training.metrics import BLEU, Perplexity, Average
 from utils.nn import prepare_input_mask, seq_cross_ent
 from utils.seq_collector import SeqCollector
 from utils.text_tool import make_human_readable_text
-
-Nullable = Optional
 
 
 class ParallelSeq2Seq(nn.Module):
@@ -64,7 +61,7 @@ class ParallelSeq2Seq(nn.Module):
 
     def forward(self,
                 source_tokens: torch.LongTensor,
-                target_tokens: Optional[torch.LongTensor] = None,
+                target_tokens: torch.LongTensor | None = None,
                 **kwargs,
                 ) -> dict:
         """Run the network, and dispatch work to helper functions based on the runtime"""
@@ -160,9 +157,9 @@ class ParallelSeq2Seq(nn.Module):
     def _forward_training(self,
                           state: torch.Tensor,
                           target: torch.LongTensor,
-                          state_mask: Nullable[torch.LongTensor],
-                          target_mask: Nullable[torch.LongTensor]
-                          ) -> Tuple[torch.Tensor, torch.FloatTensor]:
+                          state_mask: torch.LongTensor | None,
+                          target_mask: torch.LongTensor | None
+                          ) -> tuple[torch.Tensor, torch.FloatTensor]:
         """
         Run decoder for training, given target tokens as supervision.
         When training, all timesteps are used and computed universally.
@@ -178,7 +175,7 @@ class ParallelSeq2Seq(nn.Module):
 
         return predictions, logits
 
-    def _forward_prediction(self, state, source_mask, *, decoding_len: Nullable[int]):
+    def _forward_prediction(self, state, source_mask, *, decoding_len: int | None):
         if self._beam_size > 1:
             return self._forward_beam_search(state, source_mask, decoding_len=decoding_len)
         else:
@@ -186,10 +183,10 @@ class ParallelSeq2Seq(nn.Module):
 
     def _forward_greedy_search(self,
                                state: torch.Tensor,
-                               source_mask: Nullable[torch.LongTensor],
+                               source_mask: torch.LongTensor | None,
                                *,
-                               decoding_len: Nullable[int],
-                               ) -> Tuple[torch.Tensor, torch.Tensor]:
+                               decoding_len: int | None,
+                               ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Run decoder step by step for testing or validation, with no gold tokens available.
         """
@@ -227,10 +224,10 @@ class ParallelSeq2Seq(nn.Module):
 
     def _forward_beam_search(self,
                              state: torch.Tensor,
-                             source_mask: Nullable[torch.LongTensor],
+                             source_mask: torch.LongTensor | None,
                              *,
-                             decoding_len: Nullable[int],
-                             ) -> Tuple[torch.Tensor, torch.Tensor]:
+                             decoding_len: int | None,
+                             ) -> tuple[torch.Tensor, torch.Tensor]:
         batch_sz, beam_sz, vocab_sz = state.size()[0], self._beam_size, self._vocab_size
         decoding_len = decoding_len or self.max_decoding_step
 
@@ -260,7 +257,7 @@ class ParallelSeq2Seq(nn.Module):
         # [(batch, beam)]
         prev_preds = [batch_start.expand(-1, beam_sz), topk_indices]
         # [(batch, beam)]
-        backtrace: List[torch.Tensor] = [torch.zeros_like(topk_indices)]
+        backtrace: list[torch.Tensor] = [torch.zeros_like(topk_indices)]
 
         for timestep in range(decoding_len):
             # step_inputs: (batch * beam, seq_len = (timestep + 1)), i.e., at least 1 token at step 0
@@ -303,8 +300,8 @@ class ParallelSeq2Seq(nn.Module):
         return predictions, acc_log_probs
 
     def _backtrace_predictions(self,
-                               preds: List[torch.Tensor],
-                               backtrace: List[torch.Tensor]) -> torch.Tensor:
+                               preds: list[torch.Tensor],
+                               backtrace: list[torch.Tensor]) -> torch.Tensor:
         """
         :param preds: [(batch, beam)]
         :param backtrace: [(batch, beam)] with the less length than predictions by 1
@@ -324,8 +321,8 @@ class ParallelSeq2Seq(nn.Module):
 
         return torch.stack(list(reversed(new_preds)), dim=-1)
 
-    def get_metrics(self, reset: bool = False) -> Dict[str, float]:
-        all_metrics: Dict[str, float] = {}
+    def get_metrics(self, reset: bool = False) -> dict[str, float]:
+        all_metrics: dict[str, float] = {}
         if self.bleu:
             all_metrics.update(self.bleu.get_metric(reset=reset))
         all_metrics.update(PPL=self.ppl.get_metric(reset))

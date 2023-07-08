@@ -380,7 +380,8 @@ class NeuralPDA(nn.Module):
         node_val = node[:, 1]
         return node_idx, node_val, success
 
-    def update_pda_with_predictions(self, parent_idx: LT, symbol: LT, p_growth: LT, symbol_mask: LT, lhs_mask: NullOrLT):
+    def update_pda_with_predictions(self, parent_idx: LT, symbol: LT, p_growth: LT, symbol_mask: LT,
+                                    lhs_mask: None | LT):
         """
         Iterate the symbols backwards and push them onto the stack based on topological information.
 

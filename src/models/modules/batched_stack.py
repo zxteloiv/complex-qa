@@ -1,4 +1,3 @@
-from typing import Optional, Tuple, Union
 import torch
 
 
@@ -19,7 +18,7 @@ class BatchStack:
     def describe(self):
         raise NotImplementedError
 
-    def push(self, data: torch.Tensor, push_mask: Optional[torch.Tensor]) -> torch.Tensor:
+    def push(self, data: torch.Tensor, push_mask: torch.Tensor | None) -> torch.Tensor:
         """
         :param data: (batch, *) item to push onto the stack
         :param push_mask: (batch,) indicators to push items
@@ -29,7 +28,7 @@ class BatchStack:
         """
         raise NotImplementedError
 
-    def pop(self, pop_mask: Optional[torch.Tensor] = None) -> Tuple[torch.Tensor, torch.Tensor]:
+    def pop(self, pop_mask: torch.Tensor | None = None) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Remove the top item from each stack, and return them.
         :param pop_mask: (batch,) pop the specified item, or all the batch items if None
@@ -39,7 +38,7 @@ class BatchStack:
         """
         raise NotImplementedError
 
-    def top(self) -> Tuple[torch.Tensor, torch.Tensor]:
+    def top(self) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Get the top item from each stack.
         :param pop_data: not only get the top item of each stack, but also remove them from the stack top.
@@ -64,8 +63,8 @@ class TensorBatchStack(BatchStack, DumpBatchStack):
         self.max_batch_size = max_batch_size
         self.max_stack_size = max_stack_size
         self.item_size = item_size
-        self._storage: Optional[torch.Tensor] = None
-        self._top_cur: Optional[torch.Tensor] = None
+        self._storage: torch.Tensor | None = None
+        self._top_cur: torch.Tensor | None = None
         self.inplace = False
         self.dtype = dtype
         self.reset(max_batch_size, device)
@@ -77,13 +76,13 @@ class TensorBatchStack(BatchStack, DumpBatchStack):
         }
         return stat
 
-    def reset(self, batch_size, default_device: Optional[torch.device] = None):
+    def reset(self, batch_size, default_device: torch.device | None = None):
         self._storage = torch.zeros(batch_size, self.max_stack_size, self.item_size, device=default_device, dtype=self.dtype)
         self._top_cur = torch.full((batch_size,), fill_value=-1, dtype=torch.long, device=default_device)
         self.max_batch_size = batch_size
         return self
 
-    def push(self, data: torch.Tensor, push_mask: Optional[torch.Tensor]) -> torch.Tensor:
+    def push(self, data: torch.Tensor, push_mask: torch.Tensor | None) -> torch.Tensor:
         """
         :param data: (batch, *) item to push onto the stack
         :param push_mask: (batch,)
@@ -116,7 +115,7 @@ class TensorBatchStack(BatchStack, DumpBatchStack):
         self._storage = new_storage
         return succ
 
-    def top(self) -> Tuple[torch.Tensor, torch.Tensor]:
+    def top(self) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Get the top item from each stack.
         :param batch_size: the required batch to pop, must be the max_batch_size for a tensor-based BatchStack.
@@ -138,7 +137,7 @@ class TensorBatchStack(BatchStack, DumpBatchStack):
 
         return top_val, top_succ
 
-    def pop(self, pop_mask: Optional[torch.Tensor] = None) -> Tuple[torch.Tensor, torch.Tensor]:
+    def pop(self, pop_mask: torch.Tensor | None = None) -> tuple[torch.Tensor, torch.Tensor]:
         # top_val: (batch, *)
         # top_succ: (batch,)
         top_val, top_succ = self.top()
@@ -155,7 +154,7 @@ class TensorBatchStack(BatchStack, DumpBatchStack):
         succ = 1 - (1 - top_succ) * pop_mask    # only the errors at the required locations matter
         return top_val, succ
 
-    def dump(self, i: int = None) -> Tuple[torch.Tensor, torch.LongTensor]:
+    def dump(self, i: int = None) -> tuple[torch.Tensor, torch.LongTensor]:
         # top_cur: (batch,)
         lengths = self._top_cur + 1
         max_length = torch.max(lengths)

@@ -1,15 +1,17 @@
-from typing import Union, Literal, Optional
+from typing import Literal
 import torch
 from torch import nn
 
+
 PREDICTOR_OUTPUT_SEMANTIC = Literal["probs", "logits"]
+
 
 class QuantTokenPredictor(nn.Module):
     def __init__(self,
                  num_toks,
                  tok_dim,
                  output_semantics: PREDICTOR_OUTPUT_SEMANTIC = "logits",
-                 shared_embedding: Optional[nn.Parameter] = None,
+                 shared_embedding: nn.Parameter | None = None,
                  quant_criterion: Literal["distance", "projection", "dot_product"] = "distance",
                  ):
         super().__init__()

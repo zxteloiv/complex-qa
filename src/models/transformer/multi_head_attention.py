@@ -1,6 +1,5 @@
 import copy
 import logging
-from typing import Union, List, Mapping, Dict, Tuple, Optional
 import torch
 import torch.nn
 import torch.nn.functional
@@ -13,11 +12,11 @@ class GeneralMultiHeadAttention(torch.nn.Module):
                  input_dim: int,
                  total_attention_dim: int,
                  total_value_dim: int,
-                 attend_to_dim: Optional[int] = None,
-                 output_dim: Optional[int] = None,
+                 attend_to_dim: int | None = None,
+                 output_dim: int | None = None,
                  attention_dropout: float = 0.,
                  use_future_blinding: bool = False,
-                 temperature: Optional[float] = None,
+                 temperature: float | None = None,
                  try_cloned_linear: bool = True,
                  eval_top1_ctx: bool = False,
                  ):
@@ -87,9 +86,9 @@ class GeneralMultiHeadAttention(torch.nn.Module):
     def forward(self,
                 input: torch.Tensor,
                 attend_over: torch.Tensor,
-                attend_mask: Optional[torch.LongTensor] = None,
-                structural_mask: Optional[torch.LongTensor] = None,
-                ) -> Tuple[torch.Tensor, torch.Tensor]:
+                attend_mask: torch.LongTensor | None = None,
+                structural_mask: torch.LongTensor | None = None,
+                ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Do a multi-head attention for _input_ tokens over the _attend_over_ tokens.
         _attend_mask_ is used to wipe out padded tokens in the corresponding sequences.
@@ -169,8 +168,8 @@ class GeneralMultiHeadAttention(torch.nn.Module):
     def dot_attention(self,
                       queries: torch.Tensor,
                       keys: torch.Tensor,
-                      attend_mask: Optional[torch.Tensor],
-                      structural_mask: Optional[torch.Tensor],
+                      attend_mask: None | torch.Tensor,
+                      structural_mask: None | torch.Tensor,
                       ) -> torch.Tensor:
         """
         Doing Dot Attention for multi-heads simultaneously
@@ -227,7 +226,7 @@ class MultiHeadSelfAttention(torch.nn.Module):
                  total_attention_dim: int,
                  total_value_dim: int,
                  attention_dropout: float = 0.,
-                 temperature: Optional[float] = None,
+                 temperature: float | None = None,
                  ):
         super(MultiHeadSelfAttention, self).__init__()
 
@@ -242,8 +241,8 @@ class MultiHeadSelfAttention(torch.nn.Module):
         )
 
     def forward(self, input: torch.Tensor,
-                mask: Optional[torch.Tensor] = None,
-                structural_mask: Optional[torch.Tensor] = None):
+                mask: torch.Tensor | None = None,
+                structural_mask: torch.Tensor | None = None):
         return self.self_attention(input=input, attend_over=input, attend_mask=mask, structural_mask=structural_mask)
 
 
@@ -260,7 +259,7 @@ class MaskedMultiHeadSelfAttention(torch.nn.Module):
                  total_attention_dim: int,
                  total_value_dim: int,
                  attention_dropout: float = 0.,
-                 temperature: Optional[float] = None,
+                 temperature: float | None = None,
                  ):
         super(MaskedMultiHeadSelfAttention, self).__init__()
 
@@ -275,8 +274,8 @@ class MaskedMultiHeadSelfAttention(torch.nn.Module):
         )
 
     def forward(self, input: torch.Tensor,
-                mask: Optional[torch.Tensor] = None,
-                structural_mask: Optional[torch.Tensor] = None):
+                mask: torch.Tensor | None = None,
+                structural_mask: torch.Tensor | None = None):
         return self.self_attention(input=input, attend_over=input, attend_mask=mask, structural_mask=structural_mask)
 
 
@@ -294,7 +293,7 @@ class MultiHeadAttention(torch.nn.Module):
                  total_attention_dim: int,
                  total_value_dim: int,
                  attention_dropout: float = 0.,
-                 temperature: Optional[float] = None,
+                 temperature: float | None = None,
                  ):
         super(MultiHeadAttention, self).__init__()
 
@@ -309,6 +308,6 @@ class MultiHeadAttention(torch.nn.Module):
             temperature=temperature
         )
 
-    def forward(self, input: torch.Tensor, attend_over: torch.Tensor, attend_mask: Optional[torch.Tensor] = None):
+    def forward(self, input: torch.Tensor, attend_over: torch.Tensor, attend_mask: torch.Tensor | None = None):
         return self.attention(input=input, attend_over=attend_over, attend_mask=attend_mask)
 

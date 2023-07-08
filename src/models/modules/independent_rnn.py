@@ -1,7 +1,6 @@
-from typing import Optional
 import torch.nn
 import torch.nn.modules
-from ..interfaces.unified_rnn import UnifiedRNN
+from ..interfaces.unified_rnn import UnifiedRNN, T_HIDDEN
 
 
 class IndRNNCell(UnifiedRNN):
@@ -40,7 +39,7 @@ class IndRNNCell(UnifiedRNN):
     def get_output_dim(self):
         return self.hidden_size
 
-    def forward(self, inputs: torch.Tensor, hidden: Optional[torch.Tensor] = None):
+    def forward(self, inputs: torch.Tensor, hidden: T_HIDDEN | None) -> tuple[T_HIDDEN, torch.Tensor]:
         """
 
         :param inputs: (batch, input_size)

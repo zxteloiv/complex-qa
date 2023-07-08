@@ -1,5 +1,4 @@
 import math
-from typing import Optional, Union, Tuple
 import torch
 from torch import nn
 from torch.nn import init
@@ -59,7 +58,7 @@ class GeneralizedBilinearAttention(AdaptiveAttention):
     def __init__(self, attn_dim: int, vec_dim: int,
                  use_linear: bool = True,
                  use_bias: bool = True,
-                 activation: Optional[nn.Module] = None,
+                 activation: nn.Module | None = None,
                  eval_top1_ctx: bool = False,
                  ):
         super().__init__()
@@ -102,7 +101,7 @@ class GeneralizedBilinearAttention(AdaptiveAttention):
             init.uniform_(self.bias, -bound, bound)
 
     @staticmethod
-    def _check_nonlinearity(activation: Optional[nn.Module]):
+    def _check_nonlinearity(activation: nn.Module | None):
         if activation is None:
             nonlinearity = 'linear'
         elif isinstance(activation, nn.Tanh):

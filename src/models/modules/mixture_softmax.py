@@ -1,7 +1,7 @@
-from typing import Optional, Literal
+from typing import Literal
 import torch
 from torch import nn
-import torch.nn.functional as F
+
 
 class MoSProjection(nn.Module):
     def __init__(self, mixture_num: int, input_dim, output_dim, flatten_softmax: bool = False,
@@ -26,7 +26,7 @@ class MoSProjection(nn.Module):
 
     def forward(self,
                 proj_input: torch.Tensor,
-                logit_bias: Optional[torch.Tensor] = None) -> torch.Tensor:
+                logit_bias: torch.Tensor | None = None) -> torch.Tensor:
         # size_prefix: (batch, *)
         size_prefix = proj_input.size()[:-1]
         batch_size = size_prefix[0]

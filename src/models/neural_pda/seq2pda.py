@@ -14,6 +14,7 @@ from trialbot.data import NSVocabulary
 
 from .tensor_typing_util import *
 
+
 class Seq2PDA(nn.Module):
     def __init__(self,
                  # modules

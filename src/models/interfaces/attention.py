@@ -1,5 +1,4 @@
 from abc import ABC
-from typing import Optional, Tuple
 import torch
 from .composer import TwoVecComposer
 
@@ -33,8 +32,8 @@ class AdaptiveAttention(torch.nn.Module, _AttnWeightMixin, ABC):
     def forward(self,
                 inputs: torch.Tensor,
                 attend_over: torch.Tensor,
-                attend_mask: Optional[torch.LongTensor] = None,
-                graph_mask: Optional[torch.LongTensor] = None,
+                attend_mask: torch.LongTensor | None = None,
+                graph_mask: torch.LongTensor | None = None,
                 ) -> torch.Tensor:
         """
         Although the typing is the same as the superclass due to the limited,

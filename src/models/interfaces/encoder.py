@@ -1,5 +1,4 @@
 from abc import ABC
-from typing import Union, Tuple, List
 
 import torch
 
@@ -37,7 +36,7 @@ class StackEncoder(Encoder, ABC):
     def __len__(self):
         return self.get_layer_num()
 
-    def get_layered_output(self) -> List[torch.Tensor]:
+    def get_layered_output(self) -> list[torch.Tensor]:
         """return the output of every intermediate layer after the last forward"""
         raise NotImplementedError
 
@@ -50,7 +49,7 @@ class EmbedAndEncode(torch.nn.Module, ABC):
     A typical implementation may include an nn.Embedding followed by an EncoderStack,
     but another popular choice would be a wrapper of BERT models.
     """
-    def forward(self, tokens: torch.Tensor) -> Tuple[List[torch.Tensor], torch.Tensor]:
+    def forward(self, tokens: torch.Tensor) -> tuple[list[torch.Tensor], torch.Tensor]:
         """accepts the token id sequence, returns layered states and state masks"""
         raise NotImplementedError
 

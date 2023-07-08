@@ -1,10 +1,9 @@
-from typing import Dict, List, Tuple, Mapping, Optional
 import torch
 import torch.nn
 
 from utils.nn import add_positional_features
-
 from .multi_head_attention import MultiHeadAttention, MultiHeadSelfAttention
+
 
 class InsertionDecoder(torch.nn.Module):
     def __init__(self,
@@ -113,10 +112,10 @@ class InsertionDecoder(torch.nn.Module):
 
     def forward(self,
                 tgt_hidden: torch.Tensor,
-                tgt_mask: Optional[torch.LongTensor],
+                tgt_mask: None | torch.LongTensor,
                 src_hidden: torch.Tensor,
-                src_mask: Optional[torch.LongTensor]
-                ) -> Tuple[torch.Tensor, Optional[torch.LongTensor]]:
+                src_mask: None | torch.LongTensor
+                ) -> tuple[torch.Tensor, torch.LongTensor | None]:
         """
         Transformer deocder stacked blocks.
 

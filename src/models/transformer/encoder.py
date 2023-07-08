@@ -1,4 +1,3 @@
-from typing import Dict, List, Tuple, Mapping, Optional
 import torch
 import torch.nn
 
@@ -26,10 +25,10 @@ class TransformerEncoder(Encoder):
                  ):
         super(TransformerEncoder, self).__init__()
 
-        self._attention_layers: List[MultiHeadSelfAttention] = []
-        self._attention_norm_layers: List[LayerNorm] = []
-        self._feedforward_layers: List[FeedForward] = []
-        self._feedforward_norm_layers: List[LayerNorm] = []
+        self._attention_layers: list[MultiHeadSelfAttention] = []
+        self._attention_norm_layers: list[LayerNorm] = []
+        self._feedforward_layers: list[FeedForward] = []
+        self._feedforward_norm_layers: list[LayerNorm] = []
 
         hidden_dim = hidden_dim or input_dim
         feedforward_hidden_dim = feedforward_hidden_dim or hidden_dim
