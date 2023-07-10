@@ -59,9 +59,10 @@ class EmbeddingMxin:
         embeddings = {}
 
         # First we read the embeddings from the file, only keeping vectors for the words we need.
-        logger.info("Reading pretrained embeddings from file")
+        logger.info(f"Reading pretrained embeddings from file {filename}")
+        from trialbot.utils.file_reader import open_file
 
-        with open(filename) as embeddings_file:
+        with open_file(filename) as embeddings_file:
             for line in tqdm.tqdm(embeddings_file):
                 token = line.split(" ", 1)[0]
                 if token in tokens_to_keep:
