@@ -4,8 +4,6 @@ from typing import Union, Optional, Literal, List, Callable
 import torch
 from allennlp.training.metrics import Average
 from torch import nn
-from allennlp.modules import Embedding as AllenEmbedding
-from trialbot.data import NSVocabulary
 
 from models.interfaces.encoder import StackEncoder
 from models.interfaces.unified_rnn import RNNStack, T_HIDDEN
@@ -23,7 +21,7 @@ class RNNG(nn.Module):
                  buffer_encoder: RNNStack,  # encodes temporary tokens, from h0
                  stack_encoder: StackEncoder,  # encodes the stack
                  reducer: StackEncoder,  # compose the popped stack tokens
-                 action_embedding: Union[nn.Embedding, AllenEmbedding],
+                 action_embedding: nn.Embedding,
                  action_projection: nn.Module,
 
                  # model configuration

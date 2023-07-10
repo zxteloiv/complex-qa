@@ -11,6 +11,11 @@ from models.transformer.encoder import TransformerEncoder
 from ..modules.attentions import get_attn_composer, get_attention
 from .stacked_rnn_cell import StackedRNNCell
 import os.path as osp
+import numpy
+import tqdm
+
+
+logger = logging.getLogger(__name__)
 
 
 class EmbeddingMxin:
@@ -23,17 +28,99 @@ class EmbeddingMxin:
         if src_pretrain_file is None:
             source_embedding = nn.Embedding(num_embeddings=vocab.get_vocab_size(p.src_namespace),
                                             embedding_dim=p.emb_sz,
-                                            padding_idx=0,
-                                            )
+                                            padding_idx=0)
         else:
-            from allennlp.modules.token_embedders import Embedding
-            source_embedding = Embedding(embedding_dim=p.emb_sz,
-                                         num_embeddings=vocab.get_vocab_size(p.src_namespace),
-                                         vocab_namespace=p.src_namespace,
-                                         padding_index=0,
-                                         pretrained_file=osp.expanduser(src_pretrain_file),
-                                         vocab=vocab)
+            weights = self._read_pretrained_embeddings_file(
+                osp.expanduser(src_pretrain_file), p.emb_sz, vocab, p.src_namespace,
+            )
+            source_embedding = nn.Embedding(num_embeddings=vocab.get_vocab_size(p.src_namespace),
+                                            embedding_dim=p.emb_sz,
+                                            padding_idx=0,
+                                            _weight=weights)
         return source_embedding
+
+    @staticmethod
+    def _read_pretrained_embeddings_file(
+        filename: str, embedding_dim: int, vocab: NSVocabulary, namespace: str = "tokens"
+    ) -> torch.FloatTensor:
+        """
+        Copied and modified from the original AllenNLP code base.
+
+        Read pre-trained word vectors from an eventually compressed text file, possibly contained
+        inside an archive with multiple files. The text file is assumed to be utf-8 encoded with
+        space-separated fields: [word] [dim 1] [dim 2] ...
+
+        Lines that contain more numerical tokens than `embedding_dim` raise a warning and are skipped.
+
+        The remainder of the docstring is identical to `_read_pretrained_embeddings_file`.
+        """
+        tokens_to_keep = set(vocab.get_index_to_token_vocabulary(namespace).values())
+        vocab_size = vocab.get_vocab_size(namespace)
+        embeddings = {}
+
+        # First we read the embeddings from the file, only keeping vectors for the words we need.
+        logger.info("Reading pretrained embeddings from file")
+
+        with open(filename) as embeddings_file:
+            for line in tqdm.tqdm(embeddings_file):
+                token = line.split(" ", 1)[0]
+                if token in tokens_to_keep:
+                    fields = line.rstrip().split(" ")
+                    if len(fields) - 1 != embedding_dim:
+                        # Sometimes there are funny unicode parsing problems that lead to different
+                        # fields lengths (e.g., a word with a unicode space character that splits
+                        # into more than one column).  We skip those lines.  Note that if you have
+                        # some kind of long header, this could result in all of your lines getting
+                        # skipped.  It's hard to check for that here; you just have to look in the
+                        # embedding_misses_file and at the model summary to make sure things look
+                        # like they are supposed to.
+                        logger.warning(
+                            "Found line with wrong number of dimensions (expected: %d; actual: %d): %s",
+                            embedding_dim,
+                            len(fields) - 1,
+                            line,
+                            )
+                        continue
+
+                    vector = numpy.asarray(fields[1:], dtype="float32")
+                    embeddings[token] = vector
+
+        if not embeddings:
+            raise ValueError(
+                "No embeddings of correct dimension found; you probably "
+                "misspecified your embedding_dim parameter, or didn't "
+                "pre-populate your Vocabulary"
+            )
+
+        all_embeddings = numpy.asarray(list(embeddings.values()))
+        embeddings_mean = float(numpy.mean(all_embeddings))
+        embeddings_std = float(numpy.std(all_embeddings))
+        # Now we initialize the weight matrix for an embedding layer, starting with random vectors,
+        # then filling in the word vectors we just read.
+        logger.info("Initializing pre-trained embedding layer")
+        embedding_matrix = torch.FloatTensor(vocab_size, embedding_dim).normal_(
+            embeddings_mean, embeddings_std
+        )
+        num_tokens_found = 0
+        index_to_token = vocab.get_index_to_token_vocabulary(namespace)
+        for i in range(vocab_size):
+            token = index_to_token[i]
+
+            # If we don't have a pre-trained vector for this word, we'll just leave this row alone,
+            # so the word has a random initialization.
+            if token in embeddings:
+                embedding_matrix[i] = torch.FloatTensor(embeddings[token])
+                num_tokens_found += 1
+            else:
+                logger.debug(
+                    "Token %s was not found in the embedding file. Initialising randomly.", token
+                )
+
+        logger.info(
+            "Pretrained embeddings were found for %d out of %d tokens", num_tokens_found, vocab_size
+        )
+
+        return embedding_matrix
 
     def get_target_embedding(self):
         p, vocab = self.p, self.vocab
