@@ -6,13 +6,13 @@ from allennlp.nn.util import masked_softmax, masked_log_softmax
 from allennlp.training.metrics import Average
 from torch import nn
 
-from models.interfaces.encoder import Encoder, StackEncoder
-from models.modules.attention import AdaptiveGeneralAttention as Attn, AdaptiveAllenLogits as AllenLogits
+from models.interfaces.encoder import StackEncoder
+from models.modules.attentions.adaptive_attention import AdaptiveGeneralAttention as Attn, AdaptiveAllenLogits as AllenLogits
 from models.base_s2s.model_factory import EncoderStackMixin
 from allennlp.modules.matrix_attention import BilinearMatrixAttention
 
-from utils.nn import compact_mask_select, assign_stacked_states
-from models.nl2sql.hungarian_loss import get_hungarian_reg_loss, get_hungarian_sup_loss
+from utils.nn import compact_mask_select
+from models.nl2sql.hungarian_loss import get_hungarian_reg_loss
 
 
 class SQLova(nn.Module):

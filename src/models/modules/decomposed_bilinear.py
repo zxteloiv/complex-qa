@@ -2,6 +2,39 @@ import torch
 from torch import nn
 
 
+class Bilinear(nn.Module):
+    """
+    A bilinear layer based on torch.nn.Bilinear but augmented by linear layers. such that
+
+    output = xWy + Ux + Vy + Bias   # upper-cased letter denotes module parameters.
+    """
+    def __init__(self, left_size: int, right_size: int, out_size: int,
+                 use_linear: bool = False, use_bias: bool = True):
+        super().__init__()
+        self.bilinear = nn.Bilinear(left_size, right_size, out_size, use_bias)
+        self.linear_a = self.linear_b = None
+        if use_linear:
+            self.linear_a = nn.Linear(left_size, out_size, bias=False)
+            self.linear_b = nn.Linear(right_size, out_size, bias=False)
+
+    def forward(self, left: torch.Tensor, right: torch.Tensor) -> torch.Tensor:
+        """
+        :param left: (*, left), * can be any dimension tuple but the same for the left and right
+        :param right: (*, right), must be available otherwise the computation is undefined,
+                which is different from the decomposed bilinear net. See the doc below.
+        :return: (*, out_size)
+        """
+        bilinear_out = self.bilinear(left, right)   # (*, out)
+
+        if self.linear_a is not None:
+            a_out = self.linear_a(left)     # (*, out)
+            b_out = self.linear_b(right)    # (*, out)
+            return bilinear_out + a_out + b_out
+
+        else:
+            return bilinear_out
+
+
 class DecomposedBilinear(nn.Module):
     """
     In general, the module is an approximation to the real bilinear operation with much less parameters,
@@ -55,7 +88,8 @@ class DecomposedBilinear(nn.Module):
     def forward(self, left: torch.Tensor, right: torch.Tensor | None = None) -> torch.Tensor:
         """
         :param left: (*, left)
-        :param right: (*, right)
+        :param right: (*, right), can be null because the mapping actually convert them
+            to pool size, which can be independently determined by the left tensor only.
         :return: (*, out_size)
         """
         left_size = left.size()

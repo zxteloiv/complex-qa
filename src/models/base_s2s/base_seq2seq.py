@@ -5,6 +5,7 @@ import torch
 from trialbot.data.ns_vocabulary import NSVocabulary
 from ..interfaces.attention import AdaptiveAttention as IAttn, VectorContextComposer as AttnComposer
 from ..interfaces.loss_module import LossModule
+from ..interfaces.token_predictor import TokenPredictor
 from ..modules.variational_dropout import VariationalDropout
 from ..interfaces.unified_rnn import RNNStack, T_HIDDEN
 from ..interfaces.encoder import EmbedAndEncode
@@ -21,7 +22,7 @@ class BaseSeq2Seq(torch.nn.Module):
                  vocab: NSVocabulary,
                  embed_encoder: EmbedAndEncode,
                  decoder: RNNStack,
-                 word_projection: torch.nn.Module,
+                 word_projection: TokenPredictor,
                  target_embedding: torch.nn.Embedding,
                  enc_attention: IAttn | None = None,
                  dec_hist_attn: IAttn | None = None,

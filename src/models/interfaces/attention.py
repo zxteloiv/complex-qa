@@ -44,7 +44,7 @@ class AdaptiveAttention(torch.nn.Module, _AttnWeightMixin, ABC):
         :param attend_over: (batch, attend_length, attend_dim)
         :param attend_mask: (batch, attend_length)
         :param graph_mask: (batch, input_length, attend_length)
-        :return: context: (batch, input_length, attend_dim) or simply (batch, input_dim)
+        :return: context: (batch, input_length, attend_dim) or simply (batch, attend_dim)
         """
         raise NotImplementedError
 
@@ -73,7 +73,7 @@ class AdaptiveAttnLogits(torch.nn.Module):
 
         return attn
 
-    def matrix_attn_logits(self, inputs, attend_over) -> torch.Tensor:
+    def matrix_attn_logits(self, inputs: torch.Tensor, attend_over: torch.Tensor) -> torch.Tensor:
         """
         Implement the attention for matrix, the dimension should be reshaped by the caller.
         :param inputs: (batch, M, input_dim)

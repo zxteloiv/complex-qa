@@ -1,6 +1,6 @@
 import torch
 import torch.nn
-from ..interfaces.attention import VectorContextComposer
+from models.interfaces.attention import VectorContextComposer
 from allennlp.nn.activations import Activation
 
 
@@ -84,26 +84,3 @@ class MappingAddComposer(VectorContextComposer):
         return self.output_dim
 
 
-cls_mappings = {
-    "cat": CatComposer,
-    "add": AddComposer,
-    "mapping_add": MappingAddComposer,
-    "cat_mapping": CatMappingComposer,
-}
-
-
-def get_attn_composer(cls_type: str, context_dim: int, vector_dim: int, output_dim: int, activation: str):
-    if cls_type in ("none", "passthrough", "linear"):
-        return NoneComposer(vector_dim, output_dim, activation)
-    elif cls_type == "cat":
-        assert output_dim == context_dim + vector_dim, "CatComposer will concatenate the context and vector"
-        return CatComposer(context_dim, vector_dim)
-    elif cls_type == "cat_mapping":
-        return CatMappingComposer(context_dim, vector_dim, output_dim, activation)
-    elif cls_type == "add":
-        assert context_dim == vector_dim == output_dim, "AddComposer requires all dimensions equal to sum"
-        return AddComposer(context_dim)
-    elif cls_type == "mapping_add":
-        return MappingAddComposer(context_dim, vector_dim, output_dim, activation)
-    else:
-        raise ValueError(f"The {cls_type} composer is not supported. Current composers {cls_mappings.keys()}")

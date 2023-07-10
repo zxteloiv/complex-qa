@@ -5,8 +5,7 @@ from models.base_s2s.model_factory import WordProjMixin, EncoderStackMixin, EmbE
 from .seq2rnng import Seq2RNNG
 from .rnng import RNNG
 from ..base_s2s.stacked_rnn_cell import StackedRNNCell
-from ..modules.attention_composer import get_attn_composer
-from ..modules.attention import get_attention
+from ..modules.attentions import get_attn_composer, get_attention
 from .rnng_utils import get_target_num_embeddings, get_terminal_boundary, token_to_id
 
 

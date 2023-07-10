@@ -6,7 +6,7 @@ from allennlp.modules.matrix_attention import MatrixAttention
 from allennlp.nn.util import masked_softmax
 
 from utils.nn import masked_sparsemax
-from ..interfaces.attention import AdaptiveAttention, AdaptiveAttnLogits
+from models.interfaces.attention import AdaptiveAttention, AdaptiveAttnLogits
 import torch
 
 
@@ -295,67 +295,4 @@ class AdaptiveGeneralAttention(AdaptiveAttention):
                              f'for {"training" if self.training else "evaluation"} '
                              f'is unknown.')
 
-
-def get_attention(attn_type: str,
-                  vector_dim: int = 0,
-                  matrix_dim: int = 0,
-                  **kwargs):
-    """
-    Build an Attention module with specified parameters.
-    :param attn_type: indicates the attention type, e.g. "bilinear", "dot_product" or "none"
-    :param vector_dim: the vector to compute attention
-    :param matrix_dim: the bunch of vectors to be attended against (batch, num, matrix_dim)
-    :return: a torch.nn.Module
-    """
-
-    attn_type = attn_type.lower()
-    if attn_type in ("bilinear", "dot_product"):
-        attn_type = 'adaptive_' + attn_type
-
-    if attn_type == "generalized_bilinear":
-        from .adaptive_attention import GeneralizedBilinearAttention
-        from torch import nn
-        use_linear = kwargs.get('use_linear', True)
-        use_bias = kwargs.get('use_bias', True)
-        use_argmax = kwargs.get('use_argmax', False)
-        activation = nn.Tanh() if kwargs.get('use_tanh_activation', False) else None
-        attn = GeneralizedBilinearAttention(matrix_dim, vector_dim,
-                                            activation=activation,
-                                            use_linear=use_linear,
-                                            use_bias=use_bias,
-                                            eval_top1_ctx=use_argmax,
-                                            )
-
-    elif attn_type == "generalized_dot_product":
-        from .adaptive_attention import GeneralizedDotProductAttention
-        attn = GeneralizedDotProductAttention()
-
-    elif attn_type == 'adaptive_dot_product':
-        from allennlp.modules.matrix_attention import DotProductMatrixAttention
-        attn = AdaptiveGeneralAttention(AdaptiveAllenLogits(DotProductMatrixAttention()))
-
-    elif attn_type == 'adaptive_bilinear':
-        from allennlp.modules.matrix_attention import BilinearMatrixAttention
-        attn = AdaptiveGeneralAttention(AdaptiveAllenLogits(BilinearMatrixAttention(vector_dim, matrix_dim)))
-
-    elif attn_type == 'adaptive_mha':
-        from allennlp.modules.matrix_attention import DotProductMatrixAttention
-        num_heads = kwargs.get('num_heads', 8)
-        attn = AdaptiveGeneralAttention(
-            AdaptiveAllenLogits(DotProductMatrixAttention()),
-            init_tau=(vector_dim // num_heads) ** 0.5,
-            num_heads=num_heads,
-            pre_q_mapping=torch.nn.Linear(vector_dim, matrix_dim),
-            pre_k_mapping=torch.nn.Linear(matrix_dim, matrix_dim),
-            pre_v_mapping=torch.nn.Linear(matrix_dim, matrix_dim),
-            post_ctx_mapping=torch.nn.Linear(matrix_dim, matrix_dim),
-        )
-
-    elif attn_type == "none":
-        attn = None
-
-    else:
-        raise NotImplementedError
-
-    return attn
 

@@ -1,11 +1,7 @@
 from collections import defaultdict
-from functools import partial
 import torch.nn
-import pickle
 import sys
-import os
 import os.path as osp
-import logging
 from tqdm import tqdm
 from trialbot.utils.move_to_device import move_to_device
 from trialbot.training import TrialBot, Registry, Events
@@ -24,8 +20,6 @@ shujuji.cfq.install_cfq_to_trialbot()
 import shujuji.cg_bundle as cg_bundle
 cg_bundle.install_parsed_qa_datasets(Registry._datasets)
 import shujuji.cg_bundle_translator as sql_translator
-
-import s2pda_hparams
 
 
 def get_tutor_from_train_set(vocab, train_set, dataset_name: str):
@@ -143,8 +137,8 @@ def get_model(p, vocab: NSVocabulary):
     from models.neural_pda.seq2pda import Seq2PDA
     from models.neural_pda.npda import NeuralPDA
     from models.base_s2s.encoder_stacker import EncoderStacker
-    from models.modules.attention import get_attention
-    from models.base_s2s.stacked_rnn_cell import StackedRNNCell, StackedLSTMCell
+    from models.modules.attentions import get_attention
+    from models.base_s2s.stacked_rnn_cell import StackedLSTMCell
     from models.modules.container import MultiInputsSequential, UnpackedInputsSequential, SelectArgsById
     from allennlp.nn.activations import Activation
 

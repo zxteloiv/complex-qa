@@ -1,9 +1,8 @@
 # Reinforced Seq-to-Grammar-Derivation
 from typing import Optional
-import os, os.path as osp
+import os.path as osp
 import logging
 import sys
-import math
 from random import random
 from copy import deepcopy
 from datetime import datetime as dt
@@ -21,7 +20,7 @@ from allennlp.modules.seq2seq_encoders import LstmSeq2SeqEncoder
 from allennlp.training.metrics.perplexity import Average
 from models.neural_pda.tree_action_policy import TreeActionPolicy
 from models.base_s2s.encoder_stacker import EncoderStacker
-from models.modules.attention_composer import get_attn_composer
+from models.modules.attentions import get_attn_composer
 from models.neural_pda.seq2pda import Seq2PDA
 from models.neural_pda import partial_tree_encoder as partial_tree
 from models.modules.decomposed_bilinear import DecomposedBilinear
@@ -34,7 +33,7 @@ from trialbot.data import NSVocabulary
 import shujuji.cg_bundle as cg_bundle
 cg_bundle.install_parsed_qa_datasets(Registry._datasets)
 
-from utils.trialbot.extensions import print_hyperparameters, get_metrics, print_models, print_snaptshot_path
+from utils.trialbot.extensions import print_hyperparameters, print_models, print_snaptshot_path
 from utils.trialbot.extensions import save_multiple_models_per_epoch
 from utils.trialbot.extensions import end_with_nan_loss
 from utils.trialbot.extensions import collect_garbage

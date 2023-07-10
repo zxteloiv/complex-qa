@@ -1,5 +1,4 @@
 import logging
-import numpy as np
 import torch
 from torch import nn
 from trialbot.data.ns_vocabulary import NSVocabulary
@@ -9,12 +8,9 @@ from .base_seq2seq import BaseSeq2Seq
 from .syngraph2seq import SynGraph2Seq
 from .encoder_stacker import EncoderStacker, ExtLSTM
 from models.transformer.encoder import TransformerEncoder
-from ..modules.attention import get_attention
-from ..modules.attention_composer import get_attn_composer
+from ..modules.attentions import get_attn_composer, get_attention
 from .stacked_rnn_cell import StackedRNNCell
 import os.path as osp
-
-from ..modules.variational_dropout import VariationalDropout
 
 
 class EmbeddingMxin:
