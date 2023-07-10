@@ -25,14 +25,13 @@ class CellEncoder(Encoder):
         out = sorted_out.index_select(0, restoration_indices)
         return out
 
-    def forward_tensor_seq(self, inputs, mask, hx: Any = None) -> torch.Tensor:
+    def forward_tensor_seq(self, inputs: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
         """
         :param seq: (batch, seq_len, input_dim)
         :param mask: (batch, seq_len), not required for non-bidirectional cells
-        :param hx: Any
         :return: (batch, seq_len, hid [*2])
         """
-        forward_out = self._forward_seq(inputs, hx)
+        forward_out = self._forward_seq(inputs, None)
         if not self.is_bidirectional():
             return forward_out
 
@@ -40,7 +39,7 @@ class CellEncoder(Encoder):
         # 1) the init hx is the same as the forward pass, because the hx is supposed to enrich the sequence embedding
         # 2) the mask will not get processed explicitly due to the different behavior within the batch, in practice,
         #    the hx will be always 0 if the padding idx is set properly in the nn.Embedding objects
-        back_out = self._forward_seq(inputs, hx, is_reversed=True)
+        back_out = self._forward_seq(inputs, None, is_reversed=True)
         # forward_out, back_out: (batch, len, hid)
         # bi_out: (batch, len, hid * 2)
         bi_out = torch.cat([forward_out, back_out], dim=-1)

@@ -19,7 +19,7 @@ class Encoder(_EncoderBase, ABC):
     """
     An encoder accepts an embedding tensor and outputs another tensor
     """
-    def forward(self, inputs, mask) -> torch.Tensor:
+    def forward(self, inputs: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
         """returns the output at all timesteps"""
         raise NotImplementedError
 
@@ -61,5 +61,5 @@ class EmbedAndEncode(torch.nn.Module, ABC):
 
 
 class EmbedAndGraphEncode(EmbedAndEncode, ABC):
-    def set_graph(self, graph):
+    def set_graph(self, graph: torch.Tensor):
         raise NotImplementedError
