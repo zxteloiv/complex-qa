@@ -2,7 +2,7 @@ import torch
 from torch import nn
 
 from models.base_s2s.model_factory import EncoderStackMixin
-from models.base_s2s.stacked_rnn_cell import StackedRNNCell
+from models.base_s2s.rnn_stacker import RNNCellStacker
 from models.modules.variational_dropout import VariationalDropout as VDrop, VariationalDropout
 from models.modules.attentions.adaptive_attention import AdaptiveGeneralAttention, AdaptiveAllenLogits
 from allennlp.modules.matrix_attention import MatrixAttention
@@ -139,8 +139,8 @@ class SquallBaseBuilder(EncoderStackMixin):
                 nn.Mish(),
                 nn.Linear(hid_sz // 2, hid_sz),
             ),
-            decoder=StackedRNNCell(
-                self.get_stacked_rnns(p.decoder, hid_sz, hid_sz, p.num_dec_layers, dropout),
+            decoder=RNNCellStacker(
+                self.get_rnn_list(p.decoder, hid_sz, hid_sz, p.num_dec_layers, dropout),
                 dropout=dropout,    # vertical dropout between cell layers
             ),
             sql_word_attn=self.get_mha(hid_sz, hid_sz, is_sparse=p.is_sparse),

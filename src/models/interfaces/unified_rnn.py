@@ -34,7 +34,10 @@ class UnifiedRNN(_RNNBase, ABC):
 
 
 class RNNStack(_RNNBase, ABC):
-    def forward(self, inputs: torch.Tensor, hidden: list[T_HIDDEN] | None) -> tuple[T_HIDDEN, torch.Tensor]:
+    def forward(self,
+                inputs: torch.Tensor,
+                hidden: list[T_HIDDEN] | None
+                ) -> tuple[list[T_HIDDEN], torch.Tensor]:
         # at least the hidden is a list indicating layers
         raise NotImplementedError
 

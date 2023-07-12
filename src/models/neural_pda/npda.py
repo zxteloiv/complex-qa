@@ -5,7 +5,7 @@ from torch.nn import functional as F
 
 from allennlp.nn.util import masked_softmax
 from models.modules.batched_stack import TensorBatchStack
-from models.base_s2s.stacked_rnn_cell import StackedRNNCell
+from models.base_s2s.rnn_stacker import RNNCellStacker
 from utils.seq_collector import SeqCollector
 from .partial_tree_encoder import TopDownTreeEncoder
 from .tree import Tree
@@ -23,7 +23,7 @@ class NeuralPDA(nn.Module):
                  lhs_symbol_mapper,
 
                  grammar_tutor,
-                 rhs_expander: StackedRNNCell,
+                 rhs_expander: RNNCellStacker,
 
                  tree_encoder: TopDownTreeEncoder,
                  tree_self_attn: nn.Module,

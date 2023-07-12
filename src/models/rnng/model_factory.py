@@ -4,7 +4,7 @@ from trialbot.data import NSVocabulary, START_SYMBOL
 from models.base_s2s.model_factory import WordProjMixin, EncoderStackMixin, EmbEncBundleMixin, EmbeddingMxin
 from .seq2rnng import Seq2RNNG
 from .rnng import RNNG
-from ..base_s2s.stacked_rnn_cell import StackedRNNCell
+from ..base_s2s.rnn_stacker import RNNCellStacker
 from ..modules.attentions import get_attn_composer, get_attention
 from .rnng_utils import get_target_num_embeddings, get_terminal_boundary, token_to_id
 
@@ -61,10 +61,10 @@ class RNNGBuilder(EmbeddingMxin,
         assert vocab.get_vocab_size(p.root_ns) == 1, 'root token must be unique'
         grammar_entry_str = list(vocab.get_token_to_index_vocabulary(p.root_ns).keys())[0]
         rnng = RNNG(
-            action_encoder=StackedRNNCell(self.get_stacked_rnns(
+            action_encoder=RNNCellStacker(self.get_rnn_list(
                 'lstm', hid_sz, hid_sz, 1, dec_dropout,
             )),
-            buffer_encoder=StackedRNNCell(self.get_stacked_rnns(
+            buffer_encoder=RNNCellStacker(self.get_rnn_list(
                 'lstm', hid_sz, hid_sz, 1, dec_dropout,
             )),
             stack_encoder=self.get_stacked_rnn_encoder('lstm', hid_sz, hid_sz, 1, dec_dropout),

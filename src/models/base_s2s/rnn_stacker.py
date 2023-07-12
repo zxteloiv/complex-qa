@@ -5,9 +5,9 @@ from models.interfaces.unified_rnn import UnifiedRNN, RNNStack, T_HIDDEN
 from ..modules.variational_dropout import VariationalDropout
 
 
-class StackedRNNCell(RNNStack):
+class RNNCellStacker(RNNStack):
     def __init__(self, rnns: list[UnifiedRNN], dropout: float = 0.):
-        super(StackedRNNCell, self).__init__()
+        super(RNNCellStacker, self).__init__()
         self._input_dropouts = torch.nn.ModuleList([VariationalDropout(dropout, on_the_fly=False)
                                                     for _ in range(len(rnns) - 1)])
         self.layer_rnns = torch.nn.ModuleList(rnns)
@@ -29,7 +29,7 @@ class StackedRNNCell(RNNStack):
             if isinstance(m, VariationalDropout):
                 m.reset()
 
-    def forward(self, inputs, hidden):
+    def forward(self, inputs, hidden) -> tuple[list[T_HIDDEN], torch.Tensor]:
         last_layer_output = inputs
         updated_hiddens = []
         for i, rnn in enumerate(self.layer_rnns):
@@ -68,18 +68,20 @@ class StackedRNNCell(RNNStack):
         return hiddens
 
 
-class StackedLSTMCell(StackedRNNCell):
-    def __init__(self, input_dim, hidden_dim, n_layers, dropout=0.):
+class StackedLSTMCell(RNNCellStacker):
+    def __init__(self, input_dim: int, hidden_dim: int, n_layers: int, dropout: float = 0.):
         super().__init__([
-            HSWrapper(torch.nn.LSTMCell(input_dim if floor == 0 else hidden_dim, hidden_dim))
+            HSWrapper(torch.nn.LSTMCell(input_dim if floor == 0 else hidden_dim, hidden_dim),
+                      VariationalDropout(dropout))
             for floor in range(n_layers)
         ], dropout)
 
 
-class StackedGRUCell(StackedRNNCell):
-    def __init__(self, input_dim, hidden_dim, n_layers, dropout=0.):
+class StackedGRUCell(RNNCellStacker):
+    def __init__(self, input_dim: int, hidden_dim: int, n_layers: int, dropout: float = 0.):
         super().__init__([
-            HSWrapper(torch.nn.GRUCell(input_dim if floor == 0 else hidden_dim, hidden_dim))
+            HSWrapper(torch.nn.GRUCell(input_dim if floor == 0 else hidden_dim, hidden_dim),
+                      VariationalDropout(dropout))
             for floor in range(n_layers)
         ], dropout)
 

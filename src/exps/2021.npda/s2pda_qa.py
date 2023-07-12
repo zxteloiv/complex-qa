@@ -138,7 +138,7 @@ def get_model(p, vocab: NSVocabulary):
     from models.neural_pda.npda import NeuralPDA
     from models.base_s2s.encoder_stacker import EncoderStacker
     from models.modules.attentions import get_attention
-    from models.base_s2s.stacked_rnn_cell import StackedLSTMCell
+    from models.base_s2s.rnn_stacker import StackedLSTMCell
     from models.modules.container import MultiInputsSequential, UnpackedInputsSequential, SelectArgsById
     from allennlp.nn.activations import Activation
 

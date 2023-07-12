@@ -9,7 +9,7 @@ from .syngraph2seq import SynGraph2Seq
 from .encoder_stacker import EncoderStacker, ExtLSTM
 from models.transformer.encoder import TransformerEncoder
 from ..modules.attentions import get_attn_composer, get_attention
-from .stacked_rnn_cell import StackedRNNCell
+from .rnn_stacker import RNNCellStacker
 import os.path as osp
 import numpy
 import tqdm
@@ -141,10 +141,10 @@ class EmbeddingMxin:
 
 class RNNListMixin:
     @staticmethod
-    def get_stacked_rnns(cell_type: str, inp_sz: int, hid_sz: int, num_layers: int,
-                         h_dropout: float, onlstm_chunk_sz: int = 10,
-                         bidirectional: bool = False,
-                         ) -> list[UnifiedRNN]:
+    def get_rnn_list(cell_type: str, inp_sz: int, hid_sz: int, num_layers: int,
+                     h_dropout: float, onlstm_chunk_sz: int = 10,
+                     bidirectional: bool = False,
+                     ) -> list[UnifiedRNN]:
         from ..modules.torch_rnn_wrapper import TorchRNNWrapper as RNNWrapper
         from ..modules.variational_dropout import VariationalDropout
 
@@ -258,8 +258,8 @@ class EncoderStackMixin(RNNListMixin):
     @classmethod
     def get_stacked_cell_encoder(cls, enc_type, inp_sz, hid_sz, num_layers, dropout,
                                  use_bid=False, use_pseq=False) -> StackEncoder:
-        rnns = cls.get_stacked_rnns(enc_type, inp_sz, hid_sz, num_layers, dropout)
-        b_rnns = cls.get_stacked_rnns(enc_type, inp_sz, hid_sz, num_layers, dropout)
+        rnns = cls.get_rnn_list(enc_type, inp_sz, hid_sz, num_layers, dropout)
+        b_rnns = cls.get_rnn_list(enc_type, inp_sz, hid_sz, num_layers, dropout)
         from .cell_encoder import CellEncoder
         return EncoderStacker([CellEncoder(rnn, brnn, use_pseq)
                                if use_bid else
@@ -526,8 +526,8 @@ class Seq2SeqBuilder(EmbeddingMxin,
 
         dec_dropout = getattr(p, 'dec_dropout', getattr(p, 'dropout', 0.))
 
-        rnns = self.get_stacked_rnns(p.decoder, dec_in_dim, dec_out_dim, p.num_dec_layers, dec_dropout)
-        decoder = StackedRNNCell(rnns, dec_dropout)
+        rnns = self.get_rnn_list(p.decoder, dec_in_dim, dec_out_dim, p.num_dec_layers, dec_dropout)
+        decoder = RNNCellStacker(rnns, dec_dropout)
 
         word_proj = self.get_word_projection(proj_in_dim, target_embedding)
 
