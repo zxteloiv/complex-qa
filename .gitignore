@@ -28,3 +28,4 @@ src/exps/*/run-bak/
 exps/*/run/
 exps/*/run-bak/
 
+*.uml
