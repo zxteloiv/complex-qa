@@ -1,3 +1,5 @@
+import logging
+
 import torch.nn.functional as F
 import torch.nn as nn
 import torch
@@ -44,9 +46,9 @@ class ONLSTMCell(UnifiedRNN):
 
     def forward(self, inputs, hidden):
         if hidden is None:
-            (hx, cx, _, _) = self.init_hidden_states(inputs.new_zeros((inputs.size()[0], self.hidden_size)))
-        else:
-            hx, cx, _, _ = hidden  # distances is not required for recurrent computations, but only for explanation
+            hidden = self.init_hidden_states(inputs.new_zeros((inputs.size()[0], self.hidden_size)))
+
+        hx, cx = hidden[:2]  # distances is not required for recurrent computations, but only for explanation
         n_chunk, chunk_sz = self.n_chunk, self.chunk_size
 
         gates = self.ih(inputs) + self.hh(self.h_dropout(hx))
@@ -73,7 +75,7 @@ class ONLSTMCell(UnifiedRNN):
         cy = forgetgate * cx + ingate * cell
 
         hy = outgate * torch.tanh(cy)
-        hidden = hy.view(-1, self.hidden_size), cy, distance_cforget, distance_cin
+        hidden = hy.view(-1, self.hidden_size), cy, distance_cforget, distance_cin, cforgetgate.squeeze(-1)
         return hidden, hidden[0]
 
     def init_hidden_states(self, forward_out: torch.Tensor):
