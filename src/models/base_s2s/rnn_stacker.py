@@ -54,14 +54,6 @@ class RNNCellStacker(RNNStack):
 
         return layered_output
 
-    def merge_hidden_list(self, hidden_list, weight):
-        # hidden_list: [hidden_1, ..., hidden_T] along timestep
-        # hidden: (layer_hidden_1, ..., layer_hidden_L) along layers
-        layered_list = zip(*hidden_list)
-        merged = [self.layer_rnns[i].merge_hidden_list(layer_hidden, weight)
-                  for i, layer_hidden in enumerate(layered_list) ]
-        return merged
-
     def init_hidden_states(self, layer_hidden: list[torch.Tensor]):
         assert len(layer_hidden) == self.get_layer_num()
         hiddens = [rnn.init_hidden_states(init_hidden) for rnn, init_hidden in zip(self.layer_rnns, layer_hidden)]
@@ -106,12 +98,3 @@ if __name__ == '__main__':
         assert o.size() == (batch, L)
         assert len(h) == L
         hs.append(h)
-
-    weight: torch.Tensor = torch.randn(batch, T)
-    weight = torch.nn.Softmax(dim=1)(weight)
-
-    mh = cell.merge_hidden_list(hs, weight)
-
-
-
-
