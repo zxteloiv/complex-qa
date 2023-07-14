@@ -1,6 +1,8 @@
 # A tree prior aims to incorporate our general (but not exact) knowledge about tree grammars.
 #
 import logging
+import math
+
 import trialbot.utils.prepend_pythonpath    # noqa
 from operator import itemgetter
 from typing import Any, Callable, cast
@@ -12,7 +14,7 @@ from trialbot.data import RandomIterator
 from trialbot.utils.root_finder import find_root
 from statistics import fmean, stdev
 import os.path as osp
-from trialbot.training import TrialBot, Updater
+from trialbot.training import TrialBot, Updater, Events
 from trialbot.training import Registry
 from trialbot.training.hparamset import HyperParamSet
 from transformers import AutoModel, AutoModelForCausalLM, AutoTokenizer
@@ -43,6 +45,14 @@ def main():
     bot = TrialBot(args=args, trial_name='tree_prior', get_model_func=TreeInducer.new)
     bot = setup_bot(bot, True, False, False, False, True, True)
     bot.updater = PolicyUpdater.from_bot(bot)
+
+    @bot.attach_extension(Events.EPOCH_COMPLETED)
+    def run_eval(bot: TrialBot):
+        if bot.state.iteration % 100 == 0:
+            updater = cast(PolicyUpdater, bot.updater)
+            metric = updater.eval()
+            bot.logger.info(f'Eval on dev got the metric {metric}.')
+
     bot.run()
 
 
@@ -50,7 +60,7 @@ def install_hparams():
     @Registry.hparamset('base-prior')
     def base():
         p = HyperParamSet.common_settings(find_root())
-        p.TRAINING_LIMIT = 100
+        p.TRAINING_LIMIT = 1
         p.GRAD_CLIPPING = 2
         p.batch_sz = 16
         p.llm_path = osp.expanduser('~/.glm/chatglm-6b')
@@ -58,7 +68,7 @@ def install_hparams():
         p.hid_sz = 1024
         p.chunk_sz = 32
         p.dropout = .01
-        p.num_tree_sampling = 10
+        p.num_tree_sampling = 5
         return p
 
 
@@ -66,9 +76,7 @@ class TreeInducer(RNNCellStacker):
     """The tree inducer subtyping an RNN stack of ON-LSTM cells
     extending the method to infer trees based on the ON-LSTM internals."""
     @classmethod
-    def new(cls, p: trialbot.training.hparamset.HyperParamSet,
-            vocab: trialbot.data.NSVocabulary) -> 'TreeInducer':
-        # although we use
+    def new(cls, p: trialbot.training.hparamset.HyperParamSet, vocab: trialbot.data.NSVocabulary) -> 'TreeInducer':
         return cls([
             ONLSTMCell(p.llm_hid_sz, p.hid_sz, p.chunk_sz, VD(p.dropout, on_the_fly=False)),
         ])
@@ -181,7 +189,8 @@ class TreeInducer(RNNCellStacker):
 
 
 class PriorAgent:
-    """An entity that knows how to use the tree inducer model"""
+    """An entity that knows how to use the tree inducer model.
+    But it must not be interwoven with training procedure."""
     def __init__(self, inducer: TreeInducer, llm_path: str, device: int, n_tree_samples: int = 1):
         llm_path = osp.expanduser(llm_path)
         self.tok = AutoTokenizer.from_pretrained(llm_path, trust_remote_code=True)
@@ -260,8 +269,11 @@ class PriorAgent:
         Therefore, the moving metric between X and Y rvs is actually
         the mean of cost to transport every single (X, Y) pair.
         """
-        train_losses = [self.single_example(sample) for sample in train_samples]
-        test_losses = [self.single_example(sample) for sample in test_samples]
+        def _rl(ts: tuple[T, T]) -> T:  # reward x log-prob, both of (#tree,)
+            return (ts[0] * ts[1]).mean()   # all tree averaged
+
+        train_losses = [_rl(self.single_example(sample)) for sample in train_samples]
+        test_losses = [_rl(self.single_example(sample)) for sample in test_samples]
 
         # this mean is just a quick evaluation for {x} and {y} because they're parallel
         mm_train = sum(train_losses) / len(train_losses)
@@ -271,10 +283,10 @@ class PriorAgent:
         rl_loss = (mm_train - mm_test).abs()
         return rl_loss
 
-    def single_example(self, sample: dict[str, Any]) -> T:
+    def single_example(self, sample: dict[str, Any], n_trees: int | None = None) -> tuple[T, T]:
         y_emb = sample['y_emb']
         logp_df, term_embs = self.inducer.get_tree_dist(y_emb, self.get_mask(sample['y_id']))
-        trees, trees_logp = self.inducer.infer_trees(logp_df, self.n_trees)
+        trees, trees_logp = self.inducer.infer_trees(logp_df, self.n_trees if n_trees is None else n_trees)
 
         sx_emb = sample['sx_emb']
         dists: list[T] = []
@@ -285,101 +297,8 @@ class PriorAgent:
             moving_dist = ot.emd2(null_t, null_t, dist).detach()
             dists.append(moving_dist)
 
-        trees_dist = torch.stack(dists) # (#trees,)
-        return (trees_dist * trees_logp).mean()
-
-
-class TreeSampler:
-    @staticmethod
-    def bernoulli_samples(span_prob) -> T:
-        be_terms = span_prob.bernoulli()  # (span_length,)
-        i = 0
-        while be_terms.sum() < 1:
-            del be_terms
-            i += .1
-            be_terms = (span_prob + i).clamp(max=.99).bernoulli()  # (span_length,)
-        return be_terms
-
-    @staticmethod
-    def bounded_terms(span_prob: T, num_max_terms: int = 3) -> T:
-        """
-        :param span_prob: (span_length,), values are [0, 1)
-        :param num_max_terms:
-        :return: (span_length,)
-        """
-        k = min(num_max_terms, len(span_prob) // 3)
-        _, locations = torch.topk(span_prob, k, sorted=False)  # (k,)
-        output = torch.zeros_like(span_prob)
-        output[locations] = 1
-        return output
-
-    def __init__(self, fn_get_terms: Callable = None, nt_label: str = 'nt'):
-        """
-        :param fn_get_terms: a callable function that reads span probabilities,
-                    and produce an 1D binary vector of the span length,
-                    indicating the token is a direct terminal (flag=1)
-                    or contained in the subtree (flag=0)
-        :param nt_label:
-        """
-        self.get_terms = fn_get_terms if fn_get_terms is not None else self.bernoulli_samples
-        self.nt_label = nt_label
-
-    def sample(self, terms, probs,
-               span_begin: int = None,
-               span_end: int = None,
-               ) -> tuple[T, Tree]:
-        """
-        :param probs:  (num_toks,)
-        :param terms:   [str(id) of terms] len=num_toks
-        :param span_begin: start of span for a tree
-        :param span_end: end of span for a tree, not included
-        :return: tuple of (tree_logp, tree)
-        """
-        span_begin = 0 if span_begin is None else span_begin
-        span_end = len(terms) if span_end is None else span_end
-
-        length = span_end - span_begin
-        if length <= 3:
-            return math.log(2), Tree(self.nt_label, children=[ # noqa
-                Tree(terms[span_begin + i], is_terminal=True) for i in range(length)
-            ])
-
-        span_p = probs[span_begin:span_end]
-        be_terms = self.get_terms(span_p)
-        be_terms[0] = 1     # force no left-recursion
-
-        level_logp = (be_terms * (span_p + 1).log() + (1 - be_terms) * (2 - span_p).log()).sum()
-        terminal_locs = torch.argwhere(be_terms).squeeze(-1) + span_begin  # (num_immediate_children,)
-        del be_terms
-
-        sub_logp = []
-        children = []
-        for i, loc in enumerate(terminal_locs):     # iterate over only terminals
-            # consider possible subtrees / nonterminals before the current terminal
-            if i == 0 and loc > span_begin:
-                # there's a subtree before the first terminal
-                subtree_logp, subtree = self.sample(terms, probs, span_begin, loc)
-                sub_logp.append(subtree_logp)
-                children.append(subtree)
-
-            elif loc > terminal_locs[i - 1] + 1:
-                # a subtree between last and this terminals
-                subtree_logp, subtree = self.sample(terms, probs, terminal_locs[i - 1] + 1, loc)
-                sub_logp.append(subtree_logp)
-                children.append(subtree)
-
-            tree = Tree(terms[loc], is_terminal=True)
-            children.append(tree)
-
-            # a subtree after the last terminal, add it before ending the loop
-            if i == len(terminal_locs) - 1 and loc < span_end - 1:
-                subtree_logp, subtree = self.sample(terms, probs, loc + 1, span_end)
-                sub_logp.append(subtree_logp)
-                children.append(subtree)
-
-        tree_logp = level_logp + sum(sub_logp, 0)
-        tree = Tree(self.nt_label, children=children)
-        return tree_logp, tree
+        trees_dist = torch.stack(dists)
+        return trees_dist, trees_logp   # both of (#trees,)
 
 
 class PolicyUpdater(Updater):
@@ -420,12 +339,38 @@ class PolicyUpdater(Updater):
         optim.step()
         return {'loss': loss}
 
-    def get_samples(self, dataset, iterator):
+    def get_samples(self, dataset, iterator) -> tuple[list[Any], list[Any]]:
         indices = next(iterator)
         translator = self.bot.translator
-        samples: dict[str, Any] = translator.batch_tensor([translator.to_tensor(dataset[i])
-                                                           for i in indices])
+        samples: dict[str, list[Any]] = translator.batch_tensor([translator.to_tensor(dataset[i]) for i in indices])
         return itemgetter(*self.key_pair)(samples)
+
+    def eval(self) -> float:
+        """Provide the evaluation metric (the defined moving metric) instead of RL loss."""
+        p = self.bot.hparams
+        ds = self.bot.datasets
+        ris = [RandomIterator(len(d), p.batch_sz) for d in ds]
+
+        T_X = T_Y = list[str]
+        T_DATA = tuple[T_X, T_Y]
+        T_TURN = tuple[T_DATA, T_DATA]  # train and test data
+        multiturn_data: list[T_TURN] = []
+        n_turns = math.ceil(50 / p.batch_sz)
+        for turn in range(n_turns):
+            train = self.get_samples(ds[0], ris[0])
+            test = self.get_samples(ds[1], ris[1])  # in fact using the dev
+            multiturn_data.append((train, test))
+
+        mm_train, mm_test = [], []
+        with torch.inference_mode():
+            for train, test in multiturn_data:
+                mm_train.append(fmean([self.agent.single_example(s)[0].mean().item()
+                                       for s in self.agent.embed_data(*train)]))    # metric of parallel training data
+                mm_test.append(fmean([self.agent.single_example(s)[0].mean().item()
+                                      for s in self.agent.embed_data(*test)]))      # metric of parallel testing data
+
+        metric = abs(fmean(mm_train) - fmean(mm_test)) / stdev(mm_train) / stdev(mm_test)
+        return metric
 
 
 if __name__ == "__main__":
