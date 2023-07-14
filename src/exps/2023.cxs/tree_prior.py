@@ -1,11 +1,11 @@
 # A tree prior aims to incorporate our general (but not exact) knowledge about tree grammars.
 #
-import logging
-import math
-
 import trialbot.utils.prepend_pythonpath    # noqa
+import logging
+import os
 from operator import itemgetter
 from typing import Any, Callable, cast
+import math
 
 import ot
 import torch
@@ -50,12 +50,20 @@ def main():
     bot._engine.remove_event_handler(loss_reporter, Events.ITERATION_COMPLETED)
     bot.add_event_handler(Events.ITERATION_COMPLETED, loss_reporter, 100, interval=1)
 
-    @bot.attach_extension(Events.EPOCH_COMPLETED)
+    @bot.attach_extension(Events.ITERATION_COMPLETED)
     def run_eval(bot: TrialBot):
-        if bot.state.iteration % 20 == 0:
+        if bot.state.iteration % 15 == 0:
             updater = cast(PolicyUpdater, bot.updater)
             metric = updater.eval()
             bot.logger.info(f'Eval on dev got the metric {metric}.')
+
+    @bot.attach_extension(Events.ITERATION_COMPLETED, 90)
+    def save_model(bot: TrialBot):
+        if bot.state.iteration % 15 == 0:
+            savedir, model = bot.savepath, bot.model
+            filename = osp.join(savedir, f"model_state_{bot.state.iteration}.th")
+            torch.save(model.state_dict(), filename)
+            bot.logger.info(f"model saved to {filename}")
 
     bot.run()
 
@@ -64,7 +72,7 @@ def install_hparams():
     @Registry.hparamset('base-prior')
     def base():
         p = HyperParamSet.common_settings(find_root())
-        p.TRAINING_LIMIT = 1
+        p.TRAINING_LIMIT = 4
         p.GRAD_CLIPPING = 2
         p.batch_sz = 16
         p.llm_path = osp.expanduser('~/.glm/chatglm-6b')
