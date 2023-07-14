@@ -5,6 +5,7 @@ import logging
 import os
 from operator import itemgetter
 from typing import Any, Callable, cast
+from collections.abc import Sequence
 import math
 
 import ot
@@ -99,9 +100,23 @@ class TreeInducer(RNNCellStacker):
         :param mask: (batch, seq_len)
         :return: tuple of [ (batch, #seq_len, #chunk) ], seq_len is not removed
         """
-        hx = None
+        hx: None | list[Sequence[T]] = None
         df_list: list[T] = []
         for step in range(emb.size(1)):
+            # since hx is a sequence of tensors, we apply each time the mask on it
+            if hx is not None and mask is not None:
+                step_mask = mask[:, step]
+                new_hx = []
+                for layer_hx in hx:
+                    new_layer: list[T] = []
+                    for h_var in layer_hx:
+                        if isinstance(h_var, T):
+                            m = step_mask.reshape(-1, *tuple([1,] * (h_var.ndim - step_mask.ndim)))
+                            h_var = h_var * m + torch.zeros_like(h_var) * m.logical_not()
+                            new_layer.append(h_var)
+                    new_hx.append(tuple(new_layer))
+                hx = new_hx
+
             hx, _ = self(emb[:, step], hx)  # (batch, emb) as inputs
             df_list.append(hx[0][-1])   # (batch, #chunk)
 
