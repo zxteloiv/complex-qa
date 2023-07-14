@@ -46,9 +46,13 @@ def main():
     bot = setup_bot(bot, True, False, False, False, True, True)
     bot.updater = PolicyUpdater.from_bot(bot)
 
+    from trialbot.training.extensions import loss_reporter
+    bot._engine.remove_event_handler(loss_reporter, Events.ITERATION_COMPLETED)
+    bot.add_event_handler(Events.ITERATION_COMPLETED, loss_reporter, 100, interval=1)
+
     @bot.attach_extension(Events.EPOCH_COMPLETED)
     def run_eval(bot: TrialBot):
-        if bot.state.iteration % 100 == 0:
+        if bot.state.iteration % 20 == 0:
             updater = cast(PolicyUpdater, bot.updater)
             metric = updater.eval()
             bot.logger.info(f'Eval on dev got the metric {metric}.')
