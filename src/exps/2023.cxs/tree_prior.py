@@ -19,7 +19,7 @@ from trialbot.training import Registry
 from trialbot.training.hparamset import HyperParamSet
 from transformers import AutoModel, AutoModelForCausalLM, AutoTokenizer
 from allennlp.common.util import int_to_device
-from allennlp.nn.util import masked_mean
+from allennlp.nn.util import masked_mean, masked_log_softmax
 
 from shujuji import install_semantic_parsing_datasets
 from utils.trialbot.dummy_translator import install_dummy_translator
@@ -74,7 +74,7 @@ def install_hparams():
         p = HyperParamSet.common_settings(find_root())
         p.TRAINING_LIMIT = 4
         p.GRAD_CLIPPING = 2
-        p.batch_sz = 16
+        p.batch_sz = 10
         p.llm_path = osp.expanduser('~/.glm/chatglm-6b')
         p.llm_hid_sz = 4096
         p.hid_sz = 1024
@@ -93,31 +93,21 @@ class TreeInducer(RNNCellStacker):
             ONLSTMCell(p.llm_hid_sz, p.hid_sz, p.chunk_sz, VD(p.dropout, on_the_fly=False)),
         ])
 
-    def get_tree_dist(self, emb: T, mask: T | None = None, ) -> tuple[T, T]:
+    def get_batch_tree_dist(self, emb: T, mask: T | None = None,) -> T:
         """
-        :param emb: (seq_len, emb)
-        :param mask: (seq_len,) or None
-        :return tuple of: tree log-prob, and terminal embeddings
-                  logp: (#nodes, #chunk)
-            embeddings: (#nodes, emb), the padded nodes are NOT included.
+        :param emb: (batch, seq_len, emb)
+        :param mask: (batch, seq_len)
+        :return: tuple of [ (batch, #seq_len, #chunk) ], seq_len is not removed
         """
-        hx: None | list[tuple[T, T, T, T, T]] = None
+        hx = None
         df_list: list[T] = []
-        term_embs = []
-        for step_in, step_mask in zip(emb, mask):
-            if step_mask > 0:   # assuming the non-padded tokens are consecutive
-                hx, _ = self(step_in[None, :], hx)
-                # df_logits: (batch_sz=1, n_chunk)
-                df_logits = hx[0][-1]  # we have only one cell in the rnn stack in fact.
-                df_list.append(df_logits)
-                term_embs.append(step_in)   # (emb,)
-                logging.debug(f'step: {step_in.size()}, df_logits: {df_logits.size()}')
+        for step in range(emb.size(1)):
+            hx, _ = self(emb[:, step], hx)  # (batch, emb) as inputs
+            df_list.append(hx[0][-1])   # (batch, #chunk)
 
-        dfs = torch.cat(df_list, dim=0)     # (#non-padded-nodes, #chunk)
-        term_emb = torch.stack(term_embs)   # (#non-padded-nodes, emb)
-        del term_embs
-        logp_df = torch.log_softmax(dfs, dim=-1)
-        return logp_df, term_emb
+        dfs = torch.stack(df_list, dim=1)   # (batch, #seq, #chunk)
+        logp_df = masked_log_softmax(dfs, mask.unsqueeze(-1), dim=-1)     # (batch, #seq, #chunk)
+        return logp_df
 
     def infer_trees(self, logp_df: T, n_sampled_trees: int = 1) -> tuple[list[Tree], T]:
         # logp_df: (#nodes, #chunk)
@@ -240,13 +230,35 @@ class PriorAgent:
     def embed_data(self, x_data: list[str], y_data: list[str]) -> list[dict[str, Any]]:
         list_of_dicts: list[dict[str, Any]] = []
 
-        for x, y in zip(x_data, y_data):
-            x_emb, x_id = self.embed(x)     # (num_toks, emb)
-            sx_emb = self.flat_tree_emb(x_emb, self.get_mask(x_id))
-            y_emb, y_id = self.embed(y)     # (num_toks, emb)
+        ys_emb, ys_id = self.embed(y_data)  # (batch, y-len, emb)
+        trees_dist = self.inducer.get_batch_tree_dist(ys_emb, self.get_mask(ys_id)) # (batch, y-len, #chunk)
+        xs_emb, xs_id = self.embed(x_data)  # (batch, x-len, emb)
+        xs_root_emb = masked_mean(xs_emb, self.get_mask(xs_id).unsqueeze(-1), dim=1, keepdim=True)  # (batch, 1, emb)
 
-            list_of_dicts.append(dict(x=x, x_id=x_id, x_emb=x_emb, sx_emb=sx_emb,
-                                      y=y, y_id=y_id, y_emb=y_emb))
+        def _mask_select_0(tensor: T, mask: T):
+            # tensor: (len, *), mask: (len,)
+            # returns: (#non-padded, *)
+            while mask.ndim < tensor.ndim:
+                mask = mask.unsqueeze(-1)
+            return torch.masked_select(tensor, mask).view(-1, *tensor.size()[1:])
+
+        # all available in batch, and enumerated one on one
+        for everything in zip(x_data, y_data, xs_emb, xs_id, ys_emb, ys_id, xs_root_emb, trees_dist):
+            sample = dict(zip(('x', 'y', 'x_emb', 'x_id', 'y_emb', 'y_id', 'x_root_emb', 'y_log_df'), everything))
+
+            # mask selecting the non-padded nodes
+            x_emb, x_mask, x_root = sample['x_emb'], self.get_mask(sample['x_id']), sample['x_root_emb']
+            x_nodes = _mask_select_0(x_emb, x_mask)     # (#non-padded, emb)
+            sx_emb = torch.cat([x_root, x_nodes], dim=0)
+            sample['sx_emb'] = sx_emb
+
+            # (y-len, emb), (y-len,), (y-len, #chunk)
+            y_emb, y_mask, y_log_df = sample['y_emb'], self.get_mask(sample['y_id']), sample['y_log_df']
+            sample['y_terms_emb'] = _mask_select_0(y_emb, y_mask)   # (#non-padded, emb)
+            sample['y_log_df'] = _mask_select_0(y_log_df, y_mask)   # (#non-padded, #chunk)
+
+            list_of_dicts.append(sample)
+
         return list_of_dicts
 
     def get_mask(self, x_id) -> torch.BoolTensor:
@@ -254,26 +266,6 @@ class PriorAgent:
             return x_id > 20004     # for ChatGLM only, the printable tokens start from 20005
 
         raise NotImplementedError
-
-    def flat_tree_emb(self, x_emb: T, x_mask: torch.BoolTensor | None = None) -> T:
-        """
-        :param x_emb: (seq, dim)
-        :param x_mask: (seq,), mask of 0 and 1 for the corresponding embeddings
-        :return: (#nodes, dim), padded nodes are excluded,
-                #nodes is #non_padded_nodes + 1 in this flat tree setting.
-        """
-        with torch.inference_mode():
-            if x_mask is None:
-                root = x_emb.mean(0, keepdim=True)  # (1, dim)
-                flat_emb = torch.cat([root, x_emb], dim=0)  # (seq+1, dim)
-            else:
-                x_mask = x_mask[:, None]
-                emb_sz = x_emb.size()[-1]
-                root = masked_mean(x_emb, x_mask, dim=0, keepdim=True)          # (1, dim)
-                nodes = torch.masked_select(x_emb, x_mask).view(-1, emb_sz)     # (#non-padded, dim)
-                flat_emb = torch.cat([root, nodes], dim=0)
-
-        return flat_emb.clone().detach_()
 
     def rl_loss(self, train_samples: list[dict[str, Any]], test_samples: list[dict[str, Any]]) -> T:
         """Compute the moving metric of X and Y random variables.
@@ -296,8 +288,7 @@ class PriorAgent:
         return rl_loss
 
     def single_example(self, sample: dict[str, Any], n_trees: int | None = None) -> tuple[T, T]:
-        y_emb = sample['y_emb']
-        logp_df, term_embs = self.inducer.get_tree_dist(y_emb, self.get_mask(sample['y_id']))
+        logp_df, term_embs = sample['y_log_df'], sample['y_terms_emb']  # (#nonpadded, #chunk / emb)
         trees, trees_logp = self.inducer.infer_trees(logp_df, self.n_trees if n_trees is None else n_trees)
 
         sx_emb = sample['sx_emb']
