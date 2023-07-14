@@ -1,5 +1,6 @@
 # A tree prior aims to incorporate our general (but not exact) knowledge about tree grammars.
 #
+import numpy as np
 import trialbot.utils.prepend_pythonpath    # noqa
 import logging
 import os
@@ -49,7 +50,19 @@ def main():
 
     from trialbot.training.extensions import loss_reporter
     bot._engine.remove_event_handler(loss_reporter, Events.ITERATION_COMPLETED)
-    bot.add_event_handler(Events.ITERATION_COMPLETED, loss_reporter, 100, interval=1)
+
+    @bot.attach_extension(Events.ITERATION_COMPLETED)
+    def output_reporter(bot: TrialBot):
+        output = bot.state.output
+        if output is None:
+            return
+
+        loss = output['loss'].item()
+        mm = output['metric']
+        bot.logger.info(f"Epoch: {bot.state.epoch}, "
+                        f"Iteration: {bot.state.iteration}, "
+                        f"Loss: {loss:.4f},"
+                        f"Metric: {mm:.4f}")
 
     @bot.attach_extension(Events.ITERATION_COMPLETED)
     def run_eval(bot: TrialBot):
@@ -282,7 +295,7 @@ class PriorAgent:
 
         raise NotImplementedError
 
-    def rl_loss(self, train_samples: list[dict[str, Any]], test_samples: list[dict[str, Any]]) -> T:
+    def rl_loss(self, train_samples: list[dict[str, Any]], test_samples: list[dict[str, Any]]) -> tuple[T, float]:
         """Compute the moving metric of X and Y random variables.
         Because Xs and Ys are parallel corpus, they have to be transported one on one.
         Therefore, the moving metric between X and Y rvs is actually
@@ -291,16 +304,20 @@ class PriorAgent:
         def _rl(ts: tuple[T, T]) -> T:  # reward x log-prob, both of (#tree,)
             return (ts[0] * ts[1]).mean()   # all tree averaged
 
-        train_losses = [_rl(self.single_example(sample)) for sample in train_samples]
-        test_losses = [_rl(self.single_example(sample)) for sample in test_samples]
+        train_res = [self.single_example(sample) for sample in train_samples]
+        test_res = [self.single_example(sample) for sample in test_samples]
 
         # this mean is just a quick evaluation for {x} and {y} because they're parallel
-        mm_train = sum(train_losses) / len(train_losses)
-        mm_test = sum(test_losses) / len(test_losses)
+        loss_train = sum(_rl(t) for t in train_res) / len(train_res)
+        loss_test = sum(_rl(t) for t in test_res) / len(test_res)
 
         # the lower discrepancy the better structure
-        rl_loss = (mm_train - mm_test).abs()
-        return rl_loss
+        rl_loss = (loss_train - loss_test).abs()
+
+        mm = ((sum(t[0].mean() for t in train_res) -
+               sum(t[0].mean() for t in test_res)).abs() / len(train_res)).item()
+
+        return rl_loss, mm
 
     def single_example(self, sample: dict[str, Any], n_trees: int | None = None) -> tuple[T, T]:
         logp_df, term_embs = sample['y_log_df'], sample['y_terms_emb']  # (#nonpadded, #chunk / emb)
@@ -348,14 +365,14 @@ class PolicyUpdater(Updater):
         embedded_train = self.agent.embed_data(*train_samples)
         embedded_test = self.agent.embed_data(*test_samples)
 
-        loss = self.agent.rl_loss(embedded_train, embedded_test)
+        loss, metric = self.agent.rl_loss(embedded_train, embedded_test)
         optim = self._optims[0]
         optim.zero_grad()
         loss.backward()
         if self.grad_clip > 0:
             torch.nn.utils.clip_grad_value_(self.bot.model.parameters(), self.grad_clip)
         optim.step()
-        return {'loss': loss}
+        return {'loss': loss, 'metric': metric}
 
     def get_samples(self, dataset, iterator) -> tuple[list[Any], list[Any]]:
         indices = next(iterator)
