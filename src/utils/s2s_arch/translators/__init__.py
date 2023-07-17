@@ -1,10 +1,10 @@
 from operator import itemgetter
 from typing import Dict, List, Tuple, Any, Optional
 from .s2s import Seq2SeqTranslator
-from .plm2s import PLM2SeqTranslator, PREPROCESS_HOOKS
-from .s2prod import Seq2ProdTranslator
+from .plm2s import PLM2SeqTranslator, PREPROCESS_HOOKS, AutoPLMField
+from .s2prod import Seq2ProdTranslator, TerminalRuleSeqField
 from .plm2prod import PLM2ProdTranslator
-from .syn2s import Syn2SeqTranslator
+from .syn2s import Syn2SeqTranslator, BeNeParField
 from .syn2prod import Syn2ProdTranslator
 
 
@@ -21,7 +21,7 @@ def install_general_translators(reg: dict = None):
     reg['syn2prod'] = Syn2ProdTranslator
 
 
-KWARGS_POOL = List[Tuple[str, Any]]
+KWARGS_POOL = list[tuple[str, Any]]
 
 TRANSLATOR_PARAMS = (
     'source_field', # 0
@@ -36,7 +36,7 @@ TRANSLATOR_PARAMS = (
     'benepar_model', # 9, same as default
 )
 
-TRANSLATOR_KWARGS_LOOKUP: Dict[str, List[int]] = {
+TRANSLATOR_KWARGS_LOOKUP: dict[str, list[int]] = {
     's2s': [0, 1, 2, 3, 4],
     'plm2s': [0, 1, 3, 4, 5, 6],
     's2prod': [0, 1, 2, 3, 4, 7],
@@ -72,7 +72,7 @@ def translator_kwargs_pool(source_field: str,
                            target_max_token: int = 0,
                            use_lower_case: bool = True,
                            auto_plm_name: str = 'bert-base-uncased',
-                           source_preprocess_hook: Optional[PREPROCESS_HOOKS] = None,
+                           source_preprocess_hook: PREPROCESS_HOOKS | None = None,
                            no_preterminals: bool = True,
                            spacy_model: str = 'en_core_web_md',
                            benepar_model: str = 'benepar_en3',

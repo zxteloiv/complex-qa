@@ -137,19 +137,13 @@ def masked_reducing_gather(source: torch.Tensor,
     weights = torch.ones_like(batch_reduction) if weights is None else sum_to_batch_size(weights)
 
     if reducing_method == 'batch':
-        per_batch_loss = batch_reduction / (weights + 1e-13)
+        per_batch_loss = batch_reduction / weights.clamp(min=1e-13)
         num_non_empty_sequences = ((weights > 0).float().sum() + 1e-13)
         return per_batch_loss.sum() / num_non_empty_sequences           # scalar
     elif reducing_method == "token":
-        return batch_reduction.sum() / (weights.sum().float() + 1e-13)  # scalar
+        return batch_reduction.sum() / weights.sum().float().clamp(min=1e-13)  # scalar
     else:
-        return batch_reduction / (weights + 1e-13)  # (batch,)
-
-
-def seq_likelihood(logits: torch.FloatTensor, targets: torch.LongTensor, weights: torch.FloatTensor):
-    probs = logits_to_prob(logits, log_transform='none')
-    ll = masked_reducing_gather(probs, targets, weights, reducing_method='none')
-    return ll
+        return batch_reduction / weights.clamp(min=1e-13)  # (batch,)
 
 
 def seq_cross_ent(logits: torch.FloatTensor,

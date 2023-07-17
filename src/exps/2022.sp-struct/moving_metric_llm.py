@@ -27,7 +27,7 @@ import ot
 
 from shujuji import install_semantic_parsing_datasets, get_field_names_by_prefix
 from utils.trialbot.setup_cli import setup as setup_cli, setup_null_argv
-from utils.s2s_arch.hparam_modifiers import param_overwriting_modifier, install_runtime_modifiers
+from utils.s2s_arch.hparam_modifiers import overwriting_mod_template, install_runtime_modifiers
 from utils.lark.id_tree import build_from_lark_tree
 from utils.tree import Tree, PreOrderTraverse, PostOrderTraverse
 
@@ -70,7 +70,7 @@ def main(args=None, llm=None, mm=None) -> Tuple['Embedder', 'MovingMetrics']:
 
     args = setup_cli(seed=2021, hparamset='mm-seq', device=0) if args is None else args
 
-    install_runtime_modifiers(args.hparamset, partial(param_overwriting_modifier, **dict(
+    install_runtime_modifiers(args.hparamset, partial(overwriting_mod_template, **dict(
       zip(('src_key', 'tgt_key'), get_field_names_by_prefix(args.dataset))
     )))
     train, dev, test = Registry.get_dataset(args.dataset)

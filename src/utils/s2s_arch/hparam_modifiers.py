@@ -1,9 +1,15 @@
+import logging
 from functools import wraps
-from typing import Callable, TypeVar, Dict, List, Any, Union, Collection
+from typing import Callable, TypeVar
+from collections.abc import Collection
 
 T = TypeVar('T')
 MODIFIER = Callable[[T], T]
-MOD_DICT = Dict[str, MODIFIER]
+MOD_DICT = dict[str, MODIFIER]
+
+# ==============
+# s2s arch useful modifiers
+# ==============
 
 
 def encoder_modifiers() -> MOD_DICT:
@@ -76,7 +82,7 @@ def encoder_modifiers() -> MOD_DICT:
         p.enc_out_dim = 200
         return p
 
-    encoders: Dict[str, MODIFIER] = {}
+    encoders: dict[str, MODIFIER] = {}
 
     def _add_encoder(func):
         encoders[func.__name__] = func
@@ -125,6 +131,22 @@ def decoder_modifiers() -> MOD_DICT:
     return decoders
 
 
+def install_s2s_hparamsets(base_func):
+    from trialbot.training import Registry
+    emods = encoder_modifiers()
+    dmods = decoder_modifiers()
+
+    from itertools import product
+    for (e, emod), (d, dmod) in product(emods.items(), dmods.items()):
+        hp_name = f'{e}2{d}'
+        Registry._hparamsets[hp_name] = decorate_with(emod, dmod)(base_func)
+
+
+# ==============
+# common modifier utilities
+# ==============
+
+
 def decorate_with(*mods):
     def decorator(f):
         @wraps(f)
@@ -138,20 +160,8 @@ def decorate_with(*mods):
     return decorator
 
 
-def install_hparamsets(base_func):
+def install_runtime_modifiers(hp_name: str, mod_or_mods: MODIFIER | Collection[MODIFIER]):
     from trialbot.training import Registry
-    emods = encoder_modifiers()
-    dmods = decoder_modifiers()
-
-    from itertools import product
-    for (e, emod), (d, dmod) in product(emods.items(), dmods.items()):
-        hp_name = f'{e}2{d}'
-        Registry._hparamsets[hp_name] = decorate_with(emod, dmod)(base_func)
-
-
-def install_runtime_modifiers(hp_name: str, mod_or_mods: Union[Collection[MODIFIER], MODIFIER]):
-    from trialbot.training import Registry
-    from collections.abc import Collection
     if not mod_or_mods:
         return
 
@@ -163,7 +173,20 @@ def install_runtime_modifiers(hp_name: str, mod_or_mods: Union[Collection[MODIFI
     Registry._hparamsets[hp_name] = decorate_with(*mods)(hp_func)
 
 
-def param_overwriting_modifier(p, **kwargs):
+def overwriting_mod_template(p, **kwargs):
     for k, v in kwargs.items():
         setattr(p, k, v)
     return p
+
+
+T_CONF = TypeVar('T_CONF')
+
+
+def hp_prefix_match(conf_by_prefix: dict[str, T_CONF], name: str) -> T_CONF:
+    for k, v in conf_by_prefix.items():
+        if name.startswith(k):
+            return v
+
+    logging.warning(f'Return empty conf because the specified {name} does '
+                    f' not match any prefixes in {conf_by_prefix.keys()}.')
+    return {}

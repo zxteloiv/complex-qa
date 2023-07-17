@@ -1,13 +1,10 @@
-import sys, logging
-from trialbot.utils.root_finder import find_root
-sys.path.insert(0, find_root('.SRC'))
-
+from trialbot.utils import prepend_pythonpath   # noqa
+import logging
 from typing import List
 
-from trialbot.training import Registry
 from functools import wraps
 from utils.s2s_arch.hparam_modifiers import (
-    MODIFIER, MOD_DICT, decorate_with, install_hparamsets, install_runtime_modifiers,
+    MODIFIER, MOD_DICT, install_s2s_hparamsets, install_runtime_modifiers,
 )
 from utils.s2s_arch.translators import (
     translator_kwargs_pool, get_translator_kwargs,
@@ -23,7 +20,7 @@ def main():
     from shujuji import install_semantic_parsing_datasets
     install_semantic_parsing_datasets()
     install_general_translators()
-    install_hparamsets(base_hparams)
+    install_s2s_hparamsets(base_hparams)
 
     args = setup_cli(seed=2021, device=-1)
     if not hasattr(args, 'translator') or not args.translator:
