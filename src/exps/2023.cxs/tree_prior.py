@@ -134,7 +134,7 @@ class TreeInducer(RNNCellStacker):
             df_list.append(hx[0][-1])   # (batch, #chunk)
 
         dfs = torch.stack(df_list, dim=1)   # (batch, #seq, #chunk)
-        logp_df = masked_log_softmax(dfs, mask.unsqueeze(-1), dim=-1)     # (batch, #seq, #chunk)
+        logp_df = dfs.log_softmax(dim=-1)   # mask will be applied on the seq dim, not the chunks
         return logp_df
 
     def infer_trees(self, logp_df: T, n_sampled_trees: int = 1) -> tuple[list[Tree], T]:
