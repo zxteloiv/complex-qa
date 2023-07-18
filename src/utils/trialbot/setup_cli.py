@@ -10,9 +10,10 @@ def augment_parser(parser: argparse.ArgumentParser):
     return parser
 
 
-def setup(**default_args):
+def setup(parser: None | argparse.ArgumentParser = None, **default_args):
     """
     parse the setup and set default function as a boilerplate.
+    :param parser: given an explicit parser prepared by the caller
     :param default_args: set args if not found from commandline (sys.argv)
     :return:
     """
@@ -23,20 +24,20 @@ def setup(**default_args):
         if argval is not None:
             defaults += [str(argval)]
 
-    parser = augment_parser(TrialBot.get_default_parser())
+    parser = augment_parser(TrialBot.get_default_parser() if parser is None else parser)
     args = parser.parse_args(defaults + argv)
     handle_common_args(args)
     return args
 
 
-def setup_null_argv(**kwargs):
+def setup_null_argv(parser: None | argparse.ArgumentParser = None, **kwargs):
     argv = []
     for k, v in kwargs.items():
         argv.append(f'--{k}')
         if v is not None:
             argv.append(f'{v}')
 
-    parser = augment_parser(TrialBot.get_default_parser())
+    parser = augment_parser(TrialBot.get_default_parser() if parser is None else parser)
     args = parser.parse_args(argv)
     handle_common_args(args)
     return args

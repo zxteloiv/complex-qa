@@ -528,7 +528,8 @@ class Seq2SeqBuilder(EmbeddingMixin,
 
         dec_dropout = getattr(p, 'dec_dropout', getattr(p, 'dropout', 0.))
 
-        rnns = self.get_rnn_list(p.decoder, dec_in_dim, dec_out_dim, p.num_dec_layers, dec_dropout)
+        rnns = self.get_rnn_list(p.decoder, dec_in_dim, dec_out_dim, p.num_dec_layers, dec_dropout,
+                                 getattr(p, 'dec_onlstm_chunk_sz', 10))
         decoder = RNNCellStacker(rnns, dec_dropout)
 
         word_proj = self.get_word_projection(proj_in_dim, target_embedding)

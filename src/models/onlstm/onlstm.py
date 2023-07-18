@@ -52,11 +52,11 @@ class ONLSTMCell(UnifiedRNN):
         n_chunk, chunk_sz = self.n_chunk, self.chunk_size
 
         gates = self.ih(inputs) + self.hh(self.h_dropout(hx))
-        cingate, cforgetgate = gates[:, :n_chunk * 2].chunk(2, 1)
+        cingate_logit, cforgetgate_logit = gates[:, :n_chunk * 2].chunk(2, 1)
         outgate, cell, ingate, forgetgate = gates[:, n_chunk * 2:].view(-1, n_chunk * 4, chunk_sz).chunk(4, 1)
 
-        cingate = 1. - cumsoftmax(cingate)
-        cforgetgate = cumsoftmax(cforgetgate)
+        cingate = 1. - cumsoftmax(cingate_logit)
+        cforgetgate = cumsoftmax(cforgetgate_logit)
 
         distance_cforget = 1. - cforgetgate.sum(dim=-1) / n_chunk
         distance_cin = cingate.sum(dim=-1) / n_chunk
@@ -75,7 +75,7 @@ class ONLSTMCell(UnifiedRNN):
         cy = forgetgate * cx + ingate * cell
 
         hy = outgate * torch.tanh(cy)
-        hidden = hy.view(-1, self.hidden_size), cy, distance_cforget, distance_cin, cforgetgate.squeeze(-1)
+        hidden = hy.view(-1, self.hidden_size), cy, distance_cforget, distance_cin, cforgetgate_logit
         return hidden, hidden[0]
 
     def init_hidden_states(self, forward_out: torch.Tensor):
