@@ -1,11 +1,11 @@
 
-from models.base_s2s.model_factory import EncoderStackMixin, EmbEncBundleMixin, EmbeddingMxin
+from models.base_s2s.model_factory import EncoderStackMixin, EmbEncBundleMixin, EmbeddingMixin
 from models.pcfg.C_PCFG import CompoundPCFG
 from models.pcfg.TN_PCFG import TNPCFG
 from models.pcfg.seq2pcfg import Seq2PCFG
 
 
-class Seq2PCFGBuilder(EmbeddingMxin,
+class Seq2PCFGBuilder(EmbeddingMixin,
                       EncoderStackMixin,
                       EmbEncBundleMixin,
                       ):

@@ -1,12 +1,12 @@
 from torch import nn
 from trialbot.data import NSVocabulary, START_SYMBOL, END_SYMBOL, PADDING_TOKEN
 
-from models.base_s2s.model_factory import WordProjMixin, EncoderStackMixin, EmbEncBundleMixin, EmbeddingMxin
+from models.base_s2s.model_factory import WordProjMixin, EncoderStackMixin, EmbEncBundleMixin, EmbeddingMixin
 from models.transformer.decoder import TransformerDecoder, UniversalTransformerDecoder
 from models.transformer.parallel_seq2seq import ParallelSeq2Seq
 
 
-class TransformerBuilder(EmbeddingMxin,
+class TransformerBuilder(EmbeddingMixin,
                          EncoderStackMixin,
                          EmbEncBundleMixin,
                          WordProjMixin,

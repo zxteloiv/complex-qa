@@ -18,7 +18,7 @@ import tqdm
 logger = logging.getLogger(__name__)
 
 
-class EmbeddingMxin:
+class EmbeddingMixin:
     def get_source_embedding(self):
         p, vocab = self.p, self.vocab
         if p.src_namespace is None:
@@ -417,7 +417,7 @@ class WordProjMixin:
         return word_proj
 
 
-class Seq2SeqBuilder(EmbeddingMxin,
+class Seq2SeqBuilder(EmbeddingMixin,
                      EncoderStackMixin,
                      EmbEncBundleMixin,
                      WordProjMixin,
@@ -488,7 +488,7 @@ class Seq2SeqBuilder(EmbeddingMxin,
         self.p = p
         self.vocab = vocab
 
-    def get_model(self) -> BaseSeq2Seq:
+    def get_model(self, cls=None) -> BaseSeq2Seq:
         from trialbot.data import START_SYMBOL, END_SYMBOL
 
         p, vocab = self.p, self.vocab
@@ -497,7 +497,9 @@ class Seq2SeqBuilder(EmbeddingMxin,
         source_embedding, target_embedding = self.get_embeddings()
         encoder = self.get_encoder_stack()
         embed_and_encoder = self.get_embed_encoder_bundle(source_embedding, encoder, padding_idx=0)
-        if isinstance(embed_and_encoder, EmbedAndGraphEncode):
+        if cls is not None:
+            cls = cls
+        elif isinstance(embed_and_encoder, EmbedAndGraphEncode):
             cls = SynGraph2Seq
         else:
             cls = BaseSeq2Seq

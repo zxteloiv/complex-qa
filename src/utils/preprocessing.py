@@ -1,5 +1,6 @@
 from collections import defaultdict
 
+
 def nested_list_numbers_to_tensors(nested: list, padding=0, example=None):
     import torch
     """Turn a list of list of list of list ... of integers to a tensor with the given padding"""

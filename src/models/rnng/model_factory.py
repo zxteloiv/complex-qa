@@ -1,7 +1,7 @@
 from torch import nn
 from trialbot.data import NSVocabulary, START_SYMBOL
 
-from models.base_s2s.model_factory import WordProjMixin, EncoderStackMixin, EmbEncBundleMixin, EmbeddingMxin
+from models.base_s2s.model_factory import WordProjMixin, EncoderStackMixin, EmbEncBundleMixin, EmbeddingMixin
 from .seq2rnng import Seq2RNNG
 from .rnng import RNNG
 from ..base_s2s.rnn_stacker import RNNCellStacker
@@ -9,7 +9,7 @@ from ..modules.attentions import get_attn_composer, get_attention
 from .rnng_utils import get_target_num_embeddings, get_terminal_boundary, token_to_id
 
 
-class RNNGBuilder(EmbeddingMxin,
+class RNNGBuilder(EmbeddingMixin,
                   EncoderStackMixin,
                   EmbEncBundleMixin,
                   WordProjMixin,
