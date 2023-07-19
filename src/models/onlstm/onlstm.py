@@ -13,8 +13,7 @@ def cumsoftmax(x, dim=-1):
 
 class ONLSTMCell(UnifiedRNN):
     def get_output_state(self, hidden) -> torch.Tensor:
-        hx, cx, dist_cf, dist_cin = hidden
-        return hx
+        return hidden[0]
 
     def get_input_dim(self):
         return self.input_size
