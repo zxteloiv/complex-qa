@@ -11,7 +11,12 @@ class DummyTranslator(FieldAwareTranslator):
 
 class DummyField(Field):
     def batch_tensor_by_key(self, tensors_by_keys):
-        return tensors_by_keys
+        if self.gather_keys is None:
+            return tensors_by_keys
+        elif self.renamed_to is None:
+            return {k: tensors_by_keys.get(k) for k in self.gather_keys}
+        else:
+            return {k: tensors_by_keys.get(k) for k in self.renamed_to}
 
     def generate_namespace_tokens(self, example) -> Generator[Tuple[str, str], None, None]:
         yield from []
@@ -19,10 +24,8 @@ class DummyField(Field):
     def to_tensor(self, example) -> Mapping[str, NullableTensor]:
         if self.gather_keys is None:
             return example
-
         elif self.renamed_to is None:
             return {k: example.get(k) for k in self.gather_keys}
-
         else:
             return {k_: example.get(k) for k, k_ in zip(self.gather_keys, self.renamed_to)}
 
