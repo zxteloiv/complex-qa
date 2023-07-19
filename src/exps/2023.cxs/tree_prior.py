@@ -228,10 +228,13 @@ class PriorAgent:
         self.llm = AutoModel.from_pretrained(llm_path,
                                              trust_remote_code=True,
                                              # torch_dtype=torch.float16,
-                                             ).half().eval()
+                                             ).eval()
         self.device = int_to_device(device)
         if device >= 0:
+            self.llm.half()
             self.llm.cuda(self.device)
+        else:
+            self.llm.float()    # chatglm had hard coded the dtype to be float16, which won't work on cpu
         self.inducer = inducer
         self.logger = logging.getLogger(self.__class__.__name__)
         self.n_trees = n_tree_samples
