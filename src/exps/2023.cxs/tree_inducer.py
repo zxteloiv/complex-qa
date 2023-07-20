@@ -168,6 +168,11 @@ def get_runtime_modifiers(args) -> list[MODIFIER]:
             # the two translators use the same parameter definitions.
             p.TRANSLATOR_KWARGS = dict(src_key=p.src_namespace, tgt_key=p.tgt_namespace,
                                        src_llm=p.plm_name, tgt_llm=p.llm_path,)
+        else:
+            pass
+
+        if hp == 'yx_inducer_with_prior':
+            p.TRAINING_LIMIT = hp_prefix_match(limit_conf, ds) // 3 * 2 + 1
         return p
 
     return [hp_ow_mod, hp_lazy_mod]
@@ -262,6 +267,7 @@ class YXInducer(BaseSeq2Seq):
         setattr(model, 's_layer', 1)
         if prior_agent is not None:
             setattr(model, 'prior', prior_agent)
+            setattr(model, 'prior_weight', getattr(p, 'prior_weight', 1.))
         return model
 
     def forward(self,
@@ -280,7 +286,9 @@ class YXInducer(BaseSeq2Seq):
 
         output = {'source': source_tokens, "loss": 0}
         if self.training:
-            output['loss'] = self._compute_loss(logits, target_tokens, state_mask)
+            loss = self._compute_loss(logits, target_tokens, state_mask)
+            prior_loss = self.prior_loss(cast(list[str], kwargs.get('target_raw_str')), df)
+            output['loss'] = prior_loss + loss
 
         if target_tokens is not None:
             total_err = self._compute_metrics(source_tokens, target_tokens, preds, logits)
@@ -289,7 +297,6 @@ class YXInducer(BaseSeq2Seq):
             output.update(errno=total_err.tolist())
 
         output.update(pred=preds, ys=target_tokens, df=df, cf=cf)
-        self.prior_loss(cast(list[str], kwargs.get('target_raw_str')), df)
         return output
 
     def _forward_dec(self, target_tokens, default_start, enc_attn_fn, hx):
@@ -320,15 +327,24 @@ class YXInducer(BaseSeq2Seq):
         return predictions, logits, df, cf
 
     def prior_loss(self, ys_str: list[str], df):
-        if getattr(self, 'prior', None) is None:
-            return
+        if getattr(self, 'prior', None) is None or not self.training:
+            return 0
 
+        # df: (b, #seq+1, #chunk), a start token is prepended
         prior = cast(PriorAgent, self.prior)
         ys_emb, ys_id = prior.embed(ys_str)
-        df_mask = prior.get_mask(ys_id)
-        prior_logp_df = prior.inducer.get_batch_tree_dist(ys_emb, df_mask)  # (b, #seq, #chunk)
-        post_logp_df = df.log_softmax(dim=-1)
-        print('df sizes:', prior_logp_df.size(), post_logp_df.size())
+        df_mask = prior.get_mask(ys_id) # (b, #seq, #chunk)
+        prior_df_logp = prior.inducer.get_batch_tree_dist(ys_emb, df_mask).detach_()
+
+        post_df = df[:, 1:].contiguous()    # (b, #seq, #chunk)
+        post_df_logp = post_df.log_softmax(dim=-1)   # (b, #seq, #chunk)
+        post_df_prob = post_df.softmax(dim=-1)  # (b, #seq, #chunk)
+
+        # kl-div of post and prior df: (b, #seq, #chunk), assuming each step are independent
+        kl_div = (post_df_prob * (post_df_logp - prior_df_logp)).sum(dim=(1, 2)).mean()
+
+        loss = self.prior_weight * kl_div
+        return loss
 
 
 if __name__ == '__main__':
