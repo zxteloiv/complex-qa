@@ -162,7 +162,8 @@ class TreeInducer(RNNCellStacker):
 
         return sampled_trees, sampled_tree_logp
 
-    def greedy_tree_from_df(self, df: list[int]) -> Tree:
+    @staticmethod
+    def greedy_tree_from_df(df: list[int]) -> Tree:
         # df: (#non-padded,)
         # start and end are global indices to the whole sentence
         # conventional span range, [start, end)

@@ -1,3 +1,6 @@
+import logging
+import pickle
+
 from trialbot.data.fields import SeqField
 from trialbot.utils import prepend_pythonpath   # noqa
 from trialbot.data.translator import FieldAwareTranslator
@@ -6,7 +9,7 @@ import torch.nn
 
 import os.path as osp
 import trialbot.data
-from trialbot.training import TrialBot, Registry
+from trialbot.training import TrialBot, Registry, Events
 from trialbot.utils.root_finder import find_root
 from trialbot.training.hparamset import HyperParamSet
 from allennlp.training.metrics import Average
@@ -54,6 +57,10 @@ def main():
     if not args.test:
         bot = setup_bot(bot, True, True, False, True, True, True)
         bot.updater = get_updater(bot)
+
+    else:
+        bot.add_event_handler(Events.ITERATION_COMPLETED, dump_trees, 70)
+        bot.add_event_handler(Events.EPOCH_COMPLETED, save_trees, 100)
 
     bot.run()
 
@@ -302,6 +309,7 @@ class YXInducer(BaseSeq2Seq):
             target_mask = (target_tokens[:, 1:] != self._padding_index)
             self._compute_gini_index(state_mask, target_mask)
             output.update(errno=total_err.tolist())
+            output.update(ys_mask=(target_tokens != self._padding_index))
 
         output.update(pred=preds, ys=target_tokens, df=df, cf=cf)
         return output
@@ -352,6 +360,36 @@ class YXInducer(BaseSeq2Seq):
 
         loss = self.prior_weight * kl_div
         return loss
+
+
+def dump_trees(bot: TrialBot):
+    output = bot.state.output
+    if output is None: return
+
+    # cf: (b, 1+#seq), mask: (b, #seq+2)
+    # valid tokens: cf[:, 1:], mask[:, 1:-1]
+    valid_cf = output['cf'][:, 1:]
+    valid_m = output['ys_mask'][:, 1:-1]
+
+    batch_trees = []
+    for cf, m in zip(valid_cf, valid_m):
+        levels: list[int] = []
+        for tok_cf, tok_m in zip(cf, m):
+            if tok_m > 0:
+                levels.append(tok_cf.item())
+        tree = TreeInducer.greedy_tree_from_df(levels)
+        batch_trees.append(tree)
+
+    if getattr(bot, 'tree_mem', None) is None:
+        setattr(bot, 'tree_mem', [])
+
+    bot.tree_mem += batch_trees
+
+
+def save_trees(bot: TrialBot):
+    filename = osp.join(bot.savepath, 'dump-trees.pkl')
+    bot.logger.info(f'Trees pickled into {filename}')
+    pickle.dump(bot.tree_mem, open(filename, 'wb'))
 
 
 if __name__ == '__main__':
