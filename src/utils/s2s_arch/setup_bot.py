@@ -9,7 +9,7 @@ def get_updater(bot: TrialBot):
     args, p, model, logger = bot.args, bot.hparams, bot.model, bot.logger
     from utils.select_optim import select_optim
 
-    if p.encoder.startswith('plm:'):
+    if isinstance(getattr(p, 'encoder', None), str) and p.encoder.startswith('plm:'):
         bert_params, nonbert_params = [], []
         for name, param in model.named_parameters():
             if 'pretrained_model' in name:  # the attribute is used by SeqPLMEmbedEncoder wrapper.

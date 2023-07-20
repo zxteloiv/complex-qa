@@ -31,6 +31,7 @@ from utils.llm.tokenizer_adapter import get_llm_wrapper_split_fn
 from tree_prior import TreeInducer, PriorAgent
 from tree_prior import install_hparams as install_prior_hparams
 from utils.trialbot.setup_bot import setup_bot
+from utils.s2s_arch.setup_bot import get_updater
 
 T = torch.Tensor
 
@@ -45,11 +46,15 @@ def main():
     args = setup_cli(parser, seed=2021, device=-1)
     install_runtime_modifiers(args.hparamset, get_runtime_modifiers(args))
 
-    agent = None if not args.prior else load_prior_agent(args.prior, device=args.device)
+    agent = None
+    if args.prior and not args.test:
+        agent = load_prior_agent(args.prior, device=args.device)
 
-    bot = TrialBot(args, trial_name=args.hparamset,
-                   get_model_func=get_model_func(args.hparamset, agent))
-    bot = setup_bot(bot, True, True, False, True, True, True)
+    bot = TrialBot(args, args.hparamset, get_model_func(args.hparamset, agent))
+    if not args.test:
+        bot = setup_bot(bot, True, True, False, True, True, True)
+        bot.updater = get_updater(bot)
+
     bot.run()
 
 
@@ -68,6 +73,7 @@ def install_hparams():
     @Registry.hparamset()
     def y_inducer():
         p = HyperParamSet.common_settings(find_root())
+        p.OPTIM = 'adabelief'
         p.TRAINING_LIMIT = 150
         p.batch_sz = 16
         p.tgt_namespace = 'target_tokens'
@@ -83,6 +89,7 @@ def install_hparams():
     @Registry.hparamset()
     def yx_inducer():
         p = Seq2SeqBuilder.base_hparams()
+        p.OPTIM = 'adabelief'
         p.TRAINING_LIMIT = 150
         p.batch_sz = 16
 
