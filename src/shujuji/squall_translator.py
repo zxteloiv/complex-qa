@@ -1,10 +1,12 @@
 import logging
 from collections import defaultdict
 from enum import IntEnum
-from typing import Mapping, Generator, Tuple, List, Optional, Set, Dict
+from typing import Generator, Tuple, List, Optional, Set, Dict
+from typing import Any
+from collections.abc import Iterator
 
 import torch
-from trialbot.data.translator import Field, FieldAwareTranslator, NullableTensor
+from trialbot.data.translator import Field, FieldAwareTranslator, T
 from trialbot.training import Registry
 from trialbot.data import NSVocabulary, START_SYMBOL, END_SYMBOL
 
@@ -43,18 +45,18 @@ class TgtType(IntEnum):
 
 
 class NLTableField(Field):
-    def batch_tensor_by_key(self, tensors_by_keys: Mapping[str, List[NullableTensor]]) -> Mapping[str, torch.Tensor]:
+    def build_batch_by_key(self, input_dict: dict[str, list[T]]) -> dict[str, torch.Tensor | list[T]]:
         output = {}
         for pad_id, keys in self.padded_keys.items():
             for key in keys:
-                ids = tensors_by_keys[key]
+                ids = input_dict[key]
                 output[key] = nested_list_numbers_to_tensors(ids, padding=pad_id)
         return output
 
-    def generate_namespace_tokens(self, example) -> Generator[Tuple[str, str], None, None]:
+    def generate_namespace_tokens(self, example: Any) -> Iterator[tuple[str, str]]:
         yield from []   # nothing to vocab, because the pretrained-lm knows all
 
-    def to_tensor(self, example) -> Mapping[str, NullableTensor]:
+    def to_input(self, example) -> dict[str, T | None]:
         src_params, word_locs, col_locs = self._get_source(example)
         self._word_locs = word_locs
         self._col_locs = col_locs
@@ -134,21 +136,19 @@ class NLTableField(Field):
 
 
 class SquallAllInOneField(Field):
-    def batch_tensor_by_key(self,
-                            tensors_by_keys: Mapping[str, List[NullableTensor]]
-                            ) -> Mapping[str, torch.Tensor]:
+    def build_batch_by_key(self, input_dict: dict[str, list[T]]) -> dict[str, torch.Tensor | list[T]]:
         output = {}
         for pad_id, keys in self.padded_keys.items():
             for key in keys:
-                ids = tensors_by_keys[key]
+                ids = input_dict[key]
                 output[key] = nested_list_numbers_to_tensors(ids, padding=pad_id)
 
-        output['tbl_cells'] = tensors_by_keys['tbl_cells']  # a batch list of cell text sets
-        output['nl_toks'] = tensors_by_keys['nl_toks']
-        output['sql_toks'] = tensors_by_keys['sql_toks']
+        output['tbl_cells'] = input_dict['tbl_cells']  # a batch list of cell text sets
+        output['nl_toks'] = input_dict['nl_toks']
+        output['sql_toks'] = input_dict['sql_toks']
         return output
 
-    def generate_namespace_tokens(self, example) -> Generator[Tuple[str, str], None, None]:
+    def generate_namespace_tokens(self, example: Any) -> Iterator[tuple[str, str]]:
         # other supervisions are all attention-based and thus dynamic.
         # the token types are enumerable as the TgtType class above.
         # Therefore, only the keywords and column types require a predefined vocabulary for predictions.
@@ -163,7 +163,7 @@ class SquallAllInOneField(Field):
                 yield self.ns_coltype, col_type
         yield self.ns_coltype, 'none'
 
-    def to_tensor(self, example):
+    def to_input(self, example) -> dict[str, T | None]:
         alignments = self._get_attn_sup(example)
         tgt_params = self._get_target(example)
         col_type_mask = self._get_col_type_mask(example)

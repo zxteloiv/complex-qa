@@ -341,14 +341,15 @@ class PriorAgent:
 
 
 class PolicyUpdater(Updater):
-    @classmethod
-    def from_bot(cls, bot: TrialBot) -> 'Updater': return cls(bot)
-
     def __init__(self, bot: TrialBot):
+        super().__init__()
         args, p = bot.args, bot.hparams
         iterators = list(map(lambda d: RandomIterator(len(d), p.batch_sz), bot.datasets))
         optim = select_optim(p, bot.model.parameters())
-        super().__init__(bot.models, iterators, optim)
+
+        self.model = bot.model
+        self.iterators = iterators
+        self.optim = optim
 
         self.bot = bot   # save the backward reference for convenience
         self.key_pair = get_field_names_by_prefix(args.dataset)
@@ -358,7 +359,7 @@ class PolicyUpdater(Updater):
 
     def update_epoch(self) -> dict[str, Any]:
         datasets = self.bot.datasets    # noqa
-        iterators = self._iterators
+        iterators = self.iterators
 
         # sample and embed data, which is fixed during each time of tree sampling
         train_samples = self.get_samples(datasets[0], iterators[0])
@@ -370,7 +371,7 @@ class PolicyUpdater(Updater):
         embedded_test = self.agent.embed_data(*test_samples)
 
         loss, metric = self.agent.rl_loss(embedded_train, embedded_test)
-        optim = self._optims[0]
+        optim = self.optim
         optim.zero_grad()
         loss.backward()
         if self.grad_clip > 0:
@@ -381,7 +382,7 @@ class PolicyUpdater(Updater):
     def get_samples(self, dataset, iterator) -> tuple[list[Any], list[Any]]:
         indices = next(iterator)
         translator = self.bot.translator
-        samples: dict[str, list[Any]] = translator.batch_tensor([translator.to_tensor(dataset[i]) for i in indices])
+        samples: dict[str, list[Any]] = translator.build_batch([translator.to_input(dataset[i]) for i in indices])
         return itemgetter(*self.key_pair)(samples)
 
     def eval(self) -> float:

@@ -24,7 +24,7 @@ def base_param():
     p.TRAINING_LIMIT = 80
     p.WEIGHT_DECAY = 0
     p.OPTIM = "adabelief"
-    p.optim_kwargs = {"rectify": False}
+    p.OPTIM_KWARGS = {"rectify": False}
     p.ADAM_LR = 1e-3
     p.ADAM_BETAS = (0.9, 0.999)
     p.batch_sz = 32
@@ -144,7 +144,7 @@ def get_updater(bot: TrialBot):
     logger.info(f"Using RandomIterator: on volume={len(bot.train_set)} with batch={p.batch_sz}")
 
     from trialbot.training.updaters.training_updater import TrainingUpdater
-    updater = TrainingUpdater(bot.train_set, bot.translator, model, iterator, optim, args.device, args.dry_run)
+    updater = TrainingUpdater(bot.train_set, bot.translator, model, iterator, optim, args.device, p.GRAD_CLIPPING)
     return updater
 
 

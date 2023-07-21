@@ -1,5 +1,5 @@
 from trialbot.training import Registry
-from trialbot.data.translator import FieldAwareTranslator
+from trialbot.data.translator import FieldAwareTranslator, T, Iterator
 from .cg_bundle_fields import ProcessedSentField, RNNGField
 from .cfq_fields import TreeTraversalField, TutorBuilderField
 from .cfq_fields import PolicyValidity
@@ -83,18 +83,6 @@ class SQLDerivations(FieldAwareTranslator):
             TreeTraversalField(tree_key='runtime_tree', namespace=TREE_NS,),
             PolicyValidity(tree_key='runtime_tree', use_reversible_actions=use_reversible_actions),
         ])
-
-    def batch_tensor(self, tensors):
-        tensors = list(filter(lambda x: x.get('tree_nodes') is not None, tensors))
-        batch_dict = self.list_of_dict_to_dict_of_list(tensors)
-        output = {}
-        for field in self.fields:
-            try:
-                output.update(field.batch_tensor_by_key(batch_dict))
-            except KeyError:
-                return None
-
-        return output
 
 
 class SQLTutorBuilder(FieldAwareTranslator):

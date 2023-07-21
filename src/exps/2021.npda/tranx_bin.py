@@ -44,7 +44,7 @@ def get_tranx_updater(bot: TrialBot):
         bot.add_event_handler(Events.ITERATION_COMPLETED, _sched_step, 100)
 
     from trialbot.training.updaters.training_updater import TrainingUpdater
-    updater = TrainingUpdater(bot.train_set, bot.translator, model, iterator, optim, args.device, args.dry_run)
+    updater = TrainingUpdater(bot.train_set, bot.translator, model, iterator, optim, args.device, p.GRAD_CLIPPING)
     return updater
 
 

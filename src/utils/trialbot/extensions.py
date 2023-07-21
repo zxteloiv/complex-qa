@@ -78,8 +78,8 @@ def evaluation_on_dev_every_epoch(bot: TrialBot, interval: int = 1,
         device = bot.args.device
         model.eval()
         for indices in iterator:
-            tensor_list = [bot.translator.to_tensor(dataset[index]) for index in indices]
-            batch = bot.translator.batch_tensor(tensor_list)
+            tensor_list = [bot.translator.to_input(dataset[index]) for index in indices]
+            batch = bot.translator.build_batch(tensor_list)
             if batch is None or len(batch) == 0:
                 continue
             if device >= 0:

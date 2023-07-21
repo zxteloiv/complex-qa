@@ -1,7 +1,9 @@
 from functools import partial
-from typing import Mapping, Generator, Tuple, List
+from typing import Any
 
-from trialbot.data.translator import Translator, NullableTensor, FieldAwareTranslator, Field
+from trialbot.data.translator import FieldAwareTranslator, Field, T
+from collections.abc import Iterator
+import torch
 
 
 class DummyTranslator(FieldAwareTranslator):
@@ -10,18 +12,18 @@ class DummyTranslator(FieldAwareTranslator):
 
 
 class DummyField(Field):
-    def batch_tensor_by_key(self, tensors_by_keys):
+    def build_batch_by_key(self, input_dict: dict[str, list[T]]) -> dict[str, torch.Tensor | list[T]]:
         if self.gather_keys is None:
-            return tensors_by_keys
+            return input_dict
         elif self.renamed_to is None:
-            return {k: tensors_by_keys.get(k) for k in self.gather_keys}
+            return {k: input_dict.get(k) for k in self.gather_keys}
         else:
-            return {k: tensors_by_keys.get(k) for k in self.renamed_to}
+            return {k: input_dict.get(k) for k in self.renamed_to}
 
-    def generate_namespace_tokens(self, example) -> Generator[Tuple[str, str], None, None]:
+    def generate_namespace_tokens(self, example: Any) -> Iterator[tuple[str, str]]:
         yield from []
 
-    def to_tensor(self, example) -> Mapping[str, NullableTensor]:
+    def to_input(self, example) -> dict[str, T | None]:
         if self.gather_keys is None:
             return example
         elif self.renamed_to is None:

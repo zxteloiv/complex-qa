@@ -1,6 +1,6 @@
 from typing import Union, List, Tuple, Generator, Mapping, Optional
 from trialbot.data.fields import SeqField
-from trialbot.data.translator import FieldAwareTranslator
+from trialbot.data.translator import FieldAwareTranslator, T, Iterator
 from trialbot.data.ns_vocabulary import START_SYMBOL, END_SYMBOL
 from itertools import product
 import lark
@@ -47,7 +47,7 @@ class TerminalRuleSeqField(SeqField):
                         continue
                     stack.append(n)
 
-    def generate_namespace_tokens(self, example) -> Generator[Tuple[str, str], None, None]:
+    def generate_namespace_tokens(self, example) -> Iterator[tuple[str, str]]:
         Tree, Token = lark.Tree, lark.Token
         tree: Tree = example.get(self.source_key)
         if tree is not None:
@@ -58,7 +58,7 @@ class TerminalRuleSeqField(SeqField):
         if self.add_start_end_toks:
             yield from product([self.ns], [START_SYMBOL, END_SYMBOL])
 
-    def to_tensor(self, example) -> Mapping[str, Optional['torch.Tensor']]:
+    def to_input(self, example) -> dict[str, T | None]:
         tree: _Tree = example.get(self.source_key)
         if tree is None:
             return {self.renamed_key: None}

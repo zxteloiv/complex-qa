@@ -49,7 +49,7 @@ def get_updater(bot: TrialBot):
     logger.info(f"Using RandomIterator: on volume={len(bot.train_set)} with batch={p.batch_sz}")
 
     from trialbot.training.updaters.training_updater import TrainingUpdater
-    updater = TrainingUpdater(bot.train_set, bot.translator, model, iterator, optim, args.device, args.dry_run)
+    updater = TrainingUpdater(bot.train_set, bot.translator, model, iterator, optim, args.device, p.GRAD_CLIPPING)
     return updater
 
 
@@ -61,7 +61,7 @@ def base_params():
     p.TRAINING_LIMIT = 50
     p.WEIGHT_DECAY = 0
     p.OPTIM = "adabelief"
-    p.optim_kwargs = {"rectify": False}
+    p.OPTIM_KWARGS = {"rectify": False}
     p.ADAM_LR = 1e-3
     p.ADAM_BETAS = (0.9, 0.999)
     p.batch_sz = 32
@@ -106,9 +106,9 @@ def debug():
     print(len(train), len(dev), len(test))
     for x in train[:10]:
         pprint.pprint([x[k] for k in ('question', 'sql')])
-        pprint.pprint({k: v for k, v in translator.to_tensor(x).items() if not k.startswith('src_')})
+        pprint.pprint({k: v for k, v in translator.to_input(x).items() if not k.startswith('src_')})
 
-    b = translator.batch_tensor([translator.to_tensor(x) for x in train[:10]])
+    b = translator.build_batch([translator.to_input(x) for x in train[:10]])
     pprint.pprint({k: v for k, v in b.items() if not k.startswith('src_')})
 
 

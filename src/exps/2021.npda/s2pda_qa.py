@@ -1,15 +1,11 @@
+import trialbot.utils.prepend_pythonpath    # noqa
 from collections import defaultdict
 import torch.nn
-import sys
-import os.path as osp
 from tqdm import tqdm
 from trialbot.utils.move_to_device import move_to_device
 from trialbot.training import TrialBot, Registry, Events
 from trialbot.data import NSVocabulary
 from trialbot.training.updater import Updater
-
-if __name__ == '__main__':
-    sys.path.insert(0, osp.abspath(osp.join(osp.dirname(__file__), '..', '..')))
 
 from utils.trialbot.setup_cli import setup
 from utils.select_optim import select_optim
@@ -25,7 +21,7 @@ import shujuji.cg_bundle_translator as sql_translator
 def get_tutor_from_train_set(vocab, train_set, dataset_name: str):
     builder = cfq_translator.CFQTutorBuilder() if 'cfq_' in dataset_name else sql_translator.SQLTutorBuilder()
     builder.index_with_vocab(vocab)
-    tutor_repr = builder.batch_tensor([builder.to_tensor(example) for example in tqdm(train_set)])
+    tutor_repr = builder.build_batch([builder.to_input(example) for example in tqdm(train_set)])
     return tutor_repr
 
 
@@ -248,8 +244,8 @@ class PDATrainingUpdater(Updater):
         model.train()
         optim.zero_grad()
         indices = next(iterator)
-        tensor_list = [self.translator.to_tensor(self.dataset[index]) for index in indices]
-        batch = self.translator.batch_tensor(tensor_list)
+        tensor_list = [self.translator.to_input(self.dataset[index]) for index in indices]
+        batch = self.translator.build_batch(tensor_list)
 
         if device >= 0:
             batch = move_to_device(batch, device)

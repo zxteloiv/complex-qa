@@ -21,7 +21,7 @@ def cfq_pda():
     p.batch_sz = 32
     p.WEIGHT_DECAY = .1
     p.ADAM_BETAS = (0.9, 0.98)
-    p.optim_kwargs = {"rectify": False}
+    p.OPTIM_KWARGS = {"rectify": False}
     p.GRAD_CLIPPING = .2    # grad norm required to be <= 2
 
     p.src_ns = 'questionPatternModEntities'
@@ -76,7 +76,7 @@ def sql_pda():
     p.WEIGHT_DECAY = 1e-6
     p.ADAM_LR = 1e-3
     p.ADAM_BETAS = (0.9, 0.999)
-    p.optim_kwargs = {"rectify": True, "weight_decouple": True}
+    p.OPTIM_KWARGS = {"rectify": True, "weight_decouple": True}
     p.GRAD_CLIPPING = 1    # grad norm required to be <= 2
 
     p.src_ns = 'sent'

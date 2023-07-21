@@ -1,24 +1,24 @@
 # syntactic tree to sequence
-from typing import Mapping, List, Optional, Generator, Tuple, Callable
-from trialbot.data.field import Field, NullableTensor
+from typing import Optional, Callable
+from trialbot.data.field import Field, T
 from trialbot.data.fields import SeqField
-from trialbot.data.translator import FieldAwareTranslator
+from trialbot.data.translator import FieldAwareTranslator, Iterator
 
 from utils.preprocessing import nested_list_numbers_to_tensors
 from utils.tree import PreOrderTraverse, Tree
 from .plm2s import PREPROCESS_HOOKS
+import torch
 
 
 class BeNeParField(Field):
-    def batch_tensor_by_key(self, tensors_by_keys: Mapping[str, List[NullableTensor]]
-                            ) -> Mapping[str, 'torch.Tensor']:
-        tokens_batch = tensors_by_keys[self.token_key]
-        graph_batch = tensors_by_keys[self.graph_key]
+    def build_batch_by_key(self, input_dict: dict[str, list[T]]) -> dict[str, torch.Tensor | list[T]]:
+        tokens_batch = input_dict[self.token_key]
+        graph_batch = input_dict[self.graph_key]
         tokens = nested_list_numbers_to_tensors(tokens_batch, self.padding)
         graphs = nested_list_numbers_to_tensors(graph_batch, self.padding)
         return {self.token_key: tokens, self.graph_key: graphs}
 
-    def generate_namespace_tokens(self, example) -> Generator[Tuple[str, str], None, None]:
+    def generate_namespace_tokens(self, example) -> Iterator[tuple[str, str]]:
         sent = self.get_sent(example)
         sent = self.process_sent(sent)
         if sent is not None:
@@ -27,7 +27,7 @@ class BeNeParField(Field):
                 node: Tree
                 yield self.ns, node.label
 
-    def to_tensor(self, example):
+    def to_input(self, example) -> dict[str, T | None]:
         sent = self.get_sent(example)
         sent = self.process_sent(sent)
         if sent is None:
@@ -117,7 +117,7 @@ class Syn2SeqTranslator(FieldAwareTranslator):
                  target_field: str,
                  target_max_token: int = 0,
                  use_lower_case: bool = True,
-                 source_preprocess_hooks: Optional[List[Callable[[str], str]]] = None,
+                 source_preprocess_hooks: Optional[list[Callable[[str], str]]] = None,
                  spacy_model: str = 'en_core_web_md',
                  benepar_model: str = 'benepar_en3',
                  ):

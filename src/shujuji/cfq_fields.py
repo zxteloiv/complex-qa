@@ -1,8 +1,9 @@
 from typing import List, Mapping, Generator, Tuple, Optional, Any, Literal, Iterable, Union, DefaultDict
 from itertools import product
 from collections import defaultdict
+from collections.abc import Iterator
 import torch
-from trialbot.data.field import Field, NullableTensor
+from trialbot.data.field import Field, T
 from trialbot.data.fields.seq_field import SeqField
 import lark
 from trialbot.data import START_SYMBOL, END_SYMBOL
@@ -42,7 +43,7 @@ class GrammarPatternSeqField(SeqField):
         if self.add_start_end_toks:
             yield from product([self.ns], [START_SYMBOL, END_SYMBOL])
 
-    def to_tensor(self, example) -> Mapping[str, Optional[torch.Tensor]]:
+    def to_input(self, example) -> dict[str, T | None]:
         Tree, Token = lark.Tree, lark.Token
         tree: Tree = example.get(self.source_key)
         if tree is None:
@@ -96,10 +97,10 @@ class TreeTraversalField(Field):
             'node_pos',             # (batch, n_d, max_depth)
         ]
 
-    def batch_tensor_by_key(self, tensors_by_keys: Mapping[str, List[torch.Tensor]]) -> Mapping[str, torch.Tensor]:
+    def build_batch_by_key(self, input_dict: dict[str, list[T]]) -> dict[str, torch.Tensor | list[T]]:
         output = dict()
         for k in self.output_keys:
-            tensor_list = tensors_by_keys[k]
+            tensor_list = input_dict[k]
             output[k] = nested_list_numbers_to_tensors(tensor_list, padding=self.padding)
         return output
 
@@ -109,7 +110,7 @@ class TreeTraversalField(Field):
             for node in PreOrderTraverse()(tree):
                 yield from product([self.ns], [node.label, END_SYMBOL])
 
-    def to_tensor(self, example) -> Mapping[str, Optional[list]]:
+    def to_input(self, example) -> dict[str, T | None]:
         tree = example.get(self.tree_key)
         if tree is None:
             return dict((k, None) for k in self.output_keys)
@@ -161,16 +162,16 @@ class PolicyValidity(Field):
         self.padding = padding
         self.use_reversible_actions = use_reversible_actions
 
-    def batch_tensor_by_key(self, tensors_by_keys: Mapping[str, List[NullableTensor]]) -> Mapping[str, torch.Tensor]:
+    def build_batch_by_key(self, input_dict: dict[str, list[T]]) -> dict[str, torch.Tensor | list[T]]:
         output = dict()
-        validity_batch_list = tensors_by_keys[self.out_key]
+        validity_batch_list = input_dict[self.out_key]
         output[self.out_key] = nested_list_numbers_to_tensors(validity_batch_list, padding=self.padding)
         return output
 
-    def generate_namespace_tokens(self, example) -> Generator[Tuple[str, str], None, None]:
+    def generate_namespace_tokens(self, example: Any) -> Iterator[tuple[str, str]]:
         yield from []
 
-    def to_tensor(self, example: dict) -> Mapping[str, NullableTensor]:
+    def to_input(self, example) -> dict[str, T | None]:
         tree: Tree = example.get(self.tree_key)
         if tree is None:
             return {self.out_key: None}
@@ -230,9 +231,9 @@ class TutorBuilderField(Field):
         self.tree_key = tree_key
         self.ns = ns
 
-    def batch_tensor_by_key(self, tensors_by_keys: Mapping[str, List[DefaultDict]]) -> Mapping[str, DefaultDict]:
+    def build_batch_by_key(self, input_dict: dict[str, list[T]]) -> dict[str, torch.Tensor | list[T]]:
         grammar_map = defaultdict(set)
-        for m in tensors_by_keys['grammar_map']:
+        for m in input_dict['grammar_map']:
             if m is None:
                 continue
             for lhs, rhs_list in m.items():
@@ -240,7 +241,7 @@ class TutorBuilderField(Field):
 
         return {"grammar_map": grammar_map}
 
-    def to_tensor(self, example) -> Mapping[str, Optional[DefaultDict[int, set]]]:
+    def to_input(self, example) -> dict[str, T | None]:
         tree = example.get(self.tree_key)
         if tree is None:
             return {"grammar_map": None}

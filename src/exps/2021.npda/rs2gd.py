@@ -25,10 +25,9 @@ from models.neural_pda.seq2pda import Seq2PDA
 from models.neural_pda import partial_tree_encoder as partial_tree
 from models.modules.decomposed_bilinear import DecomposedBilinear
 from utils.tree_mod import modify_tree
-from utils.trialbot.reset import reset
 from utils.lark.id_tree import build_from_lark_tree
 
-from trialbot.training import TrialBot, Events, Registry, Updater
+from trialbot.training import TrialBot, Events, Registry, Updater, State
 from trialbot.data import NSVocabulary
 import shujuji.cg_bundle as cg_bundle
 cg_bundle.install_parsed_qa_datasets(Registry._datasets)
@@ -111,14 +110,14 @@ class PolicyTraining(Updater):
         return batch_data
 
     def _get_tensor_batch(self, batch):
-        tensor_list = [self.translator.to_tensor(x) for x in batch]
+        tensor_list = [self.translator.to_input(x) for x in batch]
         filtered_tensors, filtered_batch = [], []
         # filter will be applied to tensors, but the raw data batch is required to build extension
         for tensor, example in zip(tensor_list, batch):
             if all(v is not None for v in tensor.values()):
                 filtered_tensors.append(tensor)
                 filtered_batch.append(example)
-        tensor_batch = self.translator.batch_tensor(filtered_tensors)
+        tensor_batch = self.translator.build_batch(filtered_tensors)
 
         if self._device >= 0:
             tensor_batch = move_to_device(tensor_batch, self._device)
@@ -158,8 +157,8 @@ class PolicyTraining(Updater):
 
     def _get_env_reward(self, sampled_batch, batch_sz: int, sample_num: int) -> torch.Tensor:
         translator = self.envbot.translator
-        tensor_list = [translator.to_tensor(x) for x in sampled_batch]
-        tensor_batch = translator.batch_tensor(tensor_list)
+        input_list = [translator.to_input(x) for x in sampled_batch]
+        tensor_batch = translator.build_batch(input_list)
         if self._device >= 0:
             tensor_batch = move_to_device(tensor_batch, self._device)
 
@@ -409,6 +408,23 @@ def finetune_env_model(bot: TrialBot):
     reset(updater.parserbot, reset_optimizer=True)
     updater.parserbot.savepath = osp.join(bot.savepath, f'parser-{epoch}-ft')
     updater.parserbot.run()
+
+
+def reset(bot: TrialBot, *, reset_iterator: bool = True, reset_optimizer: bool = False):
+    bot.state = State(epoch=0, iteration=0, output=None)
+    updater = bot.updater
+    if updater is None:
+        return
+
+    if reset_iterator:
+        for iterator in updater._iterators:
+            if hasattr(iterator, 'reset'):
+                iterator.reset()
+
+    if reset_optimizer:
+        for opt in updater._optims:
+            if hasattr(opt, 'reset'):
+                opt.reset()
 
 
 @Registry.hparamset()

@@ -1,7 +1,7 @@
-from typing import List, Mapping, Generator, Tuple
+from collections.abc import Iterator
 import torch
 from trialbot.data.fields import SeqField
-from trialbot.data.field import Field, NullableTensor
+from trialbot.data.field import Field, T
 from trialbot.data import START_SYMBOL, END_SYMBOL
 import nltk
 import re
@@ -142,8 +142,8 @@ class ProcessedSentField(SeqField):
 
 
 class RNNGField(Field):
-    def batch_tensor_by_key(self, tensors_by_keys: Mapping[str, List[NullableTensor]]) -> Mapping[str, torch.Tensor]:
-        action_list, target_list = list(map(tensors_by_keys.get, (self.action_key, self.target_key)))
+    def build_batch_by_key(self, input_dict: dict[str, list[T]]) -> dict[str, torch.Tensor | list[T]]:
+        action_list, target_list = list(map(input_dict.get, (self.action_key, self.target_key)))
         if any(x is None or len(x) == 0 for x in (action_list, target_list)):
             raise ValueError(f'input is empty or contains null keys: {self.action_key}, {self.target_key}')
 
@@ -159,7 +159,7 @@ class RNNGField(Field):
         if node.is_terminal:
             raise ValueError(f'root ({node.label}) is not a non-terminal')
 
-    def generate_namespace_tokens(self, example) -> Generator[Tuple[str, str], None, None]:
+    def generate_namespace_tokens(self, example) -> Iterator[tuple[str, str]]:
         tree: Tree = example.get(self.source_key)
         if tree is not None:
             # set root and emit for the root namespace
@@ -177,7 +177,7 @@ class RNNGField(Field):
                 ns = self.ns_nt if rnng_utils.is_nt_action(node) else self.ns_term
                 yield ns, rnng_utils.get_token_str(node)
 
-    def to_tensor(self, example) -> Mapping[str, NullableTensor]:
+    def to_input(self, example) -> dict[str, T | None]:
         tree: Tree = example.get(self.source_key)
         if tree is None:
             return {self.action_key: None, self.target_key: None}

@@ -1,20 +1,20 @@
 import logging
-from typing import Mapping, Generator, Tuple, List
-from trialbot.data.translator import Translator, NullableTensor, FieldAwareTranslator
+import torch
+from trialbot.data.translator import Translator, T, FieldAwareTranslator, Iterator
 from .prompt import build_ctx_with_exemplars, build_prompt
 from ..ir_client import VolatileBM25Index
 
 
 class PromptTranslator(Translator):
-    def batch_tensor(self, tensors: List[Mapping[str, NullableTensor]]):
-        tensors = list(filter(lambda x: all(v is not None for v in x.values()), tensors))
-        batch_dict = FieldAwareTranslator.list_of_dict_to_dict_of_list(tensors)
+    def build_batch(self, input_list: list[dict[str, T]]) -> dict[str, torch.Tensor | list[T]]:
+        input_list = list(filter(lambda x: all(v is not None for v in x.values()), input_list))
+        batch_dict = FieldAwareTranslator.list_of_dict_to_dict_of_list(input_list)
         return batch_dict
 
-    def generate_namespace_tokens(self, example) -> Generator[Tuple[str, str], None, None]:
+    def generate_namespace_tokens(self, example) -> Iterator[tuple[str, str]]:
         yield from []
 
-    def to_tensor(self, example) -> Mapping[str, NullableTensor]:
+    def to_input(self, example) -> dict[str, T | None]:
         src, tgt = map(example.get, (self.src_field, self.tgt_field))
 
         # use empty string or empty list for absent fields
@@ -22,7 +22,7 @@ class PromptTranslator(Translator):
         if self.prompt_mode == 'zero_shot':
             return {'src': src, 'tgt': tgt, 'context': [], 'prompt': src}
 
-        exemplars: List[dict] = self.search_index(src)
+        exemplars: list[dict] = self.search_index(src)
         if self.prompt_mode == 'history':
             ctx = build_ctx_with_exemplars(
                 exemplars, self.src_field, self.tgt_field,
@@ -69,7 +69,7 @@ class PromptTranslator(Translator):
         )
         self.indexing_dataset = train_set
 
-    def search_index(self, key: str) -> List[dict]:
+    def search_index(self, key: str) -> list[dict]:
         return [self.indexing_dataset[i] for _, i in self.idx_conn.search_index(key)]
 
 

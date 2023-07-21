@@ -1,8 +1,9 @@
 from itertools import product
-from typing import Mapping, Generator, Tuple, List
+from typing import Any
+from collections.abc import Iterator
 
 import torch
-from trialbot.data.translator import Field, FieldAwareTranslator, NullableTensor
+from trialbot.data.translator import Field, FieldAwareTranslator, T
 
 from utils.preprocessing import nested_list_numbers_to_tensors
 from .squall_translator import NLTableField
@@ -29,15 +30,15 @@ class SQLovaDecodingField(Field):
         from transformers import AutoTokenizer
         self._tokenizer = AutoTokenizer.from_pretrained(plm_name)
 
-    def batch_tensor_by_key(self, tensors_by_keys: Mapping[str, List[NullableTensor]]) -> Mapping[str, torch.Tensor]:
-        output = {k: nested_list_numbers_to_tensors(tensors_by_keys[k], self.padding) for k in self.pad_keys}
-        output['cond_values'] = tensors_by_keys['cond_values']
+    def build_batch_by_key(self, input_dict: dict[str, list[T]]) -> dict[str, torch.Tensor | list[T]]:
+        output = {k: nested_list_numbers_to_tensors(input_dict[k], self.padding) for k in self.pad_keys}
+        output['cond_values'] = input_dict['cond_values']
         return output
 
-    def generate_namespace_tokens(self, example) -> Generator[Tuple[str, str], None, None]:
+    def generate_namespace_tokens(self, example: Any) -> Iterator[tuple[str, str]]:
         yield from []   # no need to define
 
-    def to_tensor(self, example) -> Mapping[str, NullableTensor]:
+    def to_input(self, example) -> dict[str, T | None]:
         sql_dict = example['sql']
 
         table = example['table']
@@ -57,7 +58,7 @@ class SQLovaDecodingField(Field):
         where_begin = [-1] * n_cols
         where_end = [-1] * n_cols
         cond_val = []
-        nl_words: List[str] = self._tokenizer.tokenize(example['question'])
+        nl_words: list[str] = self._tokenizer.tokenize(example['question'])
 
         for col, op, span in conds:
             span = str(span)
@@ -65,7 +66,7 @@ class SQLovaDecodingField(Field):
             where_ops[col] = op
             cond_val.append(span)
 
-            span_words: List[str] = self._tokenizer.tokenize(span)
+            span_words: list[str] = self._tokenizer.tokenize(span)
             first_word, last_word = span_words[0], span_words[-1]
             if first_word not in nl_words:
                 where_begin = None

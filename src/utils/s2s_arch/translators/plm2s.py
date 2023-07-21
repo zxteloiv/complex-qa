@@ -1,24 +1,27 @@
-from typing import Mapping, List, Generator, Tuple, Union, Optional, Callable
+from typing import Optional, Callable
 from trialbot.data.translator import FieldAwareTranslator
 from trialbot.data.fields import SeqField
-from trialbot.data.field import Field, NullableTensor
+from trialbot.data.field import Field, T
+from typing import Any
+import torch
+from collections.abc import Iterator
 
 PREPROCESS_HOOK = Callable[[str], str]  # read, modify, and return a sentence string
-PREPROCESS_HOOKS = List[PREPROCESS_HOOK]
+PREPROCESS_HOOKS = list[PREPROCESS_HOOK]
 
 
 class AutoPLMField(Field):
-    def batch_tensor_by_key(self, tensors_by_keys: Mapping[str, List[NullableTensor]]) -> Mapping[str, 'torch.Tensor']:
-        sent_list = tensors_by_keys.get(self.renamed_key)
+    def build_batch_by_key(self, input_dict: dict[str, list[T]]) -> dict[str, torch.Tensor | list[T]]:
+        sent_list = input_dict.get(self.renamed_key)
         plm_inputs = self.tokenizer(sent_list, padding=self.use_padding, return_tensors="pt")
         plm_inputs = plm_inputs.data    # use the real dict instead of the UserDict
         return {self.renamed_key: plm_inputs}
 
-    def generate_namespace_tokens(self, example) -> Generator[Tuple[str, str], None, None]:
+    def generate_namespace_tokens(self, example: Any) -> Iterator[tuple[str, str]]:
         # for PLM, pretrained tokenizers can replace anything and do not require a vocab for the field
         yield from []
 
-    def to_tensor(self, example) -> Mapping[str, Union[NullableTensor, str]]:
+    def to_input(self, example) -> dict[str, T | None]:
         sent = example.get(self.source_key)
         if sent is None:
             return {self.renamed_key: None}
@@ -54,7 +57,7 @@ class PLM2SeqTranslator(FieldAwareTranslator):
                  target_field: str,
                  target_max_token: int = 0,
                  use_lower_case: bool = True,
-                 source_preprocess_hooks: Optional[List[Callable[[str], str]]] = None,
+                 source_preprocess_hooks: Optional[list[Callable[[str], str]]] = None,
                  **auto_tokenizer_kwargs,
                  ):
         super().__init__(field_list=[
