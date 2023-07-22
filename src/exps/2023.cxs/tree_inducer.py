@@ -1,6 +1,7 @@
 import logging
 import pickle
 
+from trialbot.data import RandomIterator
 from trialbot.data.fields import SeqField
 from trialbot.utils import prepend_pythonpath   # noqa
 from trialbot.data.translator import FieldAwareTranslator
@@ -9,7 +10,7 @@ import torch.nn
 
 import os.path as osp
 import trialbot.data
-from trialbot.training import TrialBot, Registry, Events
+from trialbot.training import TrialBot, Registry, Events, Updater, TestingUpdater
 from trialbot.utils.root_finder import find_root
 from trialbot.training.hparamset import HyperParamSet
 from allennlp.training.metrics import Average
@@ -26,6 +27,7 @@ from utils.nn import seq_cross_ent
 from utils.s2s_arch.translators import AutoPLMField
 from utils.seq_collector import SeqCollector
 from utils.trialbot.dummy_translator import DummyField
+from utils.trialbot.dummy_updater import DummyUpdater
 from utils.trialbot.setup_cli import setup as setup_cli
 from utils.s2s_arch.hparam_modifiers import (
     install_runtime_modifiers, overwriting_mod_template, MODIFIER, hp_prefix_match
@@ -59,8 +61,10 @@ def main():
         bot.updater = get_updater(bot)
 
     else:
-        bot.add_event_handler(Events.ITERATION_COMPLETED, dump_trees, 70)
-        bot.add_event_handler(Events.EPOCH_COMPLETED, save_trees, 100)
+        bot.updater = DummyUpdater()    # do nothing in the eval loops
+        bot.add_event_handler(Events.EPOCH_STARTED, dump_trees, dataset_id=0)
+        bot.add_event_handler(Events.EPOCH_STARTED, dump_trees, dataset_id=1)
+        bot.add_event_handler(Events.EPOCH_STARTED, dump_trees, dataset_id=2)
 
     bot.run()
 
@@ -362,34 +366,36 @@ class YXInducer(BaseSeq2Seq):
         return loss
 
 
-def dump_trees(bot: TrialBot):
-    output = bot.state.output
-    if output is None: return
-
-    # cf: (b, 1+#seq), mask: (b, #seq+2)
-    # valid tokens: cf[:, 1:], mask[:, 1:-1]
-    valid_cf = output['cf'][:, 1:]
-    valid_m = output['ys_mask'][:, 1:-1]
+def dump_trees(bot: TrialBot, dataset_id: int = -1):
+    ds = bot.datasets[dataset_id]
+    rit = RandomIterator(len(ds), bot.hparams.batch_sz, False, False)
+    updater = TestingUpdater(ds, bot.translator, bot.model, rit, bot.args.device)
+    logger = bot.logger
 
     batch_trees = []
-    for cf, m in zip(valid_cf, valid_m):
-        levels: list[int] = []
-        for tok_cf, tok_m in zip(cf, m):
-            if tok_m > 0:
-                levels.append(tok_cf.item())
-        tree = TreeInducer.greedy_tree_from_df(levels)
-        batch_trees.append(tree)
+    for i, output in enumerate(updater()):
+        if output is None:
+            logger.warning(f'the {i}th output is None')
+            continue
 
-    if getattr(bot, 'tree_mem', None) is None:
-        setattr(bot, 'tree_mem', [])
+        # cf: (b, 1+#seq), mask: (b, #seq+2)
+        # valid tokens: cf[:, 1:], mask[:, 1:-1]
+        valid_cf = output['cf'][:, 1:]
+        valid_m = output['ys_mask'][:, 1:-1]
 
-    bot.tree_mem += batch_trees
+        for cf, m in zip(valid_cf, valid_m):
+            levels: list[int] = []
+            for tok_cf, tok_m in zip(cf, m):
+                if tok_m > 0:
+                    levels.append(tok_cf.item())
+            tree = TreeInducer.greedy_tree_from_df(levels)
+            batch_trees.append(tree)
 
+        logger.info(f'induced the {i}th batch with length {len(valid_m)}')
 
-def save_trees(bot: TrialBot):
-    filename = osp.join(bot.savepath, 'dump-trees.pkl')
+    filename = osp.join(bot.savepath, f'tree_dump_ds{dataset_id}.pkl')
     bot.logger.info(f'Trees pickled into {filename}')
-    pickle.dump(bot.tree_mem, open(filename, 'wb'))
+    pickle.dump(batch_trees, open(filename, 'wb'))
 
 
 if __name__ == '__main__':
