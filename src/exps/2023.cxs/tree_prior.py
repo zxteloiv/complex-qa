@@ -46,7 +46,7 @@ def main():
     args = setup_cli(seed=2021, translator='dummy', hparamset='base-prior', device=0)
     bot = TrialBot(args=args, trial_name='tree_prior', get_model_func=TreeInducer.new)
     bot = setup_bot(bot, True, False, False, False, True, True)
-    bot.updater = PolicyUpdater.from_bot(bot)
+    bot.updater = PolicyUpdater(bot)
 
     from trialbot.training.extensions import loss_reporter
     bot._engine.remove_event_handler(loss_reporter, Events.ITERATION_COMPLETED)
