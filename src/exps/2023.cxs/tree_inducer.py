@@ -268,6 +268,7 @@ class YInducer(torch.nn.Module):
                   'df': step_mem.get_stacked_tensor('df'),    # (b, n-1, #chunk)
                   'cf': step_mem.get_stacked_tensor('cf'),    # (b, n-1)
                   'ys': ys_token,   # (b, n)
+                  'ys_mask': (ys_token != self.padding),
                   'pred': pred,     # (b, n-1)
                   }
         return output
