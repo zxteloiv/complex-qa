@@ -374,6 +374,8 @@ def dump_trees(bot: TrialBot, dataset_id: int = -1):
     rit = RandomIterator(len(ds), bot.hparams.batch_sz, False, False)
     updater = TestingUpdater(ds, bot.translator, bot.model, rit, bot.args.device)
     logger = bot.logger
+    vocab = bot.vocab
+    ns = bot.hparams.tgt_namespace
 
     batch_trees = []
     for i, output in enumerate(updater()):
@@ -389,16 +391,19 @@ def dump_trees(bot: TrialBot, dataset_id: int = -1):
 
         for cf, m, y in zip(valid_cf, valid_m, valid_ys):
             levels: list[int] = []
-            chars: list[int] = []
+            tok_ids: list[int] = []
             for tok_cf, tok_m, tok_y in zip(cf, m, y):
                 if tok_m > 0:
                     levels.append(tok_cf.item())
-                    chars.append(tok_y.item())
+                    tok_ids.append(tok_y.item())
             tree = TreeInducer.greedy_tree_from_df(levels)  # the tree labels are id to the span
             for n in PreOrderTraverse()(tree):
                 n: Tree
                 if n.is_terminal:
-                    n.label = chars[int(n.label)]   # update tree labels to real token ids produced from GLM tokenizer
+                    tok_id = tok_ids[int(n.label)]   # update tree labels to real token ids produced from GLM tokenizer
+                    tok = vocab.get_token_from_index(tok_id, ns)
+                    n.label = tok
+
             batch_trees.append(tree)
 
         logger.info(f'induced the {i}th batch with length {len(valid_m)}')
