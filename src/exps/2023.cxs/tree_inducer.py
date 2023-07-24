@@ -1,5 +1,6 @@
 import logging
 import pickle
+import sys
 
 from trialbot.data import RandomIterator
 from trialbot.data.fields import SeqField
@@ -408,4 +409,5 @@ def dump_trees(bot: TrialBot, dataset_id: int = -1):
 
 
 if __name__ == '__main__':
+    sys.setrecursionlimit(3000)
     main()
