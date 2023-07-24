@@ -26,6 +26,7 @@ from models.base_s2s.model_factory import Seq2SeqBuilder
 from utils.nn import seq_cross_ent
 from utils.s2s_arch.translators import AutoPLMField
 from utils.seq_collector import SeqCollector
+from utils.tree import PreOrderTraverse, Tree
 from utils.trialbot.dummy_translator import DummyField
 from utils.trialbot.dummy_updater import DummyUpdater
 from utils.trialbot.setup_cli import setup as setup_cli
@@ -383,13 +384,20 @@ def dump_trees(bot: TrialBot, dataset_id: int = -1):
         # valid tokens: cf[:, 1:], mask[:, 1:-1]
         valid_cf = output['cf'][:, 1:]
         valid_m = output['ys_mask'][:, 1:-1]
+        valid_ys = output['ys'][:, 1:-1]
 
-        for cf, m in zip(valid_cf, valid_m):
+        for cf, m, y in zip(valid_cf, valid_m, valid_ys):
             levels: list[int] = []
-            for tok_cf, tok_m in zip(cf, m):
+            chars: list[int] = []
+            for tok_cf, tok_m, tok_y in zip(cf, m, y):
                 if tok_m > 0:
                     levels.append(tok_cf.item())
-            tree = TreeInducer.greedy_tree_from_df(levels)
+                    chars.append(tok_y.item())
+            tree = TreeInducer.greedy_tree_from_df(levels)  # the tree labels are id to the span
+            for n in PreOrderTraverse()(tree):
+                n: Tree
+                if n.is_terminal:
+                    n.label = chars[int(n.label)]   # update tree labels to real token ids produced from GLM tokenizer
             batch_trees.append(tree)
 
         logger.info(f'induced the {i}th batch with length {len(valid_m)}')
