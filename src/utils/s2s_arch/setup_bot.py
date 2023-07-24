@@ -21,7 +21,7 @@ def get_updater(bot: TrialBot):
     else:
         params = model.parameters()
 
-    optim = select_optim(p, params)
+    optim = select_optim(p)(params)
     logger.info(f"Using Optimizer {optim}")
 
     from trialbot.data.iterators import RandomIterator

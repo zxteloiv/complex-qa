@@ -345,7 +345,7 @@ class PolicyUpdater(Updater):
         super().__init__()
         args, p = bot.args, bot.hparams
         iterators = list(map(lambda d: RandomIterator(len(d), p.batch_sz), bot.datasets))
-        optim = select_optim(p, bot.model.parameters())
+        optim = select_optim(p)(bot.model.parameters())
 
         self.model = bot.model
         self.iterators = iterators
