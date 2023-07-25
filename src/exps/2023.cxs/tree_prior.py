@@ -61,7 +61,7 @@ def main():
         mm = output['metric']
         bot.logger.info(f"Epoch: {bot.state.epoch}, "
                         f"Iteration: {bot.state.iteration}, "
-                        f"Loss: {loss:.4f},"
+                        f"Loss: {loss:.4f}, "
                         f"Metric: {mm:.4f}")
 
     @bot.attach_extension(Events.ITERATION_COMPLETED)
@@ -86,7 +86,7 @@ def install_hparams():
     @Registry.hparamset('base-prior')
     def base():
         p = HyperParamSet.common_settings(find_root())
-        p.TRAINING_LIMIT = 4
+        p.TRAINING_LIMIT = 40
         p.GRAD_CLIPPING = 2
         p.batch_sz = 10
         p.llm_path = osp.expanduser('~/.glm/chatglm-6b')
