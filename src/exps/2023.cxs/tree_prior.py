@@ -45,7 +45,7 @@ def main():
 
     args = setup_cli(seed=2021, translator='dummy', hparamset='base-prior', device=0)
     bot = TrialBot(args=args, trial_name='tree_prior', get_model_func=TreeInducer.new)
-    bot = setup_bot(bot, True, False, False, False, True, True)
+    bot = setup_bot(bot, False, False, False, False, True, True)
     bot.updater = PolicyUpdater(bot)
 
     from trialbot.training.extensions import loss_reporter
