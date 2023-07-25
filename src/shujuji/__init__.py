@@ -40,7 +40,9 @@ def install_semantic_parsing_datasets(reg: dict = None):
     smc.install(reg)
     ccfq.install_dataset(reg)
     cogs.install_dataset(reg)
+    agsa.install_raw_qa_datasets(reg)
     agsa.install_parsed_qa_datasets(reg)
+    agsa.install_cross_domain_raw_qa_datasets(reg)
     agsa.install_cross_domain_parsed_qa_datasets(reg)
     cofe.install_datasets(reg)
 

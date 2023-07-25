@@ -279,7 +279,7 @@ def install_cross_domain_parsed_qa_datasets(reg: dict = None, ds_tags: list = No
     for split_tag in SPLIT_PATH.keys():
         for g in GRAMMAR_FILES:
             g_tag = _get_grammar_tag_by_filename(g)
-            chain_keys = [f"qa.{ds_tag}_{split_tag}.{g_tag}" for ds_tag in ds_tags]
+            chain_keys = [f"{ds_tag}_{split_tag}.{g_tag}" for ds_tag in ds_tags]
             key = f"agsa_{split_tag}_{g_tag}"
             reg[key] = partial(_get_all_ds, keys=chain_keys, reg=reg)
             logging.debug(f"registered {key} lazily")
@@ -290,7 +290,7 @@ def install_cross_domain_raw_qa_datasets(reg: dict = None, ds_tags: list = None)
     ds_tags = ds_tags or DATA_PATH.keys()
 
     for split_tag in SPLIT_PATH.keys():
-        chain_keys = [f"raw_qa.{ds_tag}_{split_tag}" for ds_tag in ds_tags]
+        chain_keys = [f"{ds_tag}_{split_tag}" for ds_tag in ds_tags]
         key = f"agsa_{split_tag}"
         reg[key] = partial(_get_all_ds, keys=chain_keys, reg=reg)
         logging.debug(f"registered {key} lazily")
