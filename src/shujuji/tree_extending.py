@@ -46,6 +46,7 @@ def install_extended_ds(reg: dict = None):
 
     smc128_trees = get_trees(osp.join(DATA_PATH, 'source_domain_with_target_num128', 'induced_trees'))
     geocg_trees = get_trees(osp.join(CG_DATA_PATH, 'geography', 'schema_full_split', 'induced_trees'))
+    schcg_trees = get_trees(osp.join(CG_DATA_PATH, 'scholar', 'schema_full_split', 'induced_trees'))
 
     def get_ds(ds_key: str, tree_files: list[str]):
         dss = reg[ds_key]()
@@ -55,3 +56,5 @@ def install_extended_ds(reg: dict = None):
         reg[f'smc128_tree_{k}'] = partial(get_ds, 'smc128', v)
     for k, v in geocg_trees.items():
         reg[f'geo_cg_tree_{k}'] = partial(get_ds, 'geo_cg', v)
+    for k, v in schcg_trees.items():
+        reg[f'sch_cg_tree_{k}'] = partial(get_ds, 'sch_cg', v)
