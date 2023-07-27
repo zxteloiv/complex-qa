@@ -26,13 +26,13 @@ def main():
     install_hparamset()
     install_translators()
 
-    args = setup_cli(seed=2021, device=0, hparamset='geo_cg', dataset='geo_cg_tree_yxp')
+    args = setup_cli(seed=2021, device=0, hparamset='geo_bert2tree', dataset='geo_cg_tree_yxp')
     bot = setup_bot(args, trialname=args.hparamset)
     bot.run()
 
 
 def install_hparamset():
-    @Registry.hparamset('geo_cg')
+    @Registry.hparamset('geo_bert2tree')
     def base():
         p = Seq2SeqBuilder.base_hparams()
         p.OPTIM = 'adabelief'
@@ -49,6 +49,11 @@ def install_hparamset():
         p.TRANSLATOR_KWARGS = dict(x_key='sent', y_key='induced_tgt_tree', x_plm=p.plm_name)
 
         p.src_emb_pretrained_file = None    # the embedding-based
+        return p
+
+    @Registry.hparamset('sch_bert2tree')
+    def sch():
+        p = base()
         return p
 
 
