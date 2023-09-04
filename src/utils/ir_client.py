@@ -1,20 +1,29 @@
-from typing import Iterable, Dict, Union, List, Any, Tuple
+import numbers
+import sqlite3
+from typing import Any
 import logging
 import re
+
+PAYLOAD = str | int | float | numbers.Number
 
 
 class VolatileBM25Index:
     def __init__(self, default_search_limit: int = 10):
-        import sqlite3
         self.logger = logging.getLogger(self.__class__.__name__)
 
         self.logger.debug('building index...')
-        self.conn = sqlite3.connect(':memory:')
-        self.conn.execute('create virtual table kvmem using fts5(key, payload);')
-        self.conn.commit()
+        self.conn: sqlite3.Connection | None = None
         self.limit: int = default_search_limit
 
-    def indexing(self, key: Union[str, List[str]], payload: Union[None, Any, List[Any]]):
+    def lazy_init(self):
+        if self.conn is None:
+            self.conn = sqlite3.connect(':memory:')
+            self.conn.execute('create virtual table kvmem using fts5(key, payload);')
+            self.conn.commit()
+
+    def indexing(self, key: str | list[str], payload: PAYLOAD | list[PAYLOAD] | None = None):
+        self.lazy_init()
+
         if payload is None:
             self.logger.warning('No payload given, default to the integer 0')
             payload = 0 if isinstance(key, str) else [0 for _ in range(len(key))]
@@ -33,7 +42,11 @@ class VolatileBM25Index:
 
         self.conn.commit()
 
-    def search_index(self, key: str, limit: int = None) -> List[Tuple[str, Any]]:
+    def search_index(self, key: str, limit: int = None) -> list[tuple[str, Any]]:
+        if self.conn is None:
+            self.logger.warning('searching in an empty database, returns an empty list.')
+            return []
+
         limit = limit or self.limit
 
         keywords = []
@@ -49,8 +62,26 @@ class VolatileBM25Index:
         )
         return cur.fetchall()   # list of tuples of (key str, payload)
 
+    def save(self, target_name: str):
+        if self.conn is not None:
+            target = sqlite3.connect(target_name)
+            self.conn.backup(target)
+        else:
+            raise ValueError('cannot dump a None database.')
+
+    def load(self, file_name):
+        if self.conn is not None:
+            self.conn.close()
+            self.logger.warning('released the previous connection, loading to a new memory database')
+
+        self.conn = sqlite3.connect(':memory:')
+        source = sqlite3.connect(file_name)
+        source.backup(self.conn)
+        source.close()
+        self.conn.commit()
+
     @staticmethod
-    def from_data_list(keys: List[str], payloads: List[Any], default_search_limit: int = 10):
+    def from_data_list(keys: list[str], payloads: list[Any], default_search_limit: int = 10):
         idx = VolatileBM25Index(default_search_limit)
         idx.indexing(keys, payloads)
         return idx

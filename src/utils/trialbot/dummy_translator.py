@@ -1,5 +1,6 @@
 from functools import partial
-from typing import Any
+from operator import itemgetter
+from typing import Any, cast
 
 from trialbot.data.translator import FieldAwareTranslator, Field, T
 from collections.abc import Iterator
@@ -9,6 +10,16 @@ import torch
 class DummyTranslator(FieldAwareTranslator):
     def __init__(self, filter_none: bool = False, gather_keys: list = None):
         super().__init__(field_list=[DummyField(gather_keys)], filter_none=filter_none)
+        self.gather_keys = gather_keys
+
+    def lazy_init(self, gather_keys: list[str] | None = None, renamed_to: list[str] | None = None):
+        field: DummyField = cast(DummyField, self.fields[0])
+        field.gather_keys = gather_keys
+        field.renamed_to = renamed_to
+
+    def to_tuple(self, example) -> tuple:
+        d = self.to_input(example)
+        return itemgetter(*self.fields[0].gather_keys)(d)
 
 
 class DummyField(Field):
